@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Blockyard</title>
+<meta name="description" content="Play block games, build your own levels, and share them with friends.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='3' width='26' height='26' rx='6' fill='%23ffd23f' stroke='%231d2340' stroke-width='3'/%3E%3Crect x='3' y='21' width='26' height='8' rx='3' fill='%23f0a500'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="logo" href="#/" data-go="#/"><span class="logo-block" aria-hidden="true"></span>Blockyard</a>
+  <nav class="nav">
+    <button class="btn nav-btn" data-go="#/" data-nav="home">Games</button>
+    <button class="btn nav-btn" data-go="#/discover" data-nav="discover">Discover</button>
+    <button class="btn nav-btn btn-sun" data-go="#/create" data-nav="create">Create</button>
+    <button class="btn nav-btn" data-go="#/3d" data-nav="3d">3D <span class="beta">beta</span></button>
+  </nav>
+  <div class="me">
+    <button class="btn icon-btn" id="mute" aria-pressed="false" title="Sound">Sound on</button>
+    <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Set name</span></button>
+  </div>
+</header>
+
+<main>
+<!-- ============ HOME ============ -->
+<section id="view-home" class="view">
+  <div class="hero">
+    <canvas id="hero-strip" aria-hidden="true"></canvas>
+    <div class="hero-copy">
+      <h1>Play levels.<br>Build your own.<br>Send the link.</h1>
+      <div class="row">
+        <button class="btn btn-big btn-grass" id="hero-play">Play First Rush</button>
+        <button class="btn btn-big" data-go="#/create">Build a level</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-head">
+    <h2>Games</h2>
+    <div class="chips" role="group" aria-label="Filter games">
+      <button class="chip" data-filter="all" aria-pressed="true">All</button>
+      <button class="chip" data-filter="adventure" aria-pressed="false">Adventure</button>
+      <button class="chip" data-filter="rush" aria-pressed="false">Rush</button>
+    </div>
+  </div>
+  <p class="lede">Adventure levels let you run around freely. Rush levels run on their own and you only press one button, while portals turn you into a jet, a roller, a dart and more.</p>
+  <div class="grid" id="builtin-grid"></div>
+
+  <div id="home-online" hidden>
+    <div class="section-head"><h2>New on Discover</h2><button class="btn" data-go="#/discover">See all</button></div>
+    <div class="grid" id="home-new"></div>
+  </div>
+
+  <h2>Your games</h2>
+  <div id="mine-wrap"></div>
+
+  <div class="import">
+    <label for="import-input">Got a link or code from a friend?</label>
+    <div class="row">
+      <input id="import-input" placeholder="Paste it here" autocomplete="off">
+      <button class="btn btn-sun" id="import-btn">Play it</button>
+    </div>
+    <p class="msg" id="import-msg"></p>
+  </div>
+</section>
+
+<!-- ============ DISCOVER ============ -->
+<section id="view-discover" class="view" hidden>
+  <div class="section-head">
+    <h2>Discover</h2>
+  </div>
+  <div id="disc-offline" class="panel-note" hidden>
+    <h3>Online games aren't turned on here</h3>
+    <p>Discover shows levels that other people published. It works when Blockyard runs on Cloudflare with its database. You can still play the built-in games, build levels, and send share codes to friends.</p>
+    <button class="btn btn-sun" data-go="#/create">Build a level</button>
+  </div>
+  <div id="disc-main" hidden>
+    <div class="disc-controls">
+      <div class="chips" role="group" aria-label="Sort">
+        <button class="chip" data-sort="new" aria-pressed="true">Newest</button>
+        <button class="chip" data-sort="top" aria-pressed="false">Most played</button>
+        <button class="chip" data-sort="liked" aria-pressed="false">Most liked</button>
+      </div>
+      <select id="disc-style" aria-label="Style">
+        <option value="">All styles</option>
+        <option value="adventure">Adventure</option>
+        <option value="rush">Rush</option>
+      </select>
+      <input id="disc-q" type="search" placeholder="Search names" aria-label="Search" autocomplete="off">
+    </div>
+    <div class="grid" id="disc-grid"></div>
+    <p class="msg" id="disc-msg"></p>
+    <div class="row center"><button class="btn" id="disc-more" hidden>Load more</button></div>
+  </div>
+</section>
+
+<!-- ============ PLAY ============ -->
+<section id="view-play" class="view" hidden>
+  <div class="bar">
+    <button class="btn" id="play-back">Back</button>
+    <div class="bar-title"><h2 id="play-title"></h2><span id="play-by" class="by"></span></div>
+    <div class="hud">
+      <span id="hud-coins"></span><span id="hud-keys"></span><span id="hud-time"></span><span id="hud-deaths"></span>
+    </div>
+    <button class="btn" id="play-restart" title="Restart (R)">Restart</button>
+    <button class="btn btn-ghost" id="play-report" hidden>Report</button>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="game" aria-label="Game"></canvas>
+    <div class="overlay" id="ready" hidden>
+      <div class="panel ready-panel">
+        <h2>Ready?</h2>
+        <p id="ready-form"></p>
+        <p class="small">Press Space, click, or tap to start.</p>
+      </div>
+    </div>
+    <div class="overlay" id="win" hidden>
+      <div class="panel">
+        <h2>You made it!</h2>
+        <p id="win-stats"></p>
+        <div class="row">
+          <button class="btn btn-grass" id="win-again">Play again</button>
+          <button class="btn btn-sun" id="win-like" hidden>Like</button>
+          <button class="btn" id="win-remix">Remix in editor</button>
+          <button class="btn" id="win-back">Back</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="progress" id="hud-progress-wrap" hidden>
+    <div class="progress-track"><div class="progress-bar" id="hud-bar"></div></div>
+    <span id="hud-best" class="small"></span>
+  </div>
+  <div class="touch" id="touch-adv">
+    <button class="tbtn" data-k="left" aria-label="Move left">◀</button>
+    <button class="tbtn" data-k="right" aria-label="Move right">▶</button>
+    <button class="tbtn tbtn-jump" data-k="jump">Jump</button>
+  </div>
+  <div class="touch" id="touch-rush" hidden>
+    <button class="tbtn tbtn-jump tbtn-wide" data-k="jump">Tap or hold</button>
+  </div>
+  <p class="hint hint-keys" id="play-hint"></p>
+</section>
+
+<!-- ============ EDITOR ============ -->
+<section id="view-edit" class="view" hidden>
+  <div class="bar ed-bar">
+    <input id="ed-name" maxlength="40" aria-label="Level name">
+    <div class="row">
+      <button class="btn" id="ed-new">New</button>
+      <button class="btn btn-grass" id="ed-test">Test</button>
+      <button class="btn" id="ed-save">Save</button>
+      <button class="btn" id="ed-share">Share</button>
+      <button class="btn btn-sun" id="ed-publish">Publish</button>
+    </div>
+  </div>
+  <div class="ed-settings">
+    <label>Style <select id="ed-style"><option value="adventure">Adventure</option><option value="rush">Rush</option></select></label>
+    <label>Theme <select id="ed-theme"></select></label>
+    <label>Width <select id="ed-width"></select></label>
+    <label>Height <select id="ed-height"></select></label>
+    <label class="rush-only">Start as <select id="ed-form"></select></label>
+    <label class="rush-only">Start speed <select id="ed-speed"></select></label>
+  </div>
+  <div class="ed-palette">
+    <div class="tabs" id="ed-tabs" role="tablist" aria-label="Block types"></div>
+    <div class="ed-palette-body">
+      <div class="tools" id="ed-tools"></div>
+      <div class="tools tools-quick" id="ed-quick"></div>
+    </div>
+  </div>
+  <div class="ed-actions">
+    <div class="seg" role="group" aria-label="Drawing mode">
+      <button class="seg-btn" id="ed-brush" aria-pressed="true">Brush</button>
+      <button class="seg-btn" id="ed-box" aria-pressed="false">Box fill</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="ed-undo" title="Undo (Ctrl+Z)">Undo</button>
+      <button class="btn" id="ed-redo" title="Redo (Ctrl+Y)">Redo</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="ed-zoom-out" aria-label="Zoom out">−</button>
+      <button class="btn" id="ed-zoom-in" aria-label="Zoom in">+</button>
+    </div>
+  </div>
+  <div class="ed-wrap">
+    <div class="ed-stage" id="ed-stage"><canvas id="ed-canvas"></canvas></div>
+    <input type="range" id="ed-scroll-y" class="vscroll" min="0" max="0" value="0" aria-label="Scroll up and down">
+  </div>
+  <input type="range" id="ed-scroll-x" class="hscroll" min="0" max="0" value="0" aria-label="Scroll left and right">
+  <p class="msg" id="ed-msg"></p>
+  <p class="hint">Click or drag to place. Right-click erases. Scroll with the mouse wheel or the sliders, Ctrl + wheel zooms. On a phone, pick Move to scroll. Your level autosaves as a draft; press Save to add it to Your games.</p>
+</section>
+
+<!-- ============ 3D BETA ============ -->
+<section id="view-3d" class="view" hidden>
+  <div class="bar">
+    <button class="btn" data-go="#/">Back</button>
+    <div class="bar-title"><h2 id="t3-title">3D beta</h2><span class="by">An early test of 3D obbies</span></div>
+    <div class="hud"><span id="hud3-time"></span><span id="hud3-deaths"></span></div>
+    <div class="row">
+      <button class="btn" id="t3-sky">Sky Obby</button>
+      <button class="btn btn-sun" id="t3-random">New random obby</button>
+    </div>
+  </div>
+  <div class="stage stage3d" id="stage3d">
+    <div class="c3d-slot" id="c3d-slot"></div>
+    <div class="toast3" id="toast3" hidden></div>
+    <div class="overlay" id="win3" hidden>
+      <div class="panel">
+        <h2>Obby complete!</h2>
+        <p id="win3-stats"></p>
+        <div class="row">
+          <button class="btn btn-grass" id="win3-again">Play again</button>
+          <button class="btn btn-sun" id="win3-random">Try a random obby</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="touch touch3" id="touch3">
+    <button class="tbtn" data-k3="tLeft" aria-label="Turn left">↺</button>
+    <button class="tbtn" data-k3="tUp" aria-label="Walk forward">▲</button>
+    <button class="tbtn" data-k3="tDown" aria-label="Walk back">▼</button>
+    <button class="tbtn" data-k3="tRight" aria-label="Turn right">↻</button>
+    <button class="tbtn tbtn-jump" data-k3="jump">Jump</button>
+  </div>
+  <p class="hint hint-keys">W A S D or arrow keys to move, Q and E or left and right arrows to turn, Space to jump. Drag to look around, scroll to zoom. R respawns.</p>
+</section>
+</main>
+
+<!-- ============ MODALS ============ -->
+<div class="modal" id="share-modal" hidden role="dialog" aria-modal="true" aria-labelledby="share-h">
+  <div class="panel">
+    <h2 id="share-h">Share your level</h2>
+    <div id="share-online" hidden>
+      <label for="share-online-link">Online link</label>
+      <input id="share-online-link" readonly>
+    </div>
+    <label for="share-link">Link</label>
+    <input id="share-link" readonly>
+    <label for="share-code">Code</label>
+    <textarea id="share-code" rows="3" readonly></textarea>
+    <p class="msg">Friends can open the link, or paste the code on the Games page.</p>
+    <div class="row">
+      <button class="btn btn-sun" id="share-copy">Copy link</button>
+      <button class="btn" id="share-copy-code">Copy code</button>
+      <button class="btn" data-close>Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="publish-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pub-h">
+  <div class="panel">
+    <h2 id="pub-h">Publish to Discover</h2>
+    <div id="pub-offline" hidden>
+      <p>Publishing needs the online version of Blockyard, running on Cloudflare. Here you can use Share to send a code instead.</p>
+      <div class="row"><button class="btn" data-close>Close</button></div>
+    </div>
+    <form id="pub-form" hidden>
+      <label for="pub-name">Level name</label>
+      <input id="pub-name" maxlength="40" required>
+      <label for="pub-creator">Your nickname</label>
+      <input id="pub-creator" maxlength="20" required autocomplete="nickname">
+      <label for="pub-desc">Description (optional)</label>
+      <input id="pub-desc" maxlength="140">
+      <p class="small">Everyone can see and play published levels. Don't put your real name or school in them.</p>
+      <p class="msg" id="pub-msg"></p>
+      <div class="row">
+        <button class="btn btn-sun" type="submit" id="pub-go">Publish</button>
+        <button class="btn" type="button" id="pub-new" hidden>Publish as a new game</button>
+        <button class="btn" type="button" data-close>Cancel</button>
+      </div>
+    </form>
+    <div id="pub-done" hidden>
+      <p>Published. It's on Discover now.</p>
+      <label for="pub-link">Link to your level</label>
+      <input id="pub-link" readonly>
+      <div class="row">
+        <button class="btn btn-sun" id="pub-copy">Copy link</button>
+        <button class="btn" data-close>Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="profile-modal" hidden role="dialog" aria-modal="true" aria-labelledby="prof-h">
+  <form class="panel" id="prof-form">
+    <h2 id="prof-h">Your player</h2>
+    <label for="prof-name">Nickname</label>
+    <input id="prof-name" maxlength="20" autocomplete="nickname" placeholder="Like BlockMaster9">
+    <p class="small">Shown on levels you publish. Pick a nickname, not your real name.</p>
+    <span class="label">Color</span>
+    <div class="swatches" id="prof-colors"></div>
+    <p class="msg" id="prof-msg"></p>
+    <div class="row">
+      <button class="btn btn-sun" type="submit">Save</button>
+      <button class="btn" type="button" data-close>Cancel</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal" id="report-modal" hidden role="dialog" aria-modal="true" aria-labelledby="rep-h">
+  <form class="panel" id="rep-form">
+    <h2 id="rep-h">Report this level</h2>
+    <label for="rep-reason">What's wrong?</label>
+    <select id="rep-reason">
+      <option value="rude">Rude or mean words</option>
+      <option value="personal">Has someone's personal info</option>
+      <option value="broken">Broken or impossible</option>
+      <option value="copied">Copied from someone else</option>
+      <option value="other">Something else</option>
+    </select>
+    <p class="msg" id="rep-msg"></p>
+    <div class="row">
+      <button class="btn btn-danger" type="submit" id="rep-go">Send report</button>
+      <button class="btn" type="button" data-close>Cancel</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal" id="ask-modal" hidden role="dialog" aria-modal="true" aria-labelledby="ask-h">
+  <div class="panel">
+    <h2 id="ask-h"></h2>
+    <p id="ask-text"></p>
+    <div class="row" id="ask-buttons"></div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
