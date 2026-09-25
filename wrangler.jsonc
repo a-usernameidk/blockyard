@@ -1,23 +1,22 @@
 // Cloudflare settings for Blockyard. Cloudflare reads this file when it deploys.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // The project name. Your site will be at blockyard.<your-account>.workers.dev
-  // If you change it, use the same name when you create the project in Cloudflare.
   "name": "blockyard",
   "main": "src/worker.js",
   "compatibility_date": "2026-06-01",
-  // Everything in the public folder is served as the website.
   "assets": {
     "directory": "./public",
     "binding": "ASSETS"
   },
-  // The database. Cloudflare creates it for you on the first deploy.
-  // If the deploy ever complains about the database, see "Help" in README.md.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "blockyard-db"
     }
   ],
+  // Who gets the Admin button. Change it here, not in the dashboard.
+  "vars": {
+    "ADMIN_USERNAME": "SALT"
+  },
   "observability": { "enabled": true }
 }
