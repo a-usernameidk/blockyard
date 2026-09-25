@@ -1,13 +1,14 @@
 // The app: pages, cards, sharing, publishing and the 3D beta.
 import { normalizeLevel, encodeShare, decodeShare, isRude, cleanText, LIMITS, countTiles } from './format.js';
 import { BUILTIN } from './levels.js';
-import { drawThumb, thumbWindow } from './render2d.js';
+import { drawThumb, thumbWindow, drawBackground, drawTile } from './render2d.js';
+import { drawPip, iconCanvas } from './art.js';
 import { startPlay, stopPlay } from './play2d.js';
 import { openEditor, closeEditor, currentLevel, validate, setMsg, updateMeta, newLevel, getDraft } from './editor.js';
 import { start3D } from './engine3d.js';
 import { skyObby, randomObby } from './levels3d.js';
 import { store, mine, newId, profile, PLAYER_COLORS, bests, api, isOnline } from './api.js';
-import { isMuted, setMuted, unlockAudio } from './audio.js';
+import { isMuted, setMuted, unlockAudio, isMusicOn, setMusicOn, stopMusic } from './audio.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -51,7 +52,9 @@ async function route(to) {
     const id = decodeURIComponent(h.slice(7));
     const b = BUILTIN.find((x) => x.id === id);
     const m = b ? null : mine.get(id);
-    if (b) playLevel(b, { by: 'Blockyard', key: b.id, builtin: true });
+    const mi = b ? MAP.indexOf(b) : -1;
+    if (b && mi >= 0 && !unlocked(mi)) { selected = mi; showHome(); }
+    else if (b) playLevel(b, { by: 'Blockyard', key: b.id, builtin: true, onNext: MAP[mi + 1] ? () => { selected = mi + 1; go('#/play/' + MAP[mi + 1].id); } : null });
     else if (m) playLevel(m, { by: 'you', key: m.id });
     else showHome();
   } else if (h.startsWith('#/p/')) playPublished(decodeURIComponent(h.slice(4)));
@@ -132,8 +135,14 @@ $('#prof-form').addEventListener('submit', (e) => {
   profile.set({ name, color });
   renderMe(); closeModal($('#profile-modal'));
 });
-function renderMute() { const m = isMuted(); $('#mute').textContent = m ? 'Sound off' : 'Sound on'; $('#mute').setAttribute('aria-pressed', String(m)); }
+function renderMute() {
+  const m = isMuted(), mu = isMusicOn();
+  $('#mute').replaceChildren(iconCanvas(m ? 'mute' : 'sound', 24)); $('#mute').setAttribute('aria-pressed', String(!m)); $('#mute').title = m ? 'Sound effects off' : 'Sound effects on';
+  $('#music').replaceChildren(iconCanvas(mu ? 'music' : 'music-off', 24)); $('#music').setAttribute('aria-pressed', String(mu)); $('#music').title = mu ? 'Music on' : 'Music off';
+}
 $('#mute').addEventListener('click', () => { setMuted(!isMuted()); renderMute(); unlockAudio(); });
+$('#music').addEventListener('click', () => { setMusicOn(!isMusicOn()); renderMute(); unlockAudio(); });
+$$('[data-icon]').forEach((b) => b.append(iconCanvas(b.dataset.icon, 30, '#fff')));
 addEventListener('pointerdown', unlockAudio, { once: true });
 
 /* ================= cards ================= */
@@ -166,33 +175,145 @@ function remixOf(lv) {
 function editLevel(lv) { store.set('draft', lv); go('#/create'); }
 
 /* ================= home ================= */
-let filter = 'all';
+const MAP_ORDER = ['b-grassy', 'b-rush', 'b-spike', 'b-keep', 'b-jet', 'b-sky', 'b-tower', 'b-party'];
+const MAP = MAP_ORDER.map((id) => BUILTIN.find((b) => b.id === id)).filter(Boolean);
+const beaten = (id) => { const b = bests.get(id); return !!(b && b.won); };
+const unlocked = (i) => i === 0 || beaten(MAP[i - 1].id);
+function nextLevelIndex() { const i = MAP.findIndex((lv, k) => unlocked(k) && !beaten(lv.id)); return i < 0 ? 0 : i; }
+let selected = -1;
+
 function showHome() {
   show('home');
-  renderBuiltins();
+  renderMap();
+  renderThree();
   renderMine();
   renderHomeOnline();
+  startTitle();
 }
-function renderBuiltins() {
-  const grid = $('#builtin-grid'); grid.innerHTML = '';
-  for (const lv of BUILTIN) {
-    if (filter !== 'all' && lv.style !== filter) continue;
-    grid.append(card(lv, {
-      text: lv.blurb, meta: [bestText(lv.id, lv)],
-      actions: [['Play', 'btn-grass', () => go('#/play/' + lv.id)], ['Remix', '', () => editLevel(remixOf(lv))]],
-    }));
-  }
-  if (filter === 'all') {
-    const cv = document.createElement('canvas');
-    cv.width = 500; cv.height = 200;
-    draw3dThumb(cv);
-    grid.append(el('article', { class: 'card card-3d' }, cv,
-      el('div', { class: 'card-body' },
-        el('div', {}, el('h3', {}, '3D Obby'), el('p', {}, 'An early test of 3D. Jump across floating blocks to the gold goal.'),
-          el('div', { class: 'card-meta' }, el('span', { class: 'tag tag-3d' }, '3D beta'))),
-        el('div', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/3d') }, 'Play')))));
+
+function renderMap() {
+  const map = $('#map'); map.innerHTML = '';
+  if (selected < 0) selected = nextLevelIndex();
+  const road = document.createElement('canvas'); road.className = 'map-road'; road.setAttribute('aria-hidden', 'true');
+  map.append(road);
+  const nodes = MAP.map((lv, i) => {
+    const open = unlocked(i), done = beaten(lv.id);
+    const b = el('button', { class: `node node-${lv.style}${open ? '' : ' locked'}${done ? ' done' : ''}${i === selected ? ' sel' : ''}`, type: 'button', 'aria-label': `${i + 1}. ${lv.n}${open ? '' : ' (locked)'}${done ? ' (beaten)' : ''}` },
+      open ? el('span', { class: 'node-n' }, String(i + 1)) : iconCanvas('lock', 26));
+    if (done) { const st = iconCanvas('star', 22); st.classList.add('node-star'); b.append(st); }
+    b.addEventListener('click', () => { selected = i; renderMap(); });
+    map.append(b);
+    return b;
+  });
+  $('#map-count').textContent = `${MAP.filter((lv) => beaten(lv.id)).length} of ${MAP.length} beaten`;
+  layoutMap(map, road, nodes);
+  renderDetail();
+}
+function layoutMap(map, road, nodes) {
+  const W = map.clientWidth || 800;
+  const cols = W < 560 ? 4 : 8, rows = Math.ceil(nodes.length / cols);
+  const rowH = 110, pad = 44;
+  map.style.height = rows * rowH + 20 + 'px';
+  const pts = nodes.map((n, i) => {
+    const r = Math.floor(i / cols), c = i % cols, cc = r % 2 ? cols - 1 - c : c;
+    const x = pad + (cols === 1 ? 0 : cc * (W - pad * 2) / (cols - 1));
+    const y = 60 + r * rowH + (c % 2 ? 16 : -10);
+    n.style.left = x + 'px'; n.style.top = y + 'px';
+    return { x, y };
+  });
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  road.width = W * dpr; road.height = parseInt(map.style.height, 10) * dpr;
+  road.style.width = W + 'px'; road.style.height = map.style.height;
+  const c = road.getContext('2d'); c.scale(dpr, dpr);
+  for (const [w, col, dash] of [[18, '#1d2340', []], [12, '#f6d98a', []], [3, '#c9a24c', [8, 10]]]) {
+    c.lineWidth = w; c.strokeStyle = col; c.setLineDash(dash); c.lineCap = 'round'; c.lineJoin = 'round';
+    c.beginPath(); c.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i]; c.quadraticCurveTo((a.x + b.x) / 2, Math.min(a.y, b.y) - 18, b.x, b.y); }
+    c.stroke();
   }
 }
+new ResizeObserver(() => {
+  if (current !== 'home') return;
+  const map = $('#map'), road = map.querySelector('.map-road');
+  if (road) layoutMap(map, road, [...map.querySelectorAll('.node')]);
+}).observe($('#map'));
+
+function renderDetail() {
+  const lv = MAP[selected], box = $('#map-detail'); box.innerHTML = '';
+  if (!lv) return;
+  const open = unlocked(selected);
+  const cv = document.createElement('canvas');
+  drawThumb(cv, thumbWindow(lv, Math.max(30, Math.min(lv.w, lv.h * 2.5 | 0))), 5);
+  const best = bestText(lv.id, lv);
+  box.append(el('div', { class: 'detail-thumb' + (open ? '' : ' dim') }, cv), el('div', { class: 'detail-info' },
+    el('p', { class: 'detail-kicker' }, `Level ${selected + 1}`),
+    el('h3', {}, lv.n),
+    el('p', {}, open ? lv.blurb : `Beat ${MAP[selected - 1].n} to unlock this one.`),
+    el('div', { class: 'card-meta' }, styleTag(lv.style), best ? el('span', { class: 'tag' }, best) : null),
+    el('div', { class: 'row' },
+      open ? el('button', { class: 'btn btn-grass btn-big', type: 'button', onclick: () => go('#/play/' + lv.id) }, beaten(lv.id) ? 'Play again' : 'Play') : null,
+      open ? el('button', { class: 'btn', type: 'button', onclick: () => editLevel(remixOf(lv)) }, 'Remix in editor') : null)));
+}
+
+function renderThree() {
+  const grid = $('#three-grid'); grid.innerHTML = '';
+  const cv = document.createElement('canvas'); cv.width = 500; cv.height = 200;
+  draw3dThumb(cv);
+  grid.append(el('article', { class: 'card card-3d' }, cv,
+    el('div', { class: 'card-body' },
+      el('div', {}, el('h3', {}, 'Sky Obby'), el('p', {}, 'An early look at 3D. Jump across floating blocks to the gold goal.'),
+        el('div', { class: 'card-meta' }, el('span', { class: 'tag tag-3d' }, '3D beta'))),
+      el('div', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/3d') }, 'Play')))));
+}
+
+/* ---------- title screen: Pip runs forever ---------- */
+let titleRaf = 0;
+function startTitle() {
+  cancelAnimationFrame(titleRaf);
+  const cv = $('#title-canvas'), c = cv.getContext('2d');
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const color = profile.get().color;
+  const t0 = performance.now();
+  const spikeAt = (i) => i > 10 && i % 3 === 0 && ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1 < 0.5;
+  const tick = (now) => {
+    if (current !== 'home') return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = cv.clientWidth, H = cv.clientHeight;
+    if (!W || !H) { titleRaf = requestAnimationFrame(tick); return; }
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const t = still ? 2 : (now - t0) / 1000;
+    const T = 32, scroll = t * 190, groundY = H - 64;
+    drawBackground(c, 'meadow', scroll, 0, W, H, t);
+    const px = Math.max(W * 0.5, Math.min(W * 0.66, W - 120));
+    const worldPx = scroll + px;
+    let lift = 0, air = false;
+    const i0 = Math.floor(worldPx / T);
+    for (let i = i0 - 5; i <= i0 + 5; i++) {
+      if (!spikeAt(i)) continue;
+      const d = worldPx - (i * T + 16 - 70);
+      if (d > 0 && d < 140) { lift = Math.sin(Math.PI * d / 140) * 78; air = true; }
+    }
+    const first = Math.floor(scroll / T) - 1, last = first + Math.ceil(W / T) + 2;
+    for (let i = first; i <= last; i++) {
+      const x = i * T - scroll;
+      drawTile(c, '#', x, groundY, () => '.', t, 'meadow', 'game');
+      drawTile(c, '#', x, groundY + T, () => '#', t, 'meadow', 'game');
+      if (spikeAt(i)) {
+        drawTile(c, '^', x, groundY - T, () => '.', t, 'meadow', 'game');
+        if (i * T + 16 > worldPx) drawTile(c, 'o', x, groundY - T * 3.3, () => '.', t, 'meadow', 'game');
+      }
+    }
+    c.save();
+    const size = 40;
+    c.translate(px, groundY - lift - size / 2 - size * 0.14);
+    drawPip(c, size, color, { t, look: 1, run: 1, air, mouth: air ? 'open' : 'smile', sy: air ? 1.06 : 1, sx: air ? 0.95 : 1 });
+    c.restore();
+    if (!still) titleRaf = requestAnimationFrame(tick);
+  };
+  titleRaf = requestAnimationFrame(tick);
+}
+
 function draw3dThumb(cv) {
   const c = cv.getContext('2d');
   const g = c.createLinearGradient(0, 0, 0, 200); g.addColorStop(0, '#7cc8ff'); g.addColorStop(1, '#d6efff');
@@ -209,11 +330,6 @@ function draw3dThumb(cv) {
   cube(345, 70, 30, '#ff6b8f', '#a8456b', '#7a3350');
   cube(430, 45, 26, '#ffd23f', '#d9a520', '#b8871a');
 }
-$$('[data-filter]').forEach((b) => b.addEventListener('click', () => {
-  filter = b.dataset.filter;
-  $$('[data-filter]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-  renderBuiltins();
-}));
 
 function renderMine() {
   const wrap = $('#mine-wrap'); wrap.innerHTML = '';
@@ -260,8 +376,7 @@ async function renderHomeOnline() {
   } catch (e) { /* leave it hidden */ }
 }
 
-$('#hero-play').addEventListener('click', () => go('#/play/b-rush'));
-drawThumb($('#hero-strip'), thumbWindow(BUILTIN[0], 48), 8);
+$('#hero-play').addEventListener('click', () => go('#/play/' + MAP[nextLevelIndex()].id));
 
 $('#import-btn').addEventListener('click', () => {
   const raw = $('#import-input').value.trim(), msg = $('#import-msg');
@@ -287,6 +402,7 @@ function playLevel(lv, o) {
     onExit: () => { if (testing) { testing = false; show('edit', 'create'); } else go(backTo); },
     onRemix: (level) => editLevel(remixOf(level)),
     onReport: o.pubId ? () => openReport(o.pubId) : null,
+    onNext: o.onNext || null,
     onLike: o.pubId && o.online ? () => api.like(o.pubId).then(() => store.set('liked:' + o.pubId, true)) : null,
     liked: o.pubId ? store.get('liked:' + o.pubId, false) : false,
   });
@@ -471,6 +587,7 @@ function run3D(level) {
   try {
     game3d = start3D(canvas, level, {
       onHud: ({ time, deaths }) => { $('#hud3-time').textContent = `${time.toFixed(1)}s`; $('#hud3-deaths').textContent = `Falls ${deaths}`; },
+      onDie: () => { const f = $('#fade3'); f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); },
       onToast: (t) => { const el3 = $('#toast3'); el3.textContent = t; el3.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el3.hidden = true; }, 1200); },
       onWin: ({ time, deaths }) => { $('#win3-stats').textContent = `${time.toFixed(1)} seconds with ${deaths} ${deaths === 1 ? 'fall' : 'falls'}.`; $('#win3').hidden = false; },
     }, profile.get().color);
@@ -493,7 +610,25 @@ $$('[data-k3]').forEach((b) => {
   b.addEventListener('contextmenu', (e) => e.preventDefault());
 });
 
+/* ================= crashes ================= */
+function showCrash(err) {
+  stopMusic();
+  $('#crash-detail').textContent = err && err.message ? 'Error: ' + err.message : '';
+  $('#crash-modal').hidden = false;
+}
+addEventListener('blockyard-crash', (e) => showCrash(e.detail));
+addEventListener('error', (e) => { if (e.filename && e.filename.includes('/js/')) showCrash(e.error || e); });
+addEventListener('unhandledrejection', (e) => { if (e.reason instanceof Error && !/fetch|server|network/i.test(e.reason.message)) showCrash(e.reason); });
+$('#crash-reload').addEventListener('click', () => location.reload());
+
 /* ================= start ================= */
+(function drawLogo() {
+  const cv = $('#logo-pip'), c = cv.getContext('2d');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = 44 * dpr; cv.height = 44 * dpr; c.scale(dpr, dpr);
+  c.translate(22, 24);
+  drawPip(c, 24, '#ff6b35', { t: 1, look: 1 });
+})();
 renderMe();
 renderMute();
 route();

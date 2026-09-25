@@ -1,6 +1,7 @@
 // Drawing for the 2D engine: backgrounds, tiles, player forms, enemies.
 import { T } from './engine2d.js';
 import { FORM_INFO } from './format.js';
+import { drawPip, drawForm } from './art.js';
 
 export const INK = '#1d2340';
 
@@ -191,8 +192,11 @@ export function drawTile(ctx, c, x, y, n, t, theme, mode = 'game', extra = {}) {
       break;
     }
     case 'M': {
-      drawPlatform(ctx, x, y, T);
-      ctx.fillStyle = INK; ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('↔', x + 16, y + 28);
+      drawPlatform(ctx, x, y + 2, T);
+      ctx.fillStyle = INK;
+      ctx.beginPath(); ctx.moveTo(x + 3, y + 25); ctx.lineTo(x + 10, y + 20); ctx.lineTo(x + 10, y + 30); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + 29, y + 25); ctx.lineTo(x + 22, y + 20); ctx.lineTo(x + 22, y + 30); ctx.closePath(); ctx.fill();
+      ctx.fillRect(x + 10, y + 24, 12, 2);
       break;
     }
     case 'E': drawWalker(ctx, { x: x + 3, y: y + 8, w: 26, h: 24, vx: -1 }, 0); break;
@@ -222,8 +226,7 @@ export function drawTile(ctx, c, x, y, n, t, theme, mode = 'game', extra = {}) {
     }
     case 'S': {
       if (mode === 'game') break;
-      ctx.fillStyle = '#ff6b35'; rr(ctx, x + 5, y + 4, 22, 28, 6); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.font = '16px "Lilita One", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('S', x + 16, y + 24);
+      ctx.save(); ctx.translate(x + 16, y + 17); drawPip(ctx, 20, '#ff6b35', { t: 1, look: 1 }); ctx.restore();
       break;
     }
     case '.': {
@@ -314,81 +317,28 @@ export function drawWalker(ctx, e, t) {
   ctx.fillRect(x + 5 + d, y + 4, 8, 2); ctx.fillRect(x + 14 + d, y + 4, 8, 2);
 }
 
-/* ---------------- player ---------------- */
-export function drawPlayer(ctx, p, color, t, rush) {
+/* ---------------- player (Pip, see art.js) ---------------- */
+// fx = { land: 0..1 squash after landing }
+export function drawPlayer(ctx, p, color, t, rush, fx = {}) {
   const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
-  const s = p.w;
   ctx.save();
   ctx.translate(Math.round(cx), Math.round(cy));
   if (p.grav === -1) ctx.scale(1, -1);
-  ctx.lineWidth = s < 20 ? 2 : 3; ctx.strokeStyle = INK; ctx.lineJoin = 'round';
-  const form = rush ? p.form : 'adventure';
-  if (form === 'adventure') {
-    const sq = p.jumpT > 0 ? 1.12 : 1;
-    ctx.scale(1 / sq, sq);
-    ctx.fillStyle = color; rr(ctx, -p.w / 2, -p.h / 2, p.w, p.h, 6); ctx.fill(); ctx.stroke();
-    eyes(ctx, p.face * 3, -p.h / 2 + 7, 1, p.face);
+  const air = !p.onGround;
+  if (!rush) {
+    const land = fx.land || 0;
+    const up = p.vy * p.grav < -80 ? Math.min(0.14, -p.vy * p.grav / 5000) : 0;
+    const sy = 1 + up - land * 0.22, sx = 1 - up * 0.8 + land * 0.2;
+    const size = p.h * 0.84;
+    ctx.translate(0, p.h / 2 - (size / 2 * sy + size * 0.14));
+    drawPip(ctx, size, color, { t, look: p.face, run: Math.min(1, Math.abs(p.vx) / 200), air, mouth: air ? 'open' : 'smile', sx, sy });
     ctx.restore();
     return;
   }
+  // feet sit at the bottom of the hitbox for the upright forms
   ctx.rotate(p.grav === -1 ? -p.rot : p.rot);
-  const h = s / 2;
-  switch (form) {
-    case 'hopper':
-      ctx.fillStyle = color; rr(ctx, -h, -h, s, s, 5); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#ffd23f'; ctx.fillRect(-h * 0.45, -h * 0.45, h * 0.9, h * 0.9); ctx.strokeRect(-h * 0.45, -h * 0.45, h * 0.9, h * 0.9);
-      eyes(ctx, 2, -h * 0.35, s / 28, 1);
-      break;
-    case 'jet':
-      ctx.fillStyle = color; rr(ctx, -h * 0.55, -h * 1.05, h * 1.1, h * 1.1, 3); ctx.fill(); ctx.stroke();
-      eyes(ctx, 1, -h * 0.85, s / 36, 1);
-      ctx.fillStyle = '#ff5d8f';
-      ctx.beginPath(); ctx.moveTo(-h * 1.3, -h * 0.1); ctx.lineTo(h * 1.25, -h * 0.25); ctx.lineTo(h * 0.8, h * 0.55); ctx.lineTo(-h * 1.1, h * 0.55); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#ffd23f'; ctx.fillRect(-h * 1.5, -h * 0.05, h * 0.3, h * 0.45);
-      break;
-    case 'roller':
-      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(0, 0, h, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#ffd23f'; ctx.fillRect(-h, -h * 0.2, s, h * 0.4); ctx.strokeRect(-h, -h * 0.2, s, h * 0.4);
-      break;
-    case 'flapper':
-      ctx.fillStyle = '#bfefff'; ctx.beginPath(); ctx.arc(0, -h * 0.1, h * 0.6, Math.PI, 0); ctx.fill(); ctx.stroke();
-      eyes(ctx, 1, -h * 0.45, s / 40, 1);
-      ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(0, h * 0.15, h * 1.05, h * 0.42, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#ffd23f'; for (const ox of [-h * 0.55, 0, h * 0.55]) ctx.fillRect(ox - 2, h * 0.1, 4, 4);
-      break;
-    case 'dart':
-      ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(-h, -h); ctx.lineTo(h * 1.2, 0); ctx.lineTo(-h, h); ctx.lineTo(-h * 0.5, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
-      break;
-    case 'springer': {
-      const leg = p.onGround ? 0 : h * 0.35;
-      ctx.fillStyle = INK; ctx.fillRect(-h * 0.6, h * 0.3, 4, h * 0.6 + leg); ctx.fillRect(h * 0.4, h * 0.3, 4, h * 0.6 + leg);
-      ctx.fillStyle = color; rr(ctx, -h, -h, s, s * 0.72, 5); ctx.fill(); ctx.stroke();
-      eyes(ctx, 2, -h * 0.55, s / 28, 1);
-      break;
-    }
-    case 'snapper': {
-      const k = Math.sin(t * 20) * 2;
-      ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
-      for (const sx of [-1, 1]) for (const oy of [-h * 0.3, h * 0.35]) { ctx.beginPath(); ctx.moveTo(sx * h * 0.6, oy); ctx.lineTo(sx * (h * 1.2), oy + h * 0.5 + (sx * k)); ctx.stroke(); }
-      ctx.lineWidth = 3; ctx.fillStyle = color; rr(ctx, -h * 0.75, -h * 0.75, h * 1.5, h * 1.5, 7); ctx.fill(); ctx.stroke();
-      eyes(ctx, 2, -h * 0.35, s / 30, 1);
-      break;
-    }
-    case 'glider':
-      ctx.fillStyle = '#ffd23f';
-      ctx.beginPath(); ctx.moveTo(-h * 1.3, -h * 0.8); ctx.lineTo(0, -h * 0.2); ctx.lineTo(h * 1.3, -h * 0.8); ctx.lineTo(h * 0.7, h * 0.1); ctx.lineTo(-h * 0.7, h * 0.1); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = color; rr(ctx, -h * 0.7, -h * 0.6, h * 1.4, h * 1.4, 5); ctx.fill(); ctx.stroke();
-      eyes(ctx, 1, -h * 0.25, s / 32, 1);
-      break;
-  }
+  drawForm(ctx, p.form, p.w, color, { t, look: 1, run: 1, air });
   ctx.restore();
-}
-
-function eyes(ctx, ox, y, k, face) {
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(ox - 8 * k, y, 6 * k, 8 * k); ctx.fillRect(ox + 2 * k, y, 6 * k, 8 * k);
-  ctx.fillStyle = INK;
-  ctx.fillRect(ox - 6 * k + face * k, y + 2 * k, 3 * k, 5 * k); ctx.fillRect(ox + 4 * k + face * k, y + 2 * k, 3 * k, 5 * k);
 }
 
 /* ---------------- whole-level draw (game + thumbnails) ---------------- */

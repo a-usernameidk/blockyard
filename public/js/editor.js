@@ -1,7 +1,8 @@
 // Level editor: paint tiles on a scrollable, zoomable grid.
 import { TILES, FORMS, FORM_INFO, THEMES as THEME_LIST, THEME_NAMES, SPEED_NAMES, LIMITS, normalizeLevel } from './format.js';
 import { T } from './engine2d.js';
-import { drawTile, THEMES } from './render2d.js';
+import { drawTile, THEMES, drawThumb } from './render2d.js';
+import { drawIcon } from './art.js';
 import { store, newId } from './api.js';
 
 const $ = (s) => document.querySelector(s);
@@ -70,7 +71,9 @@ function toolIcon(c) {
   cv.width = T * dpr; cv.height = T * dpr;
   const x = cv.getContext('2d');
   x.setTransform(dpr, 0, 0, dpr, 0, 0);
-  if (c === 'hand') { x.font = '20px system-ui, sans-serif'; x.textAlign = 'center'; x.fillText('✋', 16, 23); }
+  if (c === 'hand') drawIcon(x, 'move', 0, 0, 32);
+  else if (c === 'pick') drawIcon(x, 'pick', 0, 0, 32);
+  else if (c === '.') drawIcon(x, 'erase', 0, 0, 32);
   else drawTile(x, c, 0, 0, () => '.', 0, ED.lv ? ED.lv.theme : 'meadow', 'icon');
   return cv;
 }
@@ -88,7 +91,8 @@ function pickTool(c) {
   document.querySelectorAll('.tool').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.tool === c)));
   canvas.classList.toggle('hand', c === 'hand');
   const t = TILES[c];
-  setMsg(c === 'hand' ? 'Move: drag to scroll around the level.' : t && t.tip ? `${t.name}: ${t.tip}` : '');
+  if (t && t.group && TABS.some(([id]) => id === t.group) && ED.tab !== t.group) { ED.tab = t.group; renderTabs(); renderTools(); }
+  setMsg(c === 'hand' ? 'Move: drag to scroll around the level.' : c === 'pick' ? 'Pick: click a block in your level to grab that block type.' : t && t.tip ? `${t.name}: ${t.tip}` : '');
 }
 function renderTabs() {
   tabsEl.innerHTML = '';
@@ -118,7 +122,7 @@ function renderTools() {
     toolsEl.appendChild(note);
   }
   quickEl.innerHTML = '';
-  quickEl.append(toolButton('S', 'Start', TILES.S.tip), toolButton('G', 'Goal', TILES.G.tip), toolButton('.', 'Erase', 'Erase tiles. Right-click also erases.'), toolButton('hand', 'Move', 'Drag to scroll around the level.'));
+  quickEl.append(toolButton('S', 'Start', TILES.S.tip), toolButton('G', 'Goal', TILES.G.tip), toolButton('.', 'Erase', 'Erase tiles (E). Right-click also erases.'), toolButton('pick', 'Pick', 'Grab a block type from the level (I).'), toolButton('hand', 'Move', 'Drag to scroll around the level.'));
 }
 
 /* ---------------- settings ---------------- */
@@ -186,11 +190,40 @@ function clampScroll() {
 }
 function syncScrollbars() {
   const mx = Math.max(0, ED.lv.w * ED.zoom - ED.view.w), my = Math.max(0, ED.lv.h * ED.zoom - ED.view.h);
-  const sxEl = $('#ed-scroll-x'), syEl = $('#ed-scroll-y');
-  sxEl.max = String(mx); sxEl.value = String(ED.sx); sxEl.hidden = mx === 0;
+  const syEl = $('#ed-scroll-y');
+  drawMinimap(mx);
   syEl.max = String(my); syEl.value = String(ED.sy); syEl.hidden = my === 0;
 }
-$('#ed-scroll-x').addEventListener('input', (e) => { ED.sx = Number(e.target.value); draw(); });
+const mini = $('#ed-minimap'), mctx = mini.getContext('2d');
+let miniLevel = null;
+function drawMinimap() {
+  if (!ED.lv) return;
+  const W = Math.max(200, mini.clientWidth || ED.view.w), H = 56;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (!miniLevel || miniLevel.d !== ED.a.join('') || miniLevel.theme !== ED.lv.theme) {
+    miniLevel = { ...ED.lv, d: ED.a.join('') };
+    miniLevel.cv = document.createElement('canvas');
+    drawThumb(miniLevel.cv, miniLevel, 2);
+  }
+  if (mini.width !== Math.round(W * dpr)) { mini.width = Math.round(W * dpr); mini.height = H * dpr; }
+  mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  mctx.imageSmoothingEnabled = false;
+  mctx.fillStyle = '#3a4270'; mctx.fillRect(0, 0, W, H);
+  mctx.drawImage(miniLevel.cv, 0, 0, W, H);
+  const k = W / (ED.lv.w * ED.zoom);
+  mctx.strokeStyle = '#ff5d8f'; mctx.lineWidth = 3;
+  mctx.strokeRect(ED.sx * k + 1.5, (ED.sy / (ED.lv.h * ED.zoom)) * H + 1.5, Math.min(W, ED.view.w * k) - 3, Math.min(H, ED.view.h / (ED.lv.h * ED.zoom) * H) - 3);
+}
+function miniJump(e) {
+  const r = mini.getBoundingClientRect();
+  const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+  ED.sx = fx * ED.lv.w * ED.zoom - ED.view.w / 2;
+  ED.sy = fy * ED.lv.h * ED.zoom - ED.view.h / 2;
+  clampScroll(); draw();
+}
+mini.addEventListener('pointerdown', (e) => { e.preventDefault(); try { mini.setPointerCapture(e.pointerId); } catch (_) { /* ok */ } miniJump(e); mini.dataset.drag = '1'; });
+mini.addEventListener('pointermove', (e) => { if (mini.dataset.drag) miniJump(e); });
+mini.addEventListener('pointerup', () => { delete mini.dataset.drag; });
 $('#ed-scroll-y').addEventListener('input', (e) => { ED.sy = Number(e.target.value); draw(); });
 
 function setZoom(z, cx = ED.view.w / 2, cy = ED.view.h / 2) {
@@ -248,6 +281,7 @@ function draw() {
     ctx.strokeRect(ED.hover.x * T + 1, ED.hover.y * T + 1, T - 2, T - 2);
   }
   ctx.restore();
+  drawMinimap();
   // coordinates readout
   if (ED.hover) {
     const label = `${ED.hover.x}, ${ED.hover.y}`;
@@ -314,6 +348,11 @@ canvas.addEventListener('pointerdown', (e) => {
   if (e.button === 1 || ED.tool === 'hand') { ED.pan = { x: e.clientX, y: e.clientY, sx: ED.sx, sy: ED.sy }; return; }
   const cell = cellFrom(e);
   if (!cell) return;
+  if (ED.tool === 'pick') {
+    const c = ED.a[cell.y * ED.lv.w + cell.x];
+    if (c !== '.' && !(TILES[c].rush && ED.lv.style !== 'rush')) pickTool(c); else setMsg('That spot is empty. Click a block to pick it up.');
+    return;
+  }
   const erase = e.button === 2 || ED.tool === '.';
   const before = ED.a.join('');
   pushUndo();
@@ -375,6 +414,10 @@ addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
   else if (mod && e.code === 'KeyY') { e.preventDefault(); redo(); }
+  else if (!mod && e.code === 'KeyB') setBox(false);
+  else if (!mod && e.code === 'KeyF') setBox(true);
+  else if (!mod && e.code === 'KeyE') pickTool('.');
+  else if (!mod && e.code === 'KeyI') pickTool('pick');
   else if (!mod && e.code.startsWith('Arrow')) {
     e.preventDefault();
     const d = ED.zoom * 3;

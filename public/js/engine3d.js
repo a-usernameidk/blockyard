@@ -125,7 +125,7 @@ export function start3D(canvas, level, ui, color = '#ff6b35') {
   let checkpointAt = null;
 
   function respawn() { P.x = spawn[0]; P.y = spawn[1]; P.z = spawn[2]; P.vx = P.vy = P.vz = 0; }
-  function die() { deaths++; respawn(); ui.onToast && ui.onToast('Oof'); }
+  function die() { deaths++; respawn(); ui.onDie && ui.onDie(); }
 
   function collide() {
     const x0 = Math.floor(P.x - HW), x1 = Math.floor(P.x + HW - 1e-4);
@@ -195,7 +195,13 @@ export function start3D(canvas, level, ui, color = '#ff6b35') {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const target = [P.x, P.y + 1.3, P.z];
     const cp = Math.cos(cam.pitch);
-    const eye = [target[0] + Math.sin(cam.yaw) * cp * cam.dist, target[1] + Math.sin(cam.pitch) * cam.dist, target[2] + Math.cos(cam.yaw) * cp * cam.dist];
+    const dir = [Math.sin(cam.yaw) * cp, Math.sin(cam.pitch), Math.cos(cam.yaw) * cp];
+    // pull the camera in if a block is between it and the player
+    let dist = cam.dist;
+    for (let d = 0.6; d < cam.dist; d += 0.2) {
+      if (typeAt(Math.floor(target[0] + dir[0] * d), Math.floor(target[1] + dir[1] * d), Math.floor(target[2] + dir[2] * d))) { dist = Math.max(1.2, d - 0.35); break; }
+    }
+    const eye = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];
     gl.uniformMatrix4fv(loc.proj, false, perspective(1.0, canvas.width / canvas.height, 0.1, 400));
     gl.uniformMatrix4fv(loc.view, false, lookAt(eye, target, [0, 1, 0]));
     for (const [m, mat] of [[world, model(0, 0, 0, 0)], [body, model(P.x, P.y, P.z, P.face)]]) {
@@ -211,6 +217,7 @@ export function start3D(canvas, level, ui, color = '#ff6b35') {
   function frame(ts) {
     if (!running) return;
     const dt = Math.min(0.05, (ts - last) / 1000); last = ts;
+    if (document.hidden) { for (const k in keys) keys[k] = false; requestAnimationFrame(frame); return; }
     if (!won) { acc += dt; while (acc >= 1 / 120) { step(1 / 120); acc -= 1 / 120; } }
     draw();
     const hud = `${time.toFixed(1)}s|${deaths}`;

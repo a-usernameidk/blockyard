@@ -13,15 +13,16 @@
 </head>
 <body>
 <header class="top">
-  <a class="logo" href="#/" data-go="#/"><span class="logo-block" aria-hidden="true"></span>Blockyard</a>
+  <a class="logo" href="#/" data-go="#/"><canvas class="logo-pip" id="logo-pip" width="44" height="44" aria-hidden="true"></canvas><span class="wordmark" aria-label="Blockyard"><b>B</b><b>l</b><b>o</b><b>c</b><b>k</b><b>y</b><b>a</b><b>r</b><b>d</b></span></a>
   <nav class="nav">
-    <button class="btn nav-btn" data-go="#/" data-nav="home">Games</button>
+    <button class="btn nav-btn" data-go="#/" data-nav="home">Play</button>
     <button class="btn nav-btn" data-go="#/discover" data-nav="discover">Discover</button>
-    <button class="btn nav-btn btn-sun" data-go="#/create" data-nav="create">Create</button>
+    <button class="btn nav-btn btn-sun" data-go="#/create" data-nav="create">Build</button>
     <button class="btn nav-btn" data-go="#/3d" data-nav="3d">3D <span class="beta">beta</span></button>
   </nav>
   <div class="me">
-    <button class="btn icon-btn" id="mute" aria-pressed="false" title="Sound">Sound on</button>
+    <button class="btn icon-btn" id="mute" aria-pressed="false" aria-label="Sound effects"></button>
+    <button class="btn icon-btn" id="music" aria-pressed="false" aria-label="Music"></button>
     <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Set name</span></button>
   </div>
 </header>
@@ -29,40 +30,38 @@
 <main>
 <!-- ============ HOME ============ -->
 <section id="view-home" class="view">
-  <div class="hero">
-    <canvas id="hero-strip" aria-hidden="true"></canvas>
-    <div class="hero-copy">
-      <h1>Play levels.<br>Build your own.<br>Send the link.</h1>
+  <div class="title-screen">
+    <canvas id="title-canvas" aria-hidden="true"></canvas>
+    <div class="title-copy">
+      <p class="big-logo" aria-label="Blockyard"><b>B</b><b>l</b><b>o</b><b>c</b><b>k</b><b>y</b><b>a</b><b>r</b><b>d</b></p>
+      <p class="tagline">Run it. Build it. Send it to a friend.</p>
       <div class="row">
-        <button class="btn btn-big btn-grass" id="hero-play">Play First Rush</button>
-        <button class="btn btn-big" data-go="#/create">Build a level</button>
+        <button class="btn btn-big btn-grass" id="hero-play">Play</button>
+        <button class="btn btn-big btn-sun" data-go="#/create">Build a level</button>
+        <button class="btn btn-big" data-go="#/discover">Discover</button>
       </div>
     </div>
   </div>
 
-  <div class="section-head">
-    <h2>Games</h2>
-    <div class="chips" role="group" aria-label="Filter games">
-      <button class="chip" data-filter="all" aria-pressed="true">All</button>
-      <button class="chip" data-filter="adventure" aria-pressed="false">Adventure</button>
-      <button class="chip" data-filter="rush" aria-pressed="false">Rush</button>
-    </div>
-  </div>
-  <p class="lede">Adventure levels let you run around freely. Rush levels run on their own and you only press one button, while portals turn you into a jet, a roller, a dart and more.</p>
-  <div class="grid" id="builtin-grid"></div>
+  <div class="section-head"><h2>Levels</h2><span class="small" id="map-count"></span></div>
+  <div class="map" id="map"></div>
+  <div class="map-detail" id="map-detail"></div>
+
+  <div class="section-head"><h2>3D test zone</h2></div>
+  <div class="grid" id="three-grid"></div>
 
   <div id="home-online" hidden>
     <div class="section-head"><h2>New on Discover</h2><button class="btn" data-go="#/discover">See all</button></div>
     <div class="grid" id="home-new"></div>
   </div>
 
-  <h2>Your games</h2>
+  <h2>Your levels</h2>
   <div id="mine-wrap"></div>
 
   <div class="import">
-    <label for="import-input">Got a link or code from a friend?</label>
+    <label for="import-input">Got a code from a friend?</label>
     <div class="row">
-      <input id="import-input" placeholder="Paste it here" autocomplete="off">
+      <input id="import-input" placeholder="Paste the link or code" autocomplete="off">
       <button class="btn btn-sun" id="import-btn">Play it</button>
     </div>
     <p class="msg" id="import-msg"></p>
@@ -104,9 +103,6 @@
   <div class="bar">
     <button class="btn" id="play-back">Back</button>
     <div class="bar-title"><h2 id="play-title"></h2><span id="play-by" class="by"></span></div>
-    <div class="hud">
-      <span id="hud-coins"></span><span id="hud-keys"></span><span id="hud-time"></span><span id="hud-deaths"></span>
-    </div>
     <button class="btn" id="play-restart" title="Restart (R)">Restart</button>
     <button class="btn btn-ghost" id="play-report" hidden>Report</button>
   </div>
@@ -114,17 +110,18 @@
     <canvas id="game" aria-label="Game"></canvas>
     <div class="overlay" id="ready" hidden>
       <div class="panel ready-panel">
-        <h2>Ready?</h2>
+        <h2 id="ready-title">Ready?</h2>
         <p id="ready-form"></p>
         <p class="small">Press Space, click, or tap to start.</p>
       </div>
     </div>
     <div class="overlay" id="win" hidden>
       <div class="panel">
-        <h2>You made it!</h2>
+        <h2 id="win-title">Level cleared!</h2>
         <p id="win-stats"></p>
         <div class="row">
-          <button class="btn btn-grass" id="win-again">Play again</button>
+          <button class="btn btn-grass" id="win-next" hidden>Next level</button>
+          <button class="btn" id="win-again">Play again</button>
           <button class="btn btn-sun" id="win-like" hidden>Like</button>
           <button class="btn" id="win-remix">Remix in editor</button>
           <button class="btn" id="win-back">Back</button>
@@ -132,13 +129,9 @@
       </div>
     </div>
   </div>
-  <div class="progress" id="hud-progress-wrap" hidden>
-    <div class="progress-track"><div class="progress-bar" id="hud-bar"></div></div>
-    <span id="hud-best" class="small"></span>
-  </div>
   <div class="touch" id="touch-adv">
-    <button class="tbtn" data-k="left" aria-label="Move left">◀</button>
-    <button class="tbtn" data-k="right" aria-label="Move right">▶</button>
+    <button class="tbtn" data-k="left" data-icon="left" aria-label="Move left"></button>
+    <button class="tbtn" data-k="right" data-icon="right" aria-label="Move right"></button>
     <button class="tbtn tbtn-jump" data-k="jump">Jump</button>
   </div>
   <div class="touch" id="touch-rush" hidden>
@@ -184,17 +177,17 @@
       <button class="btn" id="ed-redo" title="Redo (Ctrl+Y)">Redo</button>
     </div>
     <div class="row">
-      <button class="btn" id="ed-zoom-out" aria-label="Zoom out">−</button>
-      <button class="btn" id="ed-zoom-in" aria-label="Zoom in">+</button>
+      <button class="btn" id="ed-zoom-out">Zoom out</button>
+      <button class="btn" id="ed-zoom-in">Zoom in</button>
     </div>
   </div>
   <div class="ed-wrap">
     <div class="ed-stage" id="ed-stage"><canvas id="ed-canvas"></canvas></div>
     <input type="range" id="ed-scroll-y" class="vscroll" min="0" max="0" value="0" aria-label="Scroll up and down">
   </div>
-  <input type="range" id="ed-scroll-x" class="hscroll" min="0" max="0" value="0" aria-label="Scroll left and right">
+  <canvas id="ed-minimap" class="minimap" aria-label="Whole level. Click or drag to jump around."></canvas>
   <p class="msg" id="ed-msg"></p>
-  <p class="hint">Click or drag to place. Right-click erases. Scroll with the mouse wheel or the sliders, Ctrl + wheel zooms. On a phone, pick Move to scroll. Your level autosaves as a draft; press Save to add it to Your games.</p>
+  <p class="hint">Click or drag to place. Right-click erases. The strip under the level shows the whole thing: click it to jump there. Mouse wheel scrolls, Ctrl + wheel zooms. Keys: B brush, F box fill, E erase, I pick, Ctrl+Z undo. Your level autosaves as you go.</p>
 </section>
 
 <!-- ============ 3D BETA ============ -->
@@ -211,9 +204,10 @@
   <div class="stage stage3d" id="stage3d">
     <div class="c3d-slot" id="c3d-slot"></div>
     <div class="toast3" id="toast3" hidden></div>
+    <div class="fade3" id="fade3"></div>
     <div class="overlay" id="win3" hidden>
       <div class="panel">
-        <h2>Obby complete!</h2>
+        <h2>Obby cleared!</h2>
         <p id="win3-stats"></p>
         <div class="row">
           <button class="btn btn-grass" id="win3-again">Play again</button>
@@ -223,10 +217,10 @@
     </div>
   </div>
   <div class="touch touch3" id="touch3">
-    <button class="tbtn" data-k3="tLeft" aria-label="Turn left">↺</button>
-    <button class="tbtn" data-k3="tUp" aria-label="Walk forward">▲</button>
-    <button class="tbtn" data-k3="tDown" aria-label="Walk back">▼</button>
-    <button class="tbtn" data-k3="tRight" aria-label="Turn right">↻</button>
+    <button class="tbtn" data-k3="tLeft" data-icon="turn-left" aria-label="Turn left"></button>
+    <button class="tbtn" data-k3="tUp" data-icon="up" aria-label="Walk forward"></button>
+    <button class="tbtn" data-k3="tDown" data-icon="down" aria-label="Walk back"></button>
+    <button class="tbtn" data-k3="tRight" data-icon="turn-right" aria-label="Turn right"></button>
     <button class="tbtn tbtn-jump" data-k3="jump">Jump</button>
   </div>
   <p class="hint hint-keys">W A S D or arrow keys to move, Q and E or left and right arrows to turn, Space to jump. Drag to look around, scroll to zoom. R respawns.</p>
@@ -328,6 +322,15 @@
     <h2 id="ask-h"></h2>
     <p id="ask-text"></p>
     <div class="row" id="ask-buttons"></div>
+  </div>
+</div>
+
+<div class="modal" id="crash-modal" hidden role="alertdialog" aria-modal="true" aria-labelledby="crash-h">
+  <div class="panel">
+    <h2 id="crash-h">Something broke</h2>
+    <p>The game hit an error and stopped. Your levels are saved. Reloading usually fixes it.</p>
+    <p class="small" id="crash-detail"></p>
+    <div class="row"><button class="btn btn-sun" id="crash-reload">Reload</button><button class="btn" data-close>Keep going</button></div>
   </div>
 </div>
 

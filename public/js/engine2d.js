@@ -217,14 +217,14 @@ function moveY(G, dy) {
     const ty = Math.floor((p.y + p.h - 0.001) / T);
     for (let tx = x0; tx <= x1; tx++) {
       if (tileAt(G, tx, ty) === '=' && prevBottom <= ty * T + 0.5) {
-        p.y = ty * T - p.h; p.vy = 0; land(G, { c: '=' }, was);
+        p.y = ty * T - p.h; land(G, { c: '=' }, was); p.vy = 0;
       }
     }
     for (let i = 0; i < G.ents.length; i++) {
       const e = G.ents[i];
       if (e.type !== 'plat') continue;
       if (p.x < e.x + e.w && p.x + p.w > e.x && prevBottom <= e.y + 0.5 && p.y + p.h >= e.y) {
-        p.y = e.y - p.h; p.vy = 0; land(G, { c: 'M' }, was); p.plat = i;
+        p.y = e.y - p.h; land(G, { c: 'M' }, was); p.vy = 0; p.plat = i;
       }
     }
   }
@@ -237,7 +237,7 @@ function moveY(G, dy) {
 
 function land(G, hit, was) {
   const p = G.p;
-  if (!was && !p.onGround) ev(G, 'land', p.x + p.w / 2, p.y + (p.grav === 1 ? p.h : 0));
+  if (!was && !p.onGround) ev(G, 'land', p.x + p.w / 2, p.y + (p.grav === 1 ? p.h : 0), { v: Math.abs(p.vy) });
   p.onGround = true; p.groundTile = hit.c;
   if (hit.c === 'C' && hit.tx !== undefined) startCrumble(G, hit.ty * G.w + hit.tx);
 }
