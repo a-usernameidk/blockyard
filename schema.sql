@@ -25,3 +25,22 @@ CREATE TABLE IF NOT EXISTS reports (game_id TEXT NOT NULL, who TEXT NOT NULL, re
 
 CREATE INDEX IF NOT EXISTS reports_who ON reports (who, at);
 
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, name_lower TEXT NOT NULL UNIQUE, pw_hash TEXT NOT NULL, pw_salt TEXT NOT NULL,
+  rec_hash TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}', banned INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+
+CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);
+
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
+
+CREATE TABLE IF NOT EXISTS events (kind TEXT NOT NULL, who TEXT NOT NULL, at INTEGER NOT NULL);
+
+CREATE INDEX IF NOT EXISTS events_who ON events (kind, who, at);
+
+CREATE TABLE IF NOT EXISTS daily (date TEXT NOT NULL, user_id TEXT NOT NULL, progress REAL NOT NULL, won INTEGER NOT NULL DEFAULT 0,
+  at INTEGER NOT NULL, PRIMARY KEY (date, user_id));
+
+CREATE INDEX IF NOT EXISTS daily_rank ON daily (date, progress DESC, at);
+
+-- Added later (the Worker adds it automatically):
+ALTER TABLE games ADD COLUMN user_id TEXT;

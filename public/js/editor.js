@@ -431,7 +431,10 @@ new ResizeObserver(() => { if (ED.active && ED.lv) { sizeView(); clampScroll(); 
 
 /* ---------------- autosave draft ---------------- */
 let saveTimer = 0;
+const changeFns = new Set();
+export function onEditorChange(fn) { changeFns.add(fn); }
 function autosave() {
+  for (const fn of changeFns) fn();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { if (ED.lv) store.set('draft', currentLevel()); }, 400);
 }

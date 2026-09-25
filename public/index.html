@@ -23,7 +23,8 @@
   <div class="me">
     <button class="btn icon-btn" id="mute" aria-pressed="false" aria-label="Sound effects"></button>
     <button class="btn icon-btn" id="music" aria-pressed="false" aria-label="Music"></button>
-    <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Set name</span></button>
+    <button class="btn coin-chip" id="coin-chip" data-go="#/shop" title="Pip's Closet"><span id="coin-icon"></span><span id="coin-count">0</span></button>
+    <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Log in</span></button>
   </div>
 </header>
 
@@ -41,6 +42,12 @@
         <button class="btn btn-big" data-go="#/discover">Discover</button>
       </div>
     </div>
+  </div>
+
+  <div class="modes">
+    <button class="mode" data-go="#/endless"><canvas class="mode-art" id="art-endless" aria-hidden="true"></canvas><span class="mode-name">Endless Rush</span><span class="mode-sub" id="sub-endless">How far can you go?</span></button>
+    <button class="mode" data-go="#/daily"><canvas class="mode-art" id="art-daily" aria-hidden="true"></canvas><span class="mode-name">Daily challenge</span><span class="mode-sub" id="sub-daily">A new course every day</span></button>
+    <button class="mode" data-go="#/shop"><canvas class="mode-art" id="art-shop" aria-hidden="true"></canvas><span class="mode-name">Pip's Closet</span><span class="mode-sub" id="sub-shop">Hats, colors and trails</span></button>
   </div>
 
   <div class="section-head"><h2>Levels</h2><span class="small" id="map-count"></span></div>
@@ -91,6 +98,7 @@
         <option value="rush">Rush</option>
       </select>
       <input id="disc-q" type="search" placeholder="Search names" aria-label="Search" autocomplete="off">
+      <span class="chip-filter" id="disc-creator" hidden>Levels by <b id="disc-creator-name"></b> <button class="linkish" id="disc-creator-clear" type="button">Show everyone</button></span>
     </div>
     <div class="grid" id="disc-grid"></div>
     <p class="msg" id="disc-msg"></p>
@@ -118,7 +126,9 @@
     <div class="overlay" id="win" hidden>
       <div class="panel">
         <h2 id="win-title">Level cleared!</h2>
+        <div class="win-stars" id="win-stars"></div>
         <p id="win-stats"></p>
+        <p class="win-reward" id="win-reward"></p>
         <div class="row">
           <button class="btn btn-grass" id="win-next" hidden>Next level</button>
           <button class="btn" id="win-again">Play again</button>
@@ -149,6 +159,7 @@
       <button class="btn btn-grass" id="ed-test">Test</button>
       <button class="btn" id="ed-save">Save</button>
       <button class="btn" id="ed-share">Share</button>
+      <span class="proof" id="ed-proof" data-ok="false">Not beaten yet</span>
       <button class="btn btn-sun" id="ed-publish">Publish</button>
     </div>
   </div>
@@ -225,6 +236,53 @@
   </div>
   <p class="hint hint-keys">W A S D or arrow keys to move, Q and E or left and right arrows to turn, Space to jump. Drag to look around, scroll to zoom. R respawns.</p>
 </section>
+<!-- ============ PIP'S CLOSET ============ -->
+<section id="view-shop" class="view" hidden>
+  <div class="section-head"><h2>Pip's Closet</h2><span class="wallet" id="shop-wallet"></span></div>
+  <div class="closet">
+    <div class="closet-preview"><canvas id="closet-canvas" aria-label="Pip wearing your outfit"></canvas><p class="small" id="closet-caption"></p></div>
+    <div class="closet-items">
+      <div class="tabs shop-tabs" id="shop-tabs" role="tablist" aria-label="Item types"></div>
+      <div class="items" id="shop-items"></div>
+    </div>
+  </div>
+  <div class="section-head"><h2>Achievements</h2><span class="small" id="ach-count"></span></div>
+  <div class="achs" id="ach-list"></div>
+  <h2>Stats</h2>
+  <div class="stats" id="stats-list"></div>
+</section>
+
+<!-- ============ DAILY ============ -->
+<section id="view-daily" class="view" hidden>
+  <div class="section-head"><h2 id="daily-title">Daily challenge</h2><span class="small" id="daily-reset"></span></div>
+  <div class="daily-top">
+    <div class="daily-card">
+      <div class="detail-thumb"><canvas id="daily-thumb" aria-hidden="true"></canvas></div>
+      <p id="daily-mine"></p>
+      <div class="row"><button class="btn btn-grass btn-big" id="daily-play">Play today's course</button></div>
+      <p class="small" id="daily-note"></p>
+    </div>
+    <div class="board">
+      <h3>Today's board</h3>
+      <ol class="board-list" id="daily-board"></ol>
+      <p class="small" id="daily-board-msg"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ADMIN ============ -->
+<section id="view-admin" class="view" hidden>
+  <div class="section-head"><h2>Admin</h2><button class="btn" id="admin-refresh">Refresh</button></div>
+  <p class="lede">Reported and hidden levels come first. A level hides itself after 3 people report it. Banning someone logs them out and hides all their levels.</p>
+  <div class="row admin-users">
+    <input id="admin-user-q" placeholder="Find a player by name" autocomplete="off">
+    <button class="btn" id="admin-user-find">Find</button>
+  </div>
+  <div class="admin-list" id="admin-users"></div>
+  <h2>Levels</h2>
+  <p class="msg" id="admin-msg"></p>
+  <div class="admin-list" id="admin-games"></div>
+</section>
 </main>
 
 <!-- ============ MODALS ============ -->
@@ -252,17 +310,16 @@
   <div class="panel">
     <h2 id="pub-h">Publish to Discover</h2>
     <div id="pub-offline" hidden>
-      <p>Publishing needs the online version of Blockyard, running on Cloudflare. Here you can use Share to send a code instead.</p>
-      <div class="row"><button class="btn" data-close>Close</button></div>
+      <p id="pub-offline-text">Publishing needs the online version of Blockyard, running on Cloudflare. Here you can use Share to send a code instead.</p>
+      <div class="row"><button class="btn btn-sun" id="pub-offline-go" hidden></button><button class="btn" data-close>Close</button></div>
     </div>
     <form id="pub-form" hidden>
       <label for="pub-name">Level name</label>
       <input id="pub-name" maxlength="40" required>
-      <label for="pub-creator">Your nickname</label>
-      <input id="pub-creator" maxlength="20" required autocomplete="nickname">
       <label for="pub-desc">Description (optional)</label>
       <input id="pub-desc" maxlength="140">
       <p class="small">Everyone can see and play published levels. Don't put your real name or school in them.</p>
+      <p class="small" id="pub-who"></p>
       <p class="msg" id="pub-msg"></p>
       <div class="row">
         <button class="btn btn-sun" type="submit" id="pub-go">Publish</button>
@@ -282,20 +339,53 @@
   </div>
 </div>
 
-<div class="modal" id="profile-modal" hidden role="dialog" aria-modal="true" aria-labelledby="prof-h">
-  <form class="panel" id="prof-form">
-    <h2 id="prof-h">Your player</h2>
-    <label for="prof-name">Nickname</label>
-    <input id="prof-name" maxlength="20" autocomplete="nickname" placeholder="Like BlockMaster9">
-    <p class="small">Shown on levels you publish. Pick a nickname, not your real name.</p>
-    <span class="label">Color</span>
-    <div class="swatches" id="prof-colors"></div>
-    <p class="msg" id="prof-msg"></p>
-    <div class="row">
-      <button class="btn btn-sun" type="submit">Save</button>
-      <button class="btn" type="button" data-close>Cancel</button>
+<div class="modal" id="account-modal" hidden role="dialog" aria-modal="true" aria-labelledby="acct-h">
+  <div class="panel">
+    <h2 id="acct-h">Your account</h2>
+    <div id="acct-offline" hidden>
+      <p>Accounts need the online version of Blockyard, running on Cloudflare. You're playing as a guest, and your progress saves in this browser.</p>
+      <div class="row"><button class="btn" data-close>Close</button></div>
     </div>
-  </form>
+    <div id="acct-out" hidden>
+      <div class="tabs acct-tabs" role="tablist">
+        <button class="tab" data-acct="login" aria-selected="true" role="tab">Log in</button>
+        <button class="tab" data-acct="signup" aria-selected="false" role="tab">Sign up</button>
+        <button class="tab" data-acct="recover" aria-selected="false" role="tab">Lost password</button>
+      </div>
+      <form id="acct-form">
+        <label for="acct-name">Username</label>
+        <input id="acct-name" maxlength="16" autocomplete="username" required>
+        <div id="acct-rec-wrap" hidden>
+          <label for="acct-rec">Recovery code</label>
+          <input id="acct-rec" maxlength="20" autocomplete="off" placeholder="XXXX-XXXX-XXXX">
+        </div>
+        <label for="acct-pw" id="acct-pw-label">Password</label>
+        <input id="acct-pw" type="password" maxlength="72" autocomplete="current-password" required>
+        <p class="small" id="acct-hint">Guests save progress in this browser. With an account it follows you to any computer.</p>
+        <p class="msg" id="acct-msg"></p>
+        <div class="row"><button class="btn btn-sun" type="submit" id="acct-go">Log in</button><button class="btn" type="button" data-close>Cancel</button></div>
+      </form>
+    </div>
+    <div id="acct-in" hidden>
+      <p class="acct-who"><canvas id="acct-pip" aria-hidden="true"></canvas><span><b id="acct-user"></b><br><span class="small" id="acct-sum"></span></span></p>
+      <div class="row">
+        <button class="btn" id="acct-closet" data-go="#/shop">Pip's Closet</button>
+        <button class="btn" id="acct-admin" data-go="#/admin" hidden>Admin</button>
+        <button class="btn btn-sun" id="acct-logout">Log out</button>
+      </div>
+      <p class="small">Want your account gone? <button class="linkish" id="acct-delete" type="button">Delete my account</button></p>
+      <p class="msg" id="acct-in-msg"></p>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="recovery-modal" hidden role="dialog" aria-modal="true" aria-labelledby="rec-h">
+  <div class="panel">
+    <h2 id="rec-h">Save your recovery code</h2>
+    <p>There's no email, so this code is the only way back in if you forget your password. Write it down or screenshot it.</p>
+    <p class="rec-code" id="rec-code"></p>
+    <div class="row"><button class="btn" id="rec-copy">Copy code</button><button class="btn btn-sun" data-close>I saved it</button></div>
+  </div>
 </div>
 
 <div class="modal" id="report-modal" hidden role="dialog" aria-modal="true" aria-labelledby="rep-h">
@@ -333,6 +423,8 @@
     <div class="row"><button class="btn btn-sun" id="crash-reload">Reload</button><button class="btn" data-close>Keep going</button></div>
   </div>
 </div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script type="module" src="js/main.js"></script>
 </body>

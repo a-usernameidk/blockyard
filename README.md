@@ -9,22 +9,26 @@ It runs for free on Cloudflare. You don't install anything: you upload the files
 ```
 blockyard/
   wrangler.jsonc     Cloudflare settings (project name + database)
-  src/worker.js      The server: saves published levels, plays, likes, reports
-  schema.sql         The database tables (the server creates them by itself; this is just for reading)
+  src/worker.js      The server: accounts, progress, published levels, daily board, admin
+  schema.sql         The database tables (the server makes them by itself; this is just for reading)
   public/            The website
     index.html       The page
-    admin.html       Your admin page for removing bad levels
     css/style.css    How everything looks
-    js/main.js       Pages, menus, sharing, publishing
+    js/main.js       Screens, menus, accounts, closet, publishing, admin
     js/format.js     The level format and the list of every block type
     js/engine2d.js   2D physics and rules (jumping, portals, enemies...)
     js/render2d.js   Drawing for the 2D game
-    js/play2d.js     The game loop, controls, camera, score screen
+    js/art.js        Pip, the hats and the icons, all drawn in code
+    js/play2d.js     The game loop, controls, camera, end screens
     js/editor.js     The level editor
-    js/levels.js     The built-in levels
+    js/levels.js     The built-in levels (World 1 and World 2)
+    js/progress.js   Stars, coins, achievements, saving your progress
+    js/cosmetics.js  Everything in Pip's Closet
+    js/endless.js    Builds Endless Rush and daily challenge courses
+    js/replay.js     Records runs so the server can check them
     js/engine3d.js   The 3D beta engine
     js/levels3d.js   The 3D levels
-    js/audio.js      Sound effects
+    js/audio.js      Sound effects and music
     js/api.js        Saving in the browser + talking to the server
 ```
 
@@ -57,20 +61,28 @@ https://blockyard.<your-account-name>.workers.dev
 
 ### 3. Check it works
 
-- Open your site. The Games page should load.
-- Open `https://blockyard.<your-account-name>.workers.dev/api/health`. It should say `{"ok":true,"db":true}`.
-- Build a tiny level, press **Publish**, then open **Discover**. Your level should be there.
+- Open your site. The title screen should load.
+- Open `https://blockyard.<your-account-name>.workers.dev/api/health`. It should say `{"ok":true,"db":true,"accounts":true}`.
+- Don't make an account yet. Do step 4 first.
 
-### 4. Turn on your admin page
+### 4. Add two settings, then make your account
 
-This lets you hide or delete levels people report.
+Do this **before anyone makes an account**.
 
-1. In Cloudflare, open your `blockyard` Worker → **Settings** → **Variables and Secrets** → **Add**.
-2. Type: **Secret**. Name: `ADMIN_KEY`. Value: a long password only you know.
-3. Save and deploy.
-4. Go to `https://blockyard.<your-account-name>.workers.dev/admin.html` and type that password.
+1. Pick the username you want, for example `Liam`.
+2. In Cloudflare, open your `blockyard` Worker, then **Settings**, then **Variables and Secrets**, then **Add**.
+3. Type: **Secret**. Name: `SALT`. Value: any long random text, like a sentence mashed on the keyboard. It makes stored passwords much harder to crack. Set it once and **never change or delete it**, or every password stops working.
+4. Add another: type **Text**, name `ADMIN_USERNAME`, value: the username from step 1. (More than one admin? Separate names with commas.) This makes that account the admin, who can hide or delete reported levels and ban players.
+5. Save and deploy.
+6. On your site, click **Log in**, then **Sign up**, and make the account with that exact username. Write down the recovery code it shows you.
+7. Click your name: you'll see an **Admin** button.
+8. Build a tiny level, press **Test** and beat it, then press **Publish**. Open **Discover**: your level should be there.
 
-Optional: add another secret called `SALT` with any random text. It makes the anonymous visitor IDs harder to guess.
+Only the server decides who is an admin, so nobody can fake it from their browser.
+
+### Optional: longer winning runs
+
+When someone publishes a level, the server replays their winning run to prove the level can be beaten. By default a winning run can be up to 2 minutes. Cloudflare's free plan only gives the server a tiny bit of computing time per request, so very long checks might fail. If you ever upgrade to the paid plan ($5 a month), you can add a variable `MAX_VERIFY_STEPS` set to `36000` to allow 5-minute runs.
 
 ## Making changes
 
@@ -86,6 +98,9 @@ Some easy things to try:
 - **Add a new block type:** add it to `TILES` in `format.js`, make it do something in `engine2d.js`, and draw it in `render2d.js`.
 - **Change colors:** the `THEMES` list in `render2d.js`, and the top of `css/style.css`.
 - **Block more words in names:** the `BLOCKED` list in `format.js`.
+- **Change prices or add hats:** `public/js/cosmetics.js` (new hats also need drawing in `drawHat` in `art.js`).
+- **Add achievements:** the `ACHIEVEMENTS` list in `public/js/progress.js`.
+- **Add Endless pieces:** the `CHUNKS` list in `public/js/endless.js`. Keep them short and beatable.
 
 ## Game modes
 
@@ -106,11 +121,24 @@ Some easy things to try:
 
 There are also gravity, speed and tiny/full-size portals, plus jump rings, flip rings and bounce pads.
 
+**Endless Rush:** one life, a random course made from hand-built pieces, and it keeps getting faster. Coins and distance earn you coins for the closet.
+
+**Daily challenge:** one course per day, the same for everyone (it changes at midnight UTC). Your best run goes on the leaderboard. The server replays it to make sure nobody cheats.
+
 **3D beta:** a basic obby with WASD, jumping, lava, checkpoints and a goal. No 3D editor yet.
+
+## Progress, accounts and the closet
+
+- **Guests** can play everything. Progress saves in that browser.
+- **Accounts** need just a username and a password, no email. Progress (stars, coins, items, achievements) syncs to the server, so it follows you between school and home. When a guest makes an account, their progress comes along.
+- **Stars:** every built-in level has 3: beat it, grab all the coins (or beat it without falling), and beat the target time (Adventure) or beat it without dying (Rush).
+- **Coins** come from coins you grab in built-in levels (each counts once), new stars, achievements, Endless Rush and daily challenges. Spend them in **Pip's Closet** on colors, hats and trails. Some items unlock from stars or achievements instead.
+- **Forgot your password?** Use **Lost password** with the recovery code from sign-up. There's no email, so that code is the only way back in.
+- To publish, like or report levels you need an account. Publishing also needs you to have **beaten your own level in Test**.
 
 ## Free limits
 
-Loading the website is free and unlimited on Cloudflare. The server part (publishing, Discover, plays, likes) gets 100,000 requests a day free, and the database has its own free limits. That's plenty for you and your friends. If Blockyard ever gets really popular, Cloudflare's paid plan is $5 a month.
+Loading the website is free and unlimited on Cloudflare. The server part (accounts, publishing, Discover, the daily board) gets 100,000 requests a day free, and the database has its own free limits. That's plenty for you and your friends. If Blockyard ever gets really popular, Cloudflare's paid plan is $5 a month.
 
 ## Help
 
@@ -130,4 +158,4 @@ Loading the website is free and unlimited on Cloudflare. The server part (publis
 
 **My school blocks `workers.dev`.** Some school filters do. Nothing in the game can fix that. Playing at home works, and share codes still work anywhere the site loads.
 
-**I lost my edit key.** Published levels are saved in Your games with a secret edit key, in the browser you published from. If you clear that browser's data, you can't update that level anymore, but you can still publish a new copy.
+**Updating from the older version.** Just upload the new files over the old ones. The database adds the new tables by itself. Levels published before accounts existed stay up, and can still be updated from the browser that published them. Then do step 4 again: `ADMIN_USERNAME` replaces the old `ADMIN_KEY` (you can delete `ADMIN_KEY`). If you already set `SALT` before, keep the same value.

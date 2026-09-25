@@ -35,7 +35,7 @@ export function createGame(level) {
   const G = {
     lv: level, w: level.w, h: level.h, rush: level.style === 'rush',
     map: level.d.split(''), ents: [], crumbles: [],
-    time: 0, attempt: 1, deaths: 0, coins: 0, keys: 0,
+    time: 0, runTime: 0, runDeaths: 0, attempt: 1, deaths: 0, coins: 0, keys: 0,
     totalCoins: 0, won: false, dead: false, deadT: 0,
     events: [], cp: null, cpIdx: -1, ringUsed: -1,
     progress: 0, best: 0, _cow: false,
@@ -121,7 +121,7 @@ export function cloneGame(G) {
 export function restart(G) {
   G.cp = null; G.cpIdx = -1;
   restore(G, G.init);
-  G.dead = false; G.won = false; G.time = 0; G.deaths = 0; G.attempt++;
+  G.dead = false; G.won = false; G.time = 0; G.runTime = 0; G.deaths = 0; G.runDeaths = 0; G.attempt++;
   G.events.push({ t: 'restart' });
 }
 
@@ -517,7 +517,7 @@ function checkpoint(G, i, tx, ty) {
 
 function die(G) {
   if (G.dead || G.won) return;
-  G.dead = true; G.deadT = G.rush ? 0.7 : 0.45; G.deaths++;
+  G.dead = true; G.deadT = G.rush ? 0.7 : 0.45; G.deaths++; G.runDeaths++;
   ev(G, 'die', G.p.x + G.p.w / 2, G.p.y + G.p.h / 2);
 }
 function win(G) {
@@ -534,13 +534,14 @@ export function step(G, input, dt = STEP) {
     G.deadT -= dt;
     if (G.deadT <= 0) {
       G.dead = false;
+      if (!G.cp) { G.runTime = 0; G.runDeaths = 0; }
       restore(G, G.cp || G.init);
       if (G.rush) G.attempt++;
       G.events.push({ t: 'respawn' });
     }
     return;
   }
-  G.time += dt;
+  G.time += dt; G.runTime += dt;
   const p = G.p;
   if (input.pressed) { p.buffer = G.rush ? 0.1 : 0.12; input.pressed = false; } else p.buffer -= dt;
   p.prevY = p.y;

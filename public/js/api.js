@@ -31,22 +31,6 @@ export const mine = {
 
 export function newId() { return 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
-const COLORS = ['#ff6b35', '#ff5d8f', '#3a86ff', '#44c06a', '#b06cff', '#ffd23f', '#2ec4b6', '#f4f4f4'];
-export const PLAYER_COLORS = COLORS;
-export const profile = {
-  get() { return { name: '', color: COLORS[0], ...store.get('profile', {}) }; },
-  set(p) { store.set('profile', p); },
-};
-
-export const bests = {
-  get(id) { return store.get('best:' + id, null); },
-  // keeps the best: highest progress, then fastest time
-  record(id, r) {
-    const old = this.get(id);
-    if (!old || r.progress > old.progress || (r.progress === old.progress && r.won && (!old.time || r.time < old.time))) store.set('best:' + id, r);
-  },
-};
-
 /* ---------------- online server ---------------- */
 let onlineCheck = null;
 // True only when the Cloudflare backend and its database are running.
@@ -57,7 +41,14 @@ export function isOnline() {
   return onlineCheck;
 }
 
+// The login token for this browser (empty for guests).
+export const auth = {
+  get token() { return store.get('token', ''); },
+  set token(t) { store.set('token', t || ''); },
+};
+
 async function request(method, path, body, headers = {}) {
+  if (auth.token) headers = { authorization: 'Bearer ' + auth.token, ...headers };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 9000);
   try {
@@ -68,7 +59,7 @@ async function request(method, path, body, headers = {}) {
     });
     let data = null;
     try { data = await r.json(); } catch (e) { /* not JSON */ }
-    if (!r.ok || !data) throw new Error((data && data.error) || `The server answered with an error (${r.status}).`);
+    if (!r.ok || !data) { const err = new Error((data && data.error) || `The server answered with an error (${r.status}).`); err.status = r.status; throw err; }
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('The server took too long to answer. Try again.');
@@ -81,13 +72,23 @@ async function request(method, path, body, headers = {}) {
 
 const enc = encodeURIComponent;
 export const api = {
-  list: ({ sort = 'new', style = '', q = '', page = 0 } = {}) => request('GET', `/games?${new URLSearchParams({ sort, style, q, page })}`),
+  signup: (name, password, progress) => request('POST', '/auth/signup', { name, password, progress }),
+  login: (name, password) => request('POST', '/auth/login', { name, password }),
+  recover: (name, recovery, password) => request('POST', '/auth/recover', { name, recovery, password }),
+  logout: () => request('POST', '/auth/logout'),
+  me: () => request('GET', '/me'),
+  deleteMe: () => request('DELETE', '/me'),
+  saveProgress: (progress) => request('PUT', '/me/progress', { progress }),
+  myGames: () => request('GET', '/me/games'),
+  list: ({ sort = 'new', style = '', q = '', page = 0, creator = '' } = {}) => request('GET', `/games?${new URLSearchParams({ sort, style, q, page, creator })}`),
   get: (id) => request('GET', `/games/${enc(id)}`),
-  publish: (lv, creator, desc) => request('POST', '/games', { level: toWire(lv), creator, desc }),
-  update: (id, key, lv, creator, desc) => request('PUT', `/games/${enc(id)}`, { level: toWire(lv), creator, desc }, { 'x-edit-key': key }),
-  remove: (id, key) => request('DELETE', `/games/${enc(id)}`, null, { 'x-edit-key': key }),
+  publish: (lv, desc, replay) => request('POST', '/games', { level: toWire(lv), desc, replay }),
+  update: (id, lv, desc, replay, editKey) => request('PUT', `/games/${enc(id)}`, { level: toWire(lv), desc, replay }, editKey ? { 'x-edit-key': editKey } : {}),
+  remove: (id, editKey) => request('DELETE', `/games/${enc(id)}`, null, editKey ? { 'x-edit-key': editKey } : {}),
   play: (id) => request('POST', `/games/${enc(id)}/play`),
   like: (id) => request('POST', `/games/${enc(id)}/like`),
   report: (id, reason) => request('POST', `/games/${enc(id)}/report`, { reason }),
-  admin: (key, method, path, body) => request(method, '/admin' + path, body, { 'x-admin-key': key }),
+  daily: (date) => request('GET', `/daily?date=${enc(date)}`),
+  postDaily: (date, replay) => request('POST', '/daily', { date, replay }),
+  admin: (method, path, body) => request(method, '/admin' + path, body),
 };

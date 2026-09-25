@@ -331,13 +331,13 @@ export function drawPlayer(ctx, p, color, t, rush, fx = {}) {
     const sy = 1 + up - land * 0.22, sx = 1 - up * 0.8 + land * 0.2;
     const size = p.h * 0.84;
     ctx.translate(0, p.h / 2 - (size / 2 * sy + size * 0.14));
-    drawPip(ctx, size, color, { t, look: p.face, run: Math.min(1, Math.abs(p.vx) / 200), air, mouth: air ? 'open' : 'smile', sx, sy });
+    drawPip(ctx, size, color, { t, look: p.face, run: Math.min(1, Math.abs(p.vx) / 200), air, mouth: air ? 'open' : 'smile', sx, sy, hat: fx.hat });
     ctx.restore();
     return;
   }
   // feet sit at the bottom of the hitbox for the upright forms
   ctx.rotate(p.grav === -1 ? -p.rot : p.rot);
-  drawForm(ctx, p.form, p.w, color, { t, look: 1, run: 1, air });
+  drawForm(ctx, p.form, p.w, color, { t, look: 1, run: 1, air, hat: fx.hat });
   ctx.restore();
 }
 
