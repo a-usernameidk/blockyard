@@ -22,13 +22,43 @@ function make(meta, draw) {
   };
 }
 
+// Walk-through gates: two glowing pillars, a beam, and a colored pad. The game sends you to `to` when you walk in.
+// axis 'x': the gate is wide along x (you walk through it along z). axis 'z': the other way.
+function gates({ box, set }, list) {
+  for (const g of list) {
+    const { x, z, c } = g;
+    if (g.axis === 'x') {
+      box(x - 2, 1, z, x - 2, 5, z, B.neon, c); box(x + 2, 1, z, x + 2, 5, z, B.neon, c); box(x - 2, 6, z, x + 2, 6, z, B.plastic, c);
+      box(x - 1, 0, z - 1, x + 1, 0, z + 1, B.plastic, c);
+    } else {
+      box(x, 1, z - 2, x, 5, z - 2, B.neon, c); box(x, 1, z + 2, x, 5, z + 2, B.neon, c); box(x, 6, z - 2, x, 6, z + 2, B.plastic, c);
+      box(x - 1, 0, z - 1, x + 1, 0, z + 1, B.plastic, c);
+    }
+  }
+}
+// The Plaza's gates: minigames along the north side, obbies along the south, the Arena east, player worlds west.
+const PLAZA_GATES = [
+  { to: 'mg-race', label: 'Race', x: 50, z: 32, axis: 'x', c: 5 },
+  { to: 'mg-tag', label: 'Tag', x: 57, z: 32, axis: 'x', c: 4 },
+  { to: 'mg-paint', label: 'Paintball', x: 64, z: 32, axis: 'x', c: 11 },
+  { to: 'mg-koth', label: 'King of the Hill', x: 71, z: 32, axis: 'x', c: 6 },
+  { to: 'mg-lava', label: 'Rising Lava', x: 78, z: 32, axis: 'x', c: 4 },
+  { to: 'sunny', label: 'Sunny Steps', x: 50, z: 95, axis: 'x', c: 7 },
+  { to: 'tower', label: 'Tower of Tries', x: 57, z: 95, axis: 'x', c: 5 },
+  { to: 'lava', label: 'Lava Lake', x: 64, z: 95, axis: 'x', c: 4 },
+  { to: 'factory', label: 'Conveyor Chaos', x: 71, z: 95, axis: 'x', c: 9 },
+  { to: 'sky', label: 'Sky Gauntlet', x: 78, z: 95, axis: 'x', c: 10 },
+  { to: 'arena', label: 'All Minigames', x: 95, z: 64, axis: 'z', c: 11 },
+  { to: '#/worlds', label: 'Player Worlds', x: 32, z: 64, axis: 'z', c: 8 },
+];
+
 const tree = (box, x, y, z, h = 4) => {
   box(x - 1, y + h - 1, z - 1, x + 1, y + h, z + 1, B.leaves);
   box(x, y + h + 1, z, x, y + h + 1, z, B.leaves);
   box(x, y, z, x, y + h - 1, z, B.wood);
 };
 
-export const PLAZA = make({ id: 'plaza', name: 'Blockyard Plaza', mode: 'hangout', sky: 'day', blurb: 'Hang out, chat and show off your look. Everyone starts here.' }, ({ box, set }) => {
+export const PLAZA = make({ id: 'plaza', name: 'Blockyard Plaza', mode: 'hangout', sky: 'day', portals: PLAZA_GATES, blurb: 'The hub. Hang out, then walk through a gate to a minigame or an obby.' }, ({ box, set }) => {
   box(28, 0, 28, 99, 0, 99, B.grass);
   box(50, 0, 50, 77, 0, 77, B.stone);
   // paths out to the edges
@@ -39,7 +69,7 @@ export const PLAZA = make({ id: 'plaza', name: 'Blockyard Plaza', mode: 'hangout
   box(62, 1, 62, 65, 3, 65, B.stone); box(63, 4, 63, 64, 4, 64, B.neon, 8);
   set(64, 0, 72, B.spawn);
   // trees around the square
-  for (const [x, z] of [[40, 40], [88, 40], [40, 88], [88, 88], [34, 56], [94, 72], [56, 34], [72, 94], [46, 70], [82, 56]]) tree(box, x, 1, z, 4 + ((x + z) % 3));
+  for (const [x, z] of [[40, 40], [88, 40], [40, 88], [88, 88], [34, 54], [94, 74], [46, 70], [82, 56]]) tree(box, x, 1, z, 4 + ((x + z) % 3));
   // benches
   for (const [x, z, alongX] of [[54, 52, 1], [70, 52, 1], [54, 75, 1], [70, 75, 1]]) {
     if (alongX) { box(x, 1, z, x + 3, 1, z, B.wood); }
@@ -64,6 +94,7 @@ export const PLAZA = make({ id: 'plaza', name: 'Blockyard Plaza', mode: 'hangout
   // low fence
   for (let x = 28; x <= 99; x++) { if (x < 61 || x > 66) { set(x, 1, 28, B.wood); set(x, 1, 99, B.wood); } }
   for (let z = 28; z <= 99; z++) { if (z < 61 || z > 66) { set(28, 1, z, B.wood); set(99, 1, z, B.wood); } }
+  gates({ box, set }, PLAZA_GATES);
 });
 
 export const SUNNY = make({ id: 'sunny', name: 'Sunny Steps', mode: 'obby', sky: 'day', reward: 50, blurb: 'Your first obby. Hop across floating blocks up to the goal.' }, ({ pad, box, coin, set, way }) => {
@@ -189,19 +220,19 @@ export const SKY = make({ id: 'sky', name: 'Sky Gauntlet', mode: 'obby', sky: 'n
 
 // The Minigame Arena: a lobby in the middle and one area for each game. The live room picks the next
 // game after every round, sends everyone to that area, and back to the lobby when it's over.
-export const ARENA = make({
-  id: 'arena', name: 'Minigame Arena', mode: 'hangout', sky: 'day', game: 'mix',
-  blurb: 'Race, Tag, King of the Hill and Rising Lava, one round after another. Win rounds for coins!',
-  lobby: [64.5, 1, 64.5],
-  areas: {
+const ARENA_AREAS = {
     race: { spawn: [11.5, 1, 12.5], box: [4, 4, 112, 20] },
     tag: { spawn: [26.5, 1, 102.5], box: [8, 84, 44, 120] },
+    paint: { spawn: [26.5, 1, 102.5], box: [8, 84, 44, 120] },
     koth: { spawn: [88.5, 1, 88.5], box: [84, 84, 120, 120], hill: [101, 5, 101, 103, 5, 103] },
     lava: { spawn: [88.5, 1, 12.5], box: [84, 8, 120, 44], lavaFrom: 0 },
-  },
-}, ({ box, set, coin, way }) => {
+};
+// a gate back to the Plaza, in every minigame world's lobby
+const BACK_GATE = [{ to: 'plaza', label: 'Back to the Plaza', x: 64, z: 53, axis: 'x', c: 7 }];
+function arenaMap({ box, set, coin, way }) {
   // lobby
   box(52, 0, 52, 76, 0, 76, B.grass); box(56, 0, 56, 72, 0, 72, B.stone); set(64, 0, 64, B.spawn);
+  gates({ box, set }, BACK_GATE);
   for (const [x, z, c] of [[56, 56, 4], [72, 56, 6], [56, 72, 9], [72, 72, 7]]) box(x, 1, z, x, 3, z, B.neon, c);
   // race course (east along z = 11..13)
   box(8, 0, 8, 15, 0, 16, B.grass); way.push([11.5, 1, 12.5]);
@@ -245,7 +276,19 @@ export const ARENA = make({
   box(99, y + 1, 23, 104, y + 1, 28, B.neon, 6);
   // stepping stones out on the lava floor
   for (const [x, z, h] of [[88, 36, 1], [90, 40, 2], [114, 36, 1], [116, 40, 2], [114, 12, 1], [88, 20, 1]]) box(x, 1, z, x + 1, h, z + 1, B.plastic, 4);
-});
+}
+export const ARENA = make({
+  id: 'arena', name: 'Minigame Arena', mode: 'hangout', sky: 'day', game: 'mix', portals: BACK_GATE,
+  blurb: 'Race, Tag, Paintball, King of the Hill and Rising Lava, one round after another. Win rounds for coins!',
+  lobby: [64.5, 1, 64.5], areas: ARENA_AREAS,
+}, arenaMap);
+// One world per minigame (same map, just that game), so each Plaza gate has its own servers.
+const oneGame = (game, name, sky, blurb) => make({ id: 'mg-' + game, name, mode: 'hangout', sky, game, hidden: true, portals: BACK_GATE, blurb, lobby: [64.5, 1, 64.5], areas: { [game]: ARENA_AREAS[game] } }, arenaMap);
+export const MG_RACE = oneGame('race', 'Race', 'day', 'Race the course. First to the goal wins.');
+export const MG_TAG = oneGame('tag', 'Tag', 'sunset', "Don't get tagged. Whoever gets tagged is IT too.");
+export const MG_PAINT = oneGame('paint', 'Paintball', 'day', 'Shoot paint. 3 hits splats someone.');
+export const MG_KOTH = oneGame('koth', 'King of the Hill', 'sunset', 'Hold the glowing hilltop the longest.');
+export const MG_LAVA = oneGame('lava', 'Rising Lava', 'night', 'Climb before the lava gets you.');
 
-export const WORLDS3D = [PLAZA, ARENA, SUNNY, TOWER, LAVA, FACTORY, SKY];
+export const WORLDS3D = [PLAZA, ARENA, SUNNY, TOWER, LAVA, FACTORY, SKY, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA];
 export const builtinWorld = (id) => WORLDS3D.find((w) => w.id === id) || null;

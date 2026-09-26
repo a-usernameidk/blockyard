@@ -55,9 +55,9 @@ export const SKIES = {
   night: { name: 'Night', top: '#0b1030', bottom: '#2a3570', fog: '#223066', sun: [0.3, 0.8, -0.4], light: 0.55, amb: 0.42 },
   space: { name: 'Space', top: '#05060f', bottom: '#1b1440', fog: '#120f2e', sun: [0.5, 0.7, 0.2], light: 0.9, amb: 0.45 },
 };
-export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just chill)', race: 'Minigame: Race (needs a Goal)', tag: 'Minigame: Tag', koth: 'Minigame: King of the Hill (Goal blocks are the hill)', lava: 'Minigame: Rising Lava' };
+export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just chill)', race: 'Minigame: Race (needs a Goal)', tag: 'Minigame: Tag', koth: 'Minigame: King of the Hill (Goal blocks are the hill)', lava: 'Minigame: Rising Lava', paint: 'Minigame: Paintball' };
 // Minigame worlds are hangouts with a game: the live server runs rounds of it (see games.js).
-export const GAME_TYPES = ['race', 'tag', 'koth', 'lava'];
+export const GAME_TYPES = ['race', 'tag', 'koth', 'lava', 'paint'];
 
 export const solidType = (t) => t !== 0 && !BLOCKS[t].entity && !BLOCKS[t].ghost;
 

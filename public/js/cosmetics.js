@@ -68,9 +68,20 @@ export const PETS = [
   { id: 'dragon', name: 'Mini dragon', price: 1500, stock: 10 },
 ];
 
-export const SHOP = { color: COLORS, hat: HATS, trail: TRAILS, pet: PETS };
-export const KINDS = ['hat', 'color', 'trail', 'pet'];
-export const FREE = [...COLORS, ...HATS, ...TRAILS, ...PETS].filter((i) => i.price === 0 && !i.need).map((i) => i.id);
+// Gear changes how you move. It works in hangouts and minigames, but never in obbies (so times stay fair).
+export const GEAR = [
+  { id: 'none', name: 'No gear', price: 0 },
+  { id: 'speed', name: 'Speed coil', price: 600 },
+  { id: 'gravity', name: 'Gravity coil', price: 600 },
+  { id: 'boots', name: 'Double-jump boots', price: 900 },
+  { id: 'jetpack', name: 'Jetpack', price: 2500, stock: 10 },
+];
+// what each one does to movement (see physics3d.js)
+export const GEAR_MODS = { speed: { speed: 1.45 }, gravity: { grav: 0.5 }, boots: { jumps: 1 }, jetpack: { jet: 75 } };
+
+export const SHOP = { color: COLORS, hat: HATS, trail: TRAILS, pet: PETS, gear: GEAR };
+export const KINDS = ['hat', 'color', 'trail', 'pet', 'gear'];
+export const FREE = [...COLORS, ...HATS, ...TRAILS, ...PETS, ...GEAR].filter((i) => i.price === 0 && !i.need).map((i) => i.id);
 export const itemKey = (kind, id) => kind + ':' + id;
 // 'hat:cap' -> { kind, item } or null
 export function findItem(key) {
@@ -84,7 +95,7 @@ export const isFree = (item) => item.price === 0 && !item.need;
 export const canTrade = (item) => !isFree(item) && !item.need;
 export const valueOf = (item) => (item.need ? 0 : item.price || 0);
 export const sellPrice = (item) => Math.floor(valueOf(item) / 2);
-export const LIMITED = [...COLORS.map((i) => ['color', i]), ...HATS.map((i) => ['hat', i]), ...TRAILS.map((i) => ['trail', i]), ...PETS.map((i) => ['pet', i])].filter(([, i]) => i.stock).map(([k, i]) => ({ key: itemKey(k, i.id), stock: i.stock }));
+export const LIMITED = [...COLORS.map((i) => ['color', i]), ...HATS.map((i) => ['hat', i]), ...TRAILS.map((i) => ['trail', i]), ...PETS.map((i) => ['pet', i]), ...GEAR.map((i) => ['gear', i])].filter(([, i]) => i.stock).map(([k, i]) => ({ key: itemKey(k, i.id), stock: i.stock }));
 
 // Player levels: every coin you earn by playing is also 1 XP.
 export const xpFor = (lvl) => 20 * (lvl - 1) * (lvl - 1);

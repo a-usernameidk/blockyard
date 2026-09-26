@@ -249,7 +249,7 @@ async function addEvent(db, kind, who) {
     db.prepare('DELETE FROM events WHERE at < ?').bind(now - 2 * DAY),
   ]);
 }
-const lookOf = (text) => { try { const l = JSON.parse(text || '{}'); return { color: /^#[0-9a-f]{6}$/i.test(l.color) ? l.color : DEFAULT_LOOK.color, hat: String(l.hat || 'none').slice(0, 20), trail: String(l.trail || 'none').slice(0, 20), pet: String(l.pet || 'none').slice(0, 20) }; } catch (e) { return { ...DEFAULT_LOOK }; } };
+const lookOf = (text) => { try { const l = JSON.parse(text || '{}'); return { color: /^#[0-9a-f]{6}$/i.test(l.color) ? l.color : DEFAULT_LOOK.color, hat: String(l.hat || 'none').slice(0, 20), trail: String(l.trail || 'none').slice(0, 20), pet: String(l.pet || 'none').slice(0, 20), gear: String(l.gear || 'none').slice(0, 20) }; } catch (e) { return { ...DEFAULT_LOOK }; } };
 
 /* ---------------- accounts ---------------- */
 async function sessionUser(db, request, env) {

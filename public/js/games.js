@@ -3,17 +3,19 @@
 //   tag    one player is IT and tags others, who become IT too. Anyone still free at the end wins.
 //   koth   King of the hill: stand on the hill (the goal blocks) the longest
 //   lava   Rising lava: the lava comes up every few seconds. Last one standing wins.
+//   paint  Paintball: shoot paint, 3 hits splats someone. Most splats wins.
 // The server (src/room.js) and the game (play3d.js) both use this file, so they agree on the rules.
 import { decodeBlocks, scan, B } from './world.js';
 
 export const GAMES = {
   race: { name: 'Race', short: 'First to the goal wins!', secs: 120 },
   tag: { name: 'Tag', short: "Don't get tagged! If you're IT, tag everyone.", secs: 75 },
+  paint: { name: 'Paintball', short: 'Click (or tap Shoot) to fire paint. 3 hits and they splat. Most splats wins!', secs: 90 },
   koth: { name: 'King of the Hill', short: 'Stand on the glowing hill the longest.', secs: 60 },
   lava: { name: 'Rising Lava', short: 'Climb! The lava keeps rising. Last one standing wins.', secs: 90 },
 };
 export const GAME_IDS = Object.keys(GAMES);
-export const ROUND = { wait: 12, results: 7, minPlayers: 2, lavaEvery: 4, tagReach: 1.4 };
+export const ROUND = { wait: 12, results: 7, minPlayers: 2, lavaEvery: 4, tagReach: 1.4, shotRange: 32, shotEvery: 330, hitsToSplat: 3 };
 export const PRIZE = { first: 25, second: 15, third: 10, win: 20, dailyCap: 200 };
 
 // Works out where each game happens in a world: { modes, lobby, areas: { race: { spawn, box, hill, lavaFrom } } }

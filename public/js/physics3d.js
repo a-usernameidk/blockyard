@@ -238,7 +238,8 @@ export function step3(S, value) {
   }
 
   const icy = S.onGround && under(S) === B.ice;
-  const top = P3.speed * (S.boost > 0 ? P3.boost : 1);
+  const G = S.mods; // gear (only in hangouts and minigames, never in checked runs)
+  const top = P3.speed * (S.boost > 0 ? P3.boost : 1) * (G && G.speed ? G.speed : 1);
   const tx = dx * top, tz = dz * top;
   const moving = f || s;
   const rate = !S.onGround ? P3.airAccel : icy ? (moving ? P3.iceAccel : P3.iceFriction) : (moving ? P3.accel : P3.friction);
@@ -255,9 +256,16 @@ export function step3(S, value) {
   if (jumpHeld && (S.onGround || (pressed && S.air < P3.coyote)) && S.v.y <= 0.001) {
     S.v.y = P3.jump; S.onGround = false; S.air = P3.coyote;
     S.events.push({ t: 'jump', x: S.p.x, y: S.p.y, z: S.p.z });
+  } else if (G) {
+    if (S.onGround) { S.jumpsLeft = G.jumps || 0; S.fuel = G.jet || 0; }
+    if (G.jumps && pressed && !S.onGround && S.jumpsLeft > 0) {
+      S.jumpsLeft--; S.v.y = P3.jump * 0.95; S.events.push({ t: 'jump2', x: S.p.x, y: S.p.y, z: S.p.z });
+    } else if (G.jet && jumpHeld && !S.onGround && S.fuel > 0 && S.air > 8) {
+      S.fuel--; S.v.y = Math.min(8, S.v.y + 70 * dt); S.jetting = 4;
+    }
   }
 
-  S.v.y -= P3.gravity * dt;
+  S.v.y -= P3.gravity * (G && G.grav ? G.grav : 1) * dt;
   if (S.v.y < -P3.maxFall) S.v.y = -P3.maxFall;
 
   if (S.v.x) moveX(S, S.v.x * dt);

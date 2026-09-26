@@ -13,7 +13,7 @@ import { json, fail, body, needUser, DAY, randomId, isConstraint, startOfDay } f
 
 export const REWARD = { star: 10, dailyWin: 30, endlessCap: 200, obbyNoFall: 25, coin3d: 2, migrateCap: 2000, finishPerHour: 120 };
 const TRADE = { maxItems: 8, maxCoins: 100000, days: 3, openPerUser: 10 };
-export const DEFAULT_LOOK = { color: '#ff6b35', hat: 'none', trail: 'none', pet: 'none' };
+export const DEFAULT_LOOK = { color: '#ff6b35', hat: 'none', trail: 'none', pet: 'none', gear: 'none' };
 
 export const ECON_SCHEMA = [
   'CREATE TABLE IF NOT EXISTS wallets (user_id TEXT PRIMARY KEY, coins INTEGER NOT NULL DEFAULT 0 CHECK (coins >= 0))',

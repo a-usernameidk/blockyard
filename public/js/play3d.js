@@ -8,6 +8,7 @@ import { openRoom } from './net.js';
 import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
 import { store } from './api.js';
 import { GAMES, ROUND, onHill, inBox } from './games.js';
+import { GEAR_MODS } from './cosmetics.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -182,7 +183,7 @@ export function startWorld(root, opts) {
     if (e.pointerType === 'touch' && e.clientX - r.left < r.width * 0.42 && joyId === null) {
       joyId = e.pointerId; joyVec = { ox: e.clientX, oy: e.clientY, x: 0, y: 0 };
       joy.style.left = e.clientX - r.left + 'px'; joy.style.top = e.clientY - r.top + 'px'; joy.classList.add('on');
-    } else camDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    } else camDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() };
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ok */ }
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -198,7 +199,11 @@ export function startWorld(root, opts) {
   });
   const endPointer = (e) => {
     if (joyId === e.pointerId) { joyId = null; joyVec = null; joy.classList.remove('on'); joy.firstChild.style.transform = ''; }
-    if (camDrag && camDrag.id === e.pointerId) camDrag = null;
+    if (camDrag && camDrag.id === e.pointerId) {
+      // a quick click (not a drag) shoots in Paintball
+      if (paintOn() && Math.hypot(e.clientX - camDrag.sx, e.clientY - camDrag.sy) < 7 && performance.now() - camDrag.t < 350) shoot();
+      camDrag = null;
+    }
   };
   canvas.addEventListener('pointerup', endPointer); canvas.addEventListener('pointercancel', endPointer);
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.dist = Math.max(2.5, Math.min(18, cam.dist * (e.deltaY > 0 ? 1.1 : 0.9))); }, { passive: false });
@@ -233,6 +238,7 @@ export function startWorld(root, opts) {
     for (const e of S.events) {
       switch (e.t) {
         case 'jump': sfx('jump'); break;
+        case 'jump2': sfx('jump'); burst(e.x, e.y, e.z, ['#ffffff', '#ffd23f'], 8, 2.5, 1); break;
         case 'land': if (e.v > 16) sfx('land'); burst(e.x, e.y, e.z, ['#ffffff'], 5, 2, 1); break;
         case 'bounce': sfx('bounce'); burst(e.x, e.y, e.z, ['#ff5d8f', '#ffffff'], 10, 3, 4); break;
         case 'speed': sfx('speed'); toast('Speed boost!', 0.9); break;
@@ -329,6 +335,7 @@ export function startWorld(root, opts) {
       case 'sys': addLine(null, m.m, null, m.big ? 'big' : true); break;
       case 'kicked': case 'full': case 'error': showMsg(m.m, true); break;
       case 'round': onRound(m); break;
+      case 'paint': onPaint(m); break;
       case 'prize': toast(m.coins ? `+${m.coins} coins!` : "You won! (You've hit today's minigame coin limit.)", 2.5); sfx('coin'); if (opts.onPrize) opts.onPrize(); break;
     }
   }
@@ -387,10 +394,55 @@ export function startWorld(root, opts) {
   let inRound = false, lastTag = 0, roundText = '';
   const nameOf = (id) => (id === myId ? 'You' : (others.get(id) || {}).name || 'Someone');
   const toXYZ = (a, spread) => ({ x: a[0] + (spread ? (Math.random() - 0.5) * spread : 0), y: a[1], z: a[2] + (spread ? (Math.random() - 0.5) * spread : 0) });
+  // gear works in hangouts, Tag and Paintball. Never in obbies (timed and checked) or the other minigames (fair play).
+  function applyGear() {
+    const ok = !opts.test && world.mode === 'hangout' && (!inRound || rs.mode === 'tag' || rs.mode === 'paint');
+    S.mods = ok ? GEAR_MODS[look.gear] || null : null;
+  }
+  /* ----- paintball ----- */
+  const aim = { from: [0, 0, 0], dir: [0, 0, 1] };
+  const shots = [];
+  let lastShot = 0;
+  const cross = h('div', { class: 'w3-cross', hidden: true, 'aria-hidden': 'true' });
+  const shootBtn = h('button', { class: 'tbtn w3-shoot', type: 'button', hidden: true, 'aria-label': 'Shoot paint' }, 'Shoot');
+  stage.append(cross, shootBtn);
+  shootBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); shoot(); });
+  addEventListener('keydown', (e) => { if (e.code === 'KeyX' && paintOn() && !typing() && stage.isConnected) shoot(); });
+  function paintOn() { return !!cfg && rs.phase === 'play' && rs.mode === 'paint' && inRound; }
+  function shoot() {
+    const now = performance.now();
+    if (!paintOn() || now - lastShot < ROUND.shotEvery) return;
+    lastShot = now;
+    const [ox, oy, oz] = aim.from, [dx, dy, dz] = aim.dir;
+    // how far until a wall?
+    let wall = ROUND.shotRange;
+    for (let t = 0.8; t < ROUND.shotRange; t += 0.4) if (camSolid(ox + dx * t, oy + dy * t, oz + dz * t)) { wall = t; break; }
+    let best = null, bestT = wall;
+    for (const o of others.values()) {
+      if (!o.pos || !rs.alive.has(o.id)) continue;
+      const cx = o.pos[0] - ox, cy = o.pos[1] + 0.7 - oy, cz = o.pos[2] - oz;
+      const t = cx * dx + cy * dy + cz * dz;
+      if (t < 0.5 || t > bestT) continue;
+      const qx = cx - dx * t, qy = cy - dy * t, qz = cz - dz * t;
+      if (Math.hypot(qx, qy, qz) < 0.8) { best = o; bestT = t; }
+    }
+    shots.push({ x: ox, y: oy, z: oz, dx, dy, dz, left: bestT, color: hexRGB(look.color) });
+    sfx('jump');
+    if (best && room) room.send({ t: 'hit', id: best.id });
+  }
+  function splash(pos, color, n = 10) { if (pos) burst(pos[0], pos[1] + 0.8, pos[2], [color || '#ff5d8f', '#ffffff'], n, 4, 3); }
+  function onPaint(m) {
+    const by = m.by === myId ? look : (others.get(m.by) || {}).look;
+    const target = m.id === myId ? [S.p.x, S.p.y, S.p.z] : (others.get(m.id) || {}).pos;
+    splash(target, by && by.color, 8);
+    if (m.id === myId) { toast(`Hit! ${m.n}/${ROUND.hitsToSplat}`, 0.8); sfx('land'); }
+    else if (m.by === myId) toast(`Hit ${nameOf(m.id)}! ${m.n}/${ROUND.hitsToSplat}`, 0.8);
+  }
   function placeAt(at, obbyNow) {
     S.spawn = at; S.p = { ...at }; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p };
     S.cp = null; S.cpIdx = -1; S.won = false; S.obby = obbyNow; S.onGround = false; winShown = false; winBox.hidden = true;
     if (fly) setFly(false);
+    applyGear();
   }
   function enterArea(mode) {
     const a = cfg.areas[mode];
@@ -412,11 +464,80 @@ export function startWorld(root, opts) {
       if (m.ev.tag) { toast(m.ev.tag === myId ? "You got tagged! Now you're IT!" : `${nameOf(m.ev.tag)} got tagged!`, 1.6); sfx(m.ev.tag === myId ? 'die' : 'bounce'); }
       if (m.ev.out && m.ev.out !== myId) toast(`${nameOf(m.ev.out)} fell in the lava!`, 1.4);
       if (m.ev.fin) toast(`${nameOf(m.ev.fin)} finished #${rs.fin.indexOf(m.ev.fin) + 1}!`, 1.6);
+      if (m.ev.splat) {
+        const by = m.ev.by === myId ? look : (others.get(m.ev.by) || {}).look;
+        splash(m.ev.splat === myId ? [S.p.x, S.p.y, S.p.z] : (others.get(m.ev.splat) || {}).pos, by && by.color, 24);
+        if (m.ev.splat === myId) { toast(`SPLAT! ${nameOf(m.ev.by)} got you.`, 1.8); sfx('die'); placeAt(toXYZ(cfg.areas.paint.spawn, 8), false); }
+        else toast(m.ev.by === myId ? `You splatted ${nameOf(m.ev.splat)}!` : `${nameOf(m.ev.by)} splatted ${nameOf(m.ev.splat)}!`, 1.6);
+        if (m.ev.by === myId) sfx('coin');
+      }
     }
     if (m.phase === 'results' && was === 'play') sfx('win');
     for (const o of others.values()) o.tag.classList.toggle('it', rs.phase === 'play' && rs.mode === 'tag' && rs.it.has(o.id));
     myTag.classList.toggle('it', rs.phase === 'play' && rs.mode === 'tag' && rs.it.has(myId));
   }
+  /* ----- tips: the first time you're near a special block, say what it does ----- */
+  const TIP3D = {
+    [B.bounce]: 'Bounce pad! Step on it and it launches you way up.',
+    [B.speed]: 'Speed pad! Step on it to run faster for a few seconds.',
+    [B.crumble]: 'Crumble block: it falls away a moment after you step on it. Keep moving!',
+    [B.checkpoint]: 'Checkpoint! Step on it and you come back here if you fall.',
+    [B.ice]: 'Ice is slippery. Start slowing down early!',
+    [B.lava]: "Lava! Touch it and you go back to your checkpoint.",
+    [B.teleport]: 'Teleporter! Step on it to jump to the next teleporter of the same color.',
+    [B.goal]: obby ? "That's the goal. Touch it to win!" : null,
+    [B.beltE]: 'Conveyor belt! It pushes you the way the arrows move.',
+    [B.moveX]: 'Moving platform! Hop on and it carries you. Wait for it if it is far away.',
+  };
+  TIP3D[B.beltW] = TIP3D[B.beltN] = TIP3D[B.beltS] = TIP3D[B.beltE];
+  TIP3D[B.moveZ] = TIP3D[B.moveX]; TIP3D[B.moveY] = 'Elevator! Stand on it and it takes you up and down.';
+  const tipsSeen = new Set(store.get('tips3d-seen', []));
+  const tipBox = h('div', { class: 'play-tip w3-tip', role: 'status' });
+  stage.append(tipBox);
+  let tipWait = 1.5;
+  function tipTick(dt) {
+    if ((tipWait -= dt) > 0) return;
+    tipWait = 0.3;
+    const bx = Math.floor(S.p.x), by = Math.floor(S.p.y), bz = Math.floor(S.p.z);
+    for (let y = by - 2; y <= by + 2; y++) for (let z = bz - 3; z <= bz + 3; z++) for (let x = bx - 3; x <= bx + 3; x++) {
+      const t = physGrid.get(x, y, z), tip = t && TIP3D[t];
+      if (!tip || tipsSeen.has(t)) continue;
+      for (const [k, v] of Object.entries(TIP3D)) if (v === tip) tipsSeen.add(Number(k));
+      store.set('tips3d-seen', [...tipsSeen]);
+      tipBox.textContent = tip; tipBox.classList.add('on'); clearTimeout(tipBox.t); tipBox.t = setTimeout(() => tipBox.classList.remove('on'), 5000); tipWait = 5.5;
+      return;
+    }
+  }
+  /* ----- gates to other worlds (the Plaza hub) ----- */
+  const gateList = (opts.portals || []).map((g) => {
+    const box = g.axis === 'x' ? [g.x - 1, g.z, g.x + 2, g.z + 1] : [g.x, g.z - 1, g.x + 1, g.z + 2];
+    const tag = h('div', { class: 'w3-tag gate' }, h('span', { class: 'w3-name' }, g.label), h('span', { class: 'gate-n' }));
+    tags.append(tag);
+    return { ...g, box, tag, cx: (box[0] + box[2]) / 2, cz: (box[1] + box[3]) / 2, color: hexRGB(PALETTE[g.c & 15]) };
+  });
+  let travel = null, gateCountT = 0;
+  function gateTick(px, py, pz, scene, dt) {
+    if (!gateList.length) return;
+    gateCountT -= dt;
+    for (const g of gateList) {
+      // the glowing portal surface
+      const wx = g.axis === 'x' ? 3 : 0.25, wz = g.axis === 'x' ? 0.25 : 3;
+      scene.push({ prim: 'cube', color: g.color, glow: 1, alpha: 0.35 + Math.sin(clock * 3 + g.x) * 0.12, m: M4.trs(g.cx, 3, g.cz, 0, 0, 0, wx, 4.8, wz) });
+      scene.push({ prim: 'cube', color: [1, 1, 1], glow: 1, alpha: 0.25, m: M4.trs(g.cx, 1 + ((clock * 1.5 + g.x) % 4.5), g.cz, 0, 0, 0, wx * 0.9, 0.12, wz * 0.9) });
+      placeTag(g.tag, g.cx, 7.6, g.cz, false, 90);
+      if (gateCountT <= 0 && opts.onlineCount) { const n = opts.onlineCount(g.to); g.tag.lastChild.textContent = n ? `${n} playing` : ''; }
+    }
+    if (gateCountT <= 0) gateCountT = 3;
+    if (fly || (inRound && rs.phase === 'play')) { travel = null; return; }
+    const inside = gateList.find((g) => px >= g.box[0] && px <= g.box[2] && pz >= g.box[1] && pz <= g.box[3] && py >= 0.5 && py <= 6);
+    if (!inside) { if (travel) { travel = null; toast('', 0.01); } return; }
+    if (!travel || travel.g !== inside) { travel = { g: inside, t: 0 }; toast(`Going to ${inside.label}…`, 1.2); sfx('checkpoint'); }
+    travel.t += dt;
+    if (travel.t > 0.7 && !travel.done && opts.onPortal) { travel.done = true; fade.classList.remove('on'); void fade.offsetWidth; fade.classList.add('on'); opts.onPortal(inside.to); }
+  }
+  if (gateList.length) setTimeout(() => { if (!stopped) toast('Walk through a gate to go somewhere!', 3); }, 1500);
+  // automated tests can move the player (only with ?w3test in the address)
+  if (location.search.includes('w3test')) window.__w3 = { at: (x, y, z) => { S.p.x = x; S.p.y = y; S.p.z = z; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; } };
   let lastHb = 0;
   function roundTick(px, py, pz, scene, clock) {
     if (!cfg || !rs.phase) return;
@@ -431,9 +552,18 @@ export function startWorld(root, opts) {
     else if (rs.mode === 'race') t = `RACE ${clockTxt}. ${rs.fin.includes(myId) ? `You finished #${rs.fin.indexOf(myId) + 1}!` : 'Get to the goal!'}`;
     else if (rs.mode === 'tag') t = `TAG ${clockTxt}. ${rs.it.has(myId) ? "You're IT! Tag the others!" : `Run! ${rs.it.size} ${rs.it.size === 1 ? 'player is' : 'players are'} IT.`}`;
     else if (rs.mode === 'koth') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `KING OF THE HILL ${clockTxt}. You: ${Math.floor(rs.scores[myId] || 0)}s${top ? `, leader: ${nameOf(top[0])} ${Math.floor(top[1])}s` : ''}`; }
+    else if (rs.mode === 'paint') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `PAINTBALL ${clockTxt}. Your splats: ${rs.scores[myId] || 0}${top ? `, leader: ${nameOf(top[0])} ${top[1]}` : ''}. Click or X to shoot!`; }
     else if (rs.mode === 'lava') t = `RISING LAVA ${clockTxt}. ${rs.alive.has(myId) ? `${rs.alive.size} left. Keep climbing!` : 'You fell in. Watch the rest!'}`;
     if (t !== roundText) { roundText = t; roundBox.textContent = t; roundBox.hidden = false; }
     roundBox.classList.toggle('hot', rs.phase === 'play' && inRound && (rs.mode !== 'tag' || rs.it.has(myId)));
+    const pOn = paintOn();
+    cross.hidden = !pOn; shootBtn.hidden = !pOn;
+    for (let i = shots.length - 1; i >= 0; i--) {
+      const sh = shots[i], step = Math.min(sh.left, 45 * 0.016);
+      sh.x += sh.dx * step; sh.y += sh.dy * step; sh.z += sh.dz * step; sh.left -= step;
+      scene.push({ prim: 'sphere', color: sh.color, glow: 0.4, m: M4.trs(sh.x, sh.y, sh.z, 0, 0, 0, 0.22, 0.22, 0.22) });
+      if (sh.left <= 0) { burst(sh.x, sh.y, sh.z, ['#ffffff'], 4, 2, 1); shots.splice(i, 1); }
+    }
     if (rs.phase !== 'play') return;
     // the rising lava and the glowing hill
     if (rs.mode === 'lava' && rs.lava != null) {
@@ -452,6 +582,8 @@ export function startWorld(root, opts) {
       }
     }
   }
+
+  applyGear();
 
   /* ---------------- winning ---------------- */
   let winShown = false;
@@ -481,6 +613,7 @@ export function startWorld(root, opts) {
   }
   function restart() {
     S = createSim(world, physGrid);
+    applyGear();
     scatter();
     frames = []; acc = 0; prevP = { ...S.p }; winShown = false; noProof = fly;
     for (const [i, t] of gone) { viewGrid.t[i] = t; const x = i % SX, z = Math.floor(i / SX) % SZ, y = Math.floor(i / (SX * SZ)); R.markDirty(x, y, z); }
@@ -539,11 +672,14 @@ export function startWorld(root, opts) {
 
     // camera: orbit around the player, pulled in if a wall is in the way
     const tgt = [px, py + 1.25, pz];
+    aim.from = tgt;
     const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     const dir = [-Math.sin(cam.yaw) * cp, sp, Math.cos(cam.yaw) * cp];
     let dist = cam.dist;
     for (let s = 0.4; s <= cam.dist; s += 0.25) if (camSolid(tgt[0] + dir[0] * s, tgt[1] + dir[1] * s, tgt[2] + dir[2] * s)) { dist = Math.max(0.8, s - 0.35); break; }
     cam.eye = [tgt[0] + dir[0] * dist, tgt[1] + dir[1] * dist, tgt[2] + dir[2] * dist];
+    aim.dir = [-dir[0], -dir[1], -dir[2]];
+    if (S.jetting > 0) { S.jetting--; if (Math.random() < 0.8) parts.push({ x: px + (Math.random() - 0.5) * 0.3, y: py + 0.3, z: pz + (Math.random() - 0.5) * 0.3, vx: 0, vy: -4, vz: 0, life: 0.35, max: 0.35, size: 0.12, color: hexRGB(Math.random() < 0.5 ? '#ff9f1c' : '#ffd23f'), g: 0 }); }
 
     // effects
     trailT -= dt;
@@ -602,6 +738,8 @@ export function startWorld(root, opts) {
       scene.push({ prim: 'cube', color: p.color, glow: 0.5, alpha: Math.max(0.05, Math.min(0.95, p.life / p.max)), m: M4.trs(p.x, p.y, p.z, p.spin || 0, p.spin || 0, 0, s, s, s) });
     }
     roundTick(px, py, pz, scene, clock);
+    gateTick(px, py, pz, scene, dt);
+    if (!fly) tipTick(dt);
     R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, far: opts.low ? 140 : 230 });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 
@@ -650,9 +788,9 @@ export function startWorld(root, opts) {
     }
     return s[s.length - 1];
   }
-  function placeTag(el, x, y, z, me) {
+  function placeTag(el, x, y, z, me, far) {
     const p = R.project(x, y, z);
-    if (!p || p.d > 45 || (me && cam.dist < 3)) { el.hidden = true; return; }
+    if (!p || p.d > (far || 45) || (me && cam.dist < 3)) { el.hidden = true; return; }
     el.hidden = false;
     const sc = Math.max(0.6, Math.min(1.1, 9 / p.d));
     el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%) scale(${sc.toFixed(2)})`;

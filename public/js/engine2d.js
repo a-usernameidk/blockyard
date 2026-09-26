@@ -26,7 +26,7 @@ export const RUSH = {
   pad: 900, ring: 640, clip: 9,
 };
 // Adventure tuning.
-export const ADV = { g: 1800, jump: 640, term: 900, run: 230, accGround: 2600, accAir: 1500, accIce: 420, pad: 1000, ring: 640, stomp: 520 };
+export const ADV = { g: 1800, jump: 690, term: 900, run: 230, accGround: 2600, accAir: 1500, accIce: 420, pad: 1000, ring: 640, stomp: 520 };
 
 const FLYING = new Set(['jet', 'dart', 'flapper', 'glider']);
 

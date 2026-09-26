@@ -3,11 +3,11 @@ import { $, $$, el, session, show, go, addRoute, ask, toast, needLogin, pipCanva
 import { api, isOnline } from '../api.js';
 import { progress, ACHIEVEMENTS } from '../progress.js';
 import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice } from '../cosmetics.js';
-import { drawPip, drawPet } from '../art.js';
+import { drawPip, drawPet, drawGear } from '../art.js';
 import { setWallet, openAccount } from './account.js';
 
 let tab = 'shop', kind = 'hat', pick = null, raf = 0, shopInfo = null;
-const KIND_LABEL = { hat: 'Hats', color: 'Colors', trail: 'Trails', pet: 'Pets' };
+const KIND_LABEL = { hat: 'Hats', color: 'Colors', trail: 'Trails', pet: 'Pets', gear: 'Gear' };
 onLeave('closet', () => cancelAnimationFrame(raf));
 
 /* ---------------- drawing items ---------------- */
@@ -41,7 +41,9 @@ export function itemPreview(k, item, size = 64) {
   cv.width = cv.height = size * dpr; cv.style.width = cv.style.height = size + 'px';
   const c = cv.getContext('2d'); c.scale(dpr, dpr); c.scale(size / 64, size / 64);
   const eq = progress.data.equip;
-  if (k === 'pet') {
+  if (k === 'gear') {
+    c.save(); c.translate(32, 36); drawGear(c, item.id, 40); c.restore();
+  } else if (k === 'pet') {
     c.save(); c.translate(22, 42); drawPip(c, 22, eq.color, { t: 1, hat: 'none' }); c.restore();
     if (item.id !== 'none') { c.save(); c.translate(44, 44); drawPet(c, item.id, 26, 1); c.restore(); }
   } else if (k === 'trail') {

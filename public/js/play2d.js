@@ -7,6 +7,64 @@ import { FORM_INFO } from './format.js';
 import { inputBits, encodeReplay } from './replay.js';
 import { sfx, unlockAudio, startMusic, stopMusic } from './audio.js';
 import { progress } from './progress.js';
+import { store } from './api.js';
+
+/* ---------------- tips: the first time you get near something new, it says what it is ---------------- */
+const TIP2D = {
+  y: 'Jump ring! Press jump while you touch it to jump again, even in the air.',
+  r: 'Flip ring! Press jump while you touch it to flip gravity.',
+  B: 'Bounce pad! Land on it and it springs you way up.',
+  '=': "Ledge: jump up through it from below, then stand on top.",
+  C: 'Crumble block: it breaks a moment after you land on it. Keep moving!',
+  k: 'A key! Grab it, then walk into a door to open it.',
+  D: 'Locked door. Find a key first, then touch the door.',
+  P: 'Checkpoint! Touch the flag and you come back here if you fall.',
+  M: 'Moving platform: stand on it and it carries you.',
+  E: 'Walker! Jump on its head to beat it. Touching it from the side hurts.',
+  I: 'Ice! It is slippery, so start slowing down early.',
+  u: 'Upside-down portal: gravity flips and you fall UP.',
+  n: 'This portal puts gravity back to normal.',
+  '^': 'Spikes! Touch them and you go back to your last checkpoint.',
+  v: 'Ceiling spikes! Watch your head.',
+  L: "Lava! Don't touch it.",
+  G: "That's the goal. Touch it to finish the level!",
+  m: 'Tiny portal: you shrink, so you fit through small gaps.',
+  q: 'This portal makes you full size again.',
+  '<': 'Speed portal: things slow down.', '>': 'Speed portal: things speed up!', '*': 'Speed portal: very fast!',
+};
+for (const f of Object.values(FORM_INFO)) TIP2D[f.tile] = `${f.name} portal: you turn into the ${f.name}. ${f.how}`;
+let tipEl = null, tipT = 0, tipWait = 0, tipsSeen = null;
+function showTip(text) {
+  if (!tipEl) { tipEl = document.createElement('div'); tipEl.className = 'play-tip'; tipEl.setAttribute('role', 'status'); canvas.parentElement.append(tipEl); }
+  tipEl.textContent = text; tipEl.classList.add('on'); tipT = 5;
+}
+function tipTick(dt) {
+  if (tipT > 0) { tipT -= dt; if (tipT <= 0 && tipEl) tipEl.classList.remove('on'); return; }
+  if ((tipWait -= dt) > 0 || !G) return;
+  tipWait = 0.25;
+  if (!tipsSeen) tipsSeen = new Set(store.get('tips-seen', []));
+  const p = G.p, cx = Math.floor((p.x + p.w / 2) / T), cy = Math.floor((p.y + p.h / 2) / T);
+  const x0 = cx - (G.rush ? 0 : 3), x1 = cx + (G.rush ? 10 : 7);
+  for (let y = cy - 5; y <= cy + 5; y++) for (let x = x0; x <= x1; x++) {
+    if (x < 0 || y < 0 || x >= G.w || y >= G.h) continue;
+    const c = G.map[y * G.w + x];
+    if (!TIP2D[c] || tipsSeen.has(c) || (c === G.p.form && false)) continue;
+    // your first form is already explained on the Ready screen
+    if (FORM_INFO[G.p.form] && FORM_INFO[G.p.form].tile === c) { tipsSeen.add(c); continue; }
+    tipsSeen.add(c); store.set('tips-seen', [...tipsSeen]);
+    showTip(TIP2D[c]);
+    return;
+  }
+  // walkers and moving platforms aren't tiles once the level starts
+  for (const e of G.ents) {
+    const c = e.type === 'plat' ? 'M' : 'E';
+    const ex = Math.floor(e.x / T), ey = Math.floor(e.y / T);
+    if (e.alive === false || tipsSeen.has(c) || ex < x0 || ex > x1 || Math.abs(ey - cy) > 5) continue;
+    tipsSeen.add(c); store.set('tips-seen', [...tipsSeen]);
+    showTip(TIP2D[c]);
+    return;
+  }
+}
 
 const VW = 800, VH = 450;
 const $ = (s) => document.querySelector(s);
@@ -57,7 +115,7 @@ export function startPlay(level, o) {
   requestAnimationFrame(frame);
 }
 
-export function stopPlay() { running = false; releaseAll(); stopMusic(); progress.flush(); }
+export function stopPlay() { running = false; releaseAll(); stopMusic(); progress.flush(); if (tipEl) { tipEl.classList.remove('on'); tipT = 0; } }
 
 function showReady(title, text) {
   waiting = true;
@@ -88,6 +146,7 @@ function frame(ts) {
       }
     }
     if (endTimer > 0) { endTimer -= dt; if (endTimer <= 0) showEnd(); }
+    if (!waiting) tipTick(dt);
     handleEvents();
     updateEffects(dt);
     updateCamera(dt);

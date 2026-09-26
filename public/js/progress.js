@@ -36,7 +36,7 @@ export const ACHIEVEMENTS = [
 export const OBBIES = ['sunny', 'tower', 'lava', 'factory', 'sky'];
 const STAR_REWARD = 10;
 const blank = () => ({
-  v: 2, coins: 0, levels: {}, owned: FREE.slice(), equip: { color: '#ff6b35', hat: 'none', trail: 'none', pet: 'none' }, ach: {},
+  v: 2, coins: 0, levels: {}, owned: FREE.slice(), equip: { color: '#ff6b35', hat: 'none', trail: 'none', pet: 'none', gear: 'none' }, ach: {},
   stats: { wins: 0, jumps: 0, stomps: 0, portals: 0, deaths: 0, coins: 0, endlessBest: 0, dailies: 0, saved: 0, proven: 0, published: 0, bought: 0, obbies: 0, chats: 0, trades: 0, team: 0 },
   daily: {}, updated: 0,
 });

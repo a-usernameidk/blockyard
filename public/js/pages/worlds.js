@@ -53,7 +53,7 @@ export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays
       el('div', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go(`#/w/${id}/play`) }, 'Play'), el('button', { class: 'btn', type: 'button', onclick: () => go('#/w/' + id) }, 'Servers'))));
 }
 export function builtinCards() {
-  return WORLDS3D.map((w) => {
+  return WORLDS3D.filter((w) => !w.hidden).map((w) => {
     if (!builtinThumbs.has(w.id)) builtinThumbs.set(w.id, thumbOfWorld(w.get().world));
     const done = progress.level('w:' + w.id);
     return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game });
@@ -197,6 +197,9 @@ async function enterWorld(id, code) {
     onManage: (name) => manageUser(name),
     game: (() => { try { return gameConfig(w.world, w.builtin ? builtinWorld(id) : null); } catch (e) { return null; } })(),
     onPrize: () => refreshWallet(),
+    portals: w.builtin ? builtinWorld(id).portals || null : null,
+    onPortal: (to) => go(to.startsWith('#') ? to : `#/w/${to}/play`),
+    onlineCount: (wid) => online.worlds[wid] || 0,
     onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },
     room: multi ? async () => { if (first) { const f = first; first = null; return f; } return api.joinRoom(joined ? { code: joined } : { world: id }); } : null,
     soloNote: !session.user ? 'You are playing solo. Log in to see other players and chat.' : !session.rooms ? 'Multiplayer is off on this server, so you are playing solo.' : null,
@@ -225,7 +228,7 @@ async function enterWorld(id, code) {
 let firstTicket = null;
 
 addRoute(/^#\/worlds$/, () => showWorlds());
-addRoute(/^#\/w\/([A-Za-z0-9]+)\/play$/, (m) => enterWorld(m[1]));
-addRoute(/^#\/w\/([A-Za-z0-9]+)$/, (m) => showWorld(m[1]));
+addRoute(/^#\/w\/([A-Za-z0-9-]+)\/play$/, (m) => enterWorld(m[1]));
+addRoute(/^#\/w\/([A-Za-z0-9-]+)$/, (m) => showWorld(m[1]));
 addRoute(/^#\/join\/([A-Za-z0-9]+)$/, (m) => enterWorld(null, m[1]));
 export { OBBIES };

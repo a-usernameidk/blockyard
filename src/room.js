@@ -170,7 +170,7 @@ export class Room {
         break;
       }
       case 'ping': send(ws, { t: 'pong', at: msg.at }); break;
-      case 'fin': case 'tag': case 'out': this.gameMsg(me, msg); break;
+      case 'fin': case 'tag': case 'out': case 'hit': this.gameMsg(me, msg); break;
       case 'hb': this.tick(); break;
     }
   }
@@ -277,7 +277,7 @@ export class Room {
       R.phase = 'play'; R.start = now; R.ends = now + GAMES[R.mode].secs * 1000;
       R.ids = new Set(here.map((a) => a.id)); R.names = Object.fromEntries(here.map((a) => [a.id, { name: a.name, uid: a.uid }]));
       R.alive = new Set(R.ids); R.fin = []; R.scores = new Map(); R.seen = new Map(); R.startCount = R.ids.size;
-      R.it = new Set();
+      R.it = new Set(); R.hits = new Map(); R.lastShot = new Map();
       if (R.mode === 'tag') { const list = [...R.ids]; const k = n >= 6 ? 2 : 1; while (R.it.size < k) R.it.add(list[Math.floor(Math.random() * list.length)]); R.firstIt = new Set(R.it); }
       R.lava = R.mode === 'lava' ? lavaLevel(this.game.areas.lava, 0) : undefined;
       this.sendRound();
@@ -327,6 +327,18 @@ export class Room {
       const a = this.posOf(me.id), b = this.posOf(msg.id);
       if (a && b && Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < ROUND.tagReach + 1.2) { R.it.add(msg.id); this.sendRound({ ev: { tag: msg.id, by: me.id } }); }
     }
+    else if (msg.t === 'hit' && R.mode === 'paint' && msg.id !== me.id && R.ids.has(msg.id)) {
+      const now = Date.now();
+      if (now - (R.lastShot.get(me.id) || 0) < ROUND.shotEvery - 60) return;
+      R.lastShot.set(me.id, now);
+      const a = this.posOf(me.id), b = this.posOf(msg.id);
+      if (!a || !b || Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > ROUND.shotRange + 2) return;
+      const n = (R.hits.get(msg.id) || 0) + 1;
+      if (n >= ROUND.hitsToSplat) {
+        R.hits.set(msg.id, 0); R.scores.set(me.id, (R.scores.get(me.id) || 0) + 1);
+        this.sendRound({ ev: { splat: msg.id, by: me.id } });
+      } else { R.hits.set(msg.id, n); this.broadcast({ t: 'paint', id: msg.id, by: me.id, n }); }
+    }
     this.tick();
   }
   posOf(id) {
@@ -343,7 +355,8 @@ export class Room {
     else if (mode === 'tag') {
       const free = [...R.ids].filter((id) => !R.it.has(id));
       winners = (free.length ? free : [...R.firstIt].filter((id) => R.ids.has(id))).map((id) => [id, 1, PRIZE.win]);
-    } else if (mode === 'koth') winners = [...R.scores].filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id], i) => [id, i + 1, i ? PRIZE.second : PRIZE.first]);
+    } else if (mode === 'paint') winners = [...R.scores].filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id], i) => [id, i + 1, i ? PRIZE.second : PRIZE.first]);
+    else if (mode === 'koth') winners = [...R.scores].filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id], i) => [id, i + 1, i ? PRIZE.second : PRIZE.first]);
     else if (mode === 'lava') winners = [...R.alive].filter((id) => R.ids.has(id)).map((id, _, all) => [id, 1, all.length === 1 ? PRIZE.first : PRIZE.win]);
     if (count < ROUND.minPlayers) winners = winners.map(([id, pl]) => [id, pl, 0]);
     R.phase = 'results'; R.ends = Date.now() + ROUND.results * 1000;

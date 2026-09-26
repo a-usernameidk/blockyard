@@ -396,3 +396,25 @@ export function drawPet(ctx, id, s, t = 0) {
   }
   ctx.restore();
 }
+
+// Gear icons for the closet.
+export function drawGear(ctx, id, s) {
+  const k = s / 40;
+  ctx.save(); ctx.scale(k, k); ctx.lineWidth = 2.4; ctx.strokeStyle = INK; ctx.lineJoin = 'round';
+  const fill = (c) => { ctx.fillStyle = c; ctx.fill(); ctx.stroke(); };
+  if (id === 'speed' || id === 'gravity') {
+    const c = id === 'speed' ? '#3a86ff' : '#b06cff';
+    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.ellipse(0, -8 + i * 6, 12, 4, 0, 0, Math.PI * 2); ctx.strokeStyle = c; ctx.lineWidth = 4; ctx.stroke(); }
+    ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.rect(-3, -18, 6, 34); fill('#8a90a8');
+  } else if (id === 'boots') {
+    for (const d of [-1, 1]) { ctx.beginPath(); ctx.moveTo(d * 4, -14); ctx.lineTo(d * 4 + d * 8, -14); ctx.lineTo(d * 4 + d * 8, 4); ctx.lineTo(d * 4 + d * 16, 4); ctx.lineTo(d * 4 + d * 16, 12); ctx.lineTo(d * 4, 12); ctx.closePath(); fill('#e63946'); }
+    ctx.fillStyle = '#fff'; ctx.fillRect(-14, 6, 8, 3); ctx.fillRect(6, 6, 8, 3);
+    ctx.fillStyle = '#ffd23f'; for (const d of [-1, 1]) { ctx.beginPath(); ctx.moveTo(d * 12, -12); ctx.lineTo(d * 20, -18); ctx.lineTo(d * 16, -8); ctx.closePath(); ctx.fill(); }
+  } else if (id === 'jetpack') {
+    for (const d of [-1, 1]) { ctx.beginPath(); ctx.rect(d * 8 - 6, -16, 12, 26); fill('#a3abc2'); ctx.beginPath(); ctx.moveTo(d * 8 - 5, 10); ctx.lineTo(d * 8, 20); ctx.lineTo(d * 8 + 5, 10); ctx.closePath(); fill('#ff9f1c'); }
+    ctx.beginPath(); ctx.rect(-4, -12, 8, 14); fill('#e63946');
+  } else {
+    ctx.fillStyle = 'rgba(29,35,64,.25)'; ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
