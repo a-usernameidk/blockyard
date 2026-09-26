@@ -262,6 +262,8 @@ export function startWorld(root, opts) {
     while (log.children.length > 60) log.firstChild.remove();
     log.scrollTop = log.scrollHeight;
     li.dataset.at = String(performance.now());
+    // admin shouts and announcements go away after a minute
+    if (sys === 'big') setTimeout(() => li.remove(), 60000);
   }
   function addPlayer(p) {
     if (others.has(p.id)) return;
