@@ -320,3 +320,44 @@ addRoute(/^#\/closet$/, () => showCloset('shop'));
 addRoute(/^#\/shop$/, () => showCloset('shop'));
 addRoute(/^#\/closet\/(mine|trades|badges)$/, (m) => showCloset(m[1]));
 addRoute(/^#\/closet\/trade\/([A-Za-z0-9_]{0,16})$/, (m) => showCloset('trades', m[1] || ''));
+
+/* ---------------- the shop keeper in 3D worlds ---------------- */
+// Fills `host` (an overlay inside the 3D stage) with a small shop. looked(equip) is called after you wear or buy something.
+export async function shopPanel(host, { close, looked }) {
+  let k = 'hat', sel = null;
+  const coins = el('span', { class: 'tag tag-pay' });
+  const grid = el('div', { class: 'items' });
+  const cap = el('div', { class: 'shop-cap' });
+  const chips = el('div', { class: 'chips' });
+  const panel = el('div', { class: 'panel shop-panel', role: 'dialog', 'aria-label': 'Shop' },
+    el('div', { class: 'shop-head' }, el('h2', {}, 'Shop keeper'), coins, el('button', { class: 'btn', type: 'button', onclick: close }, 'Close')),
+    el('p', { class: 'small' }, '"Welcome! Pick something to try it on. Buy it and you wear it right away."'),
+    chips, grid, cap);
+  host.replaceChildren(panel);
+  if (!shopInfo && (await isOnline())) { try { shopInfo = await api.shop(); } catch (e) { /* no deals */ } }
+  const draw = () => {
+    const w = progress.wallet;
+    coins.textContent = w ? `${w.coins} coins` : 'Guest';
+    chips.replaceChildren(...KINDS.map((x) => el('button', { class: 'chip', type: 'button', 'aria-pressed': String(x === k), onclick: () => { k = x; sel = null; draw(); } }, KIND_LABEL[x])));
+    grid.replaceChildren(...SHOP[k].map((item) => {
+      const key = itemKey(k, item.id), owned = progress.owns(k, item.id), on = progress.data.equip[k] === item.id;
+      return el('button', { class: `item${on ? ' on' : ''}${sel && sel.key === key ? ' pick' : ''}${item.stock ? ' limited' : ''}`, type: 'button', onclick: () => { sel = { key, item }; draw(); } },
+        itemPreview(k, item, 52), el('span', { class: 'item-name' }, item.name), on ? el('span', { class: 'item-price' }, 'Wearing') : owned ? el('span', { class: 'item-price' }, 'Owned') : priceTag(key, item));
+    }));
+    cap.replaceChildren();
+    if (!sel) { cap.append(el('p', { class: 'small' }, 'Pick something.')); return; }
+    const { key, item } = sel, owned = progress.owns(k, item.id), wearing = progress.data.equip[k] === item.id;
+    const btns = [];
+    if (owned) btns.push(el('button', { class: 'btn btn-grass', type: 'button', disabled: wearing, onclick: async () => { await wear(k, item.id); looked({ ...progress.data.equip }); draw(); } }, wearing ? 'Wearing it' : 'Wear it'));
+    else if (!w) btns.push(el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { close(); openAccount(); } }, 'Log in to buy'));
+    else if (item.need) btns.push(el('button', { class: 'btn', type: 'button', disabled: true }, item.hint));
+    else {
+      const price = dealPrice(key, item), left = item.stock && shopInfo ? shopInfo.stock[key] : null;
+      const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => { b.disabled = true; await buy(key, item); looked({ ...progress.data.equip }); draw(); } }, `Buy for ${price} coins`);
+      if (left === 0) { b.disabled = true; b.textContent = 'Sold out'; } else if (w.coins < price) { b.disabled = true; b.textContent = `Need ${price - w.coins} more coins`; }
+      btns.push(b);
+    }
+    cap.append(el('b', {}, item.name), el('div', { class: 'row' }, ...btns));
+  };
+  draw();
+}

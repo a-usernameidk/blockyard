@@ -9,7 +9,7 @@ import { runReplay } from '../public/js/replay.js';
 import { runReplay3d } from '../public/js/physics3d.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
 import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES } from '../public/js/world.js';
-import { GAMES, ROUND, PRIZE, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
+import { GAMES, ROUND, PRIZE, WEAPONS, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
 import { coinStmts, questBumps } from './econ.js';
 
 const MAX_PLAYERS = 16;
@@ -182,6 +182,19 @@ export class Room {
       case 'ping': send(ws, { t: 'pong', at: msg.at }); break;
       case 'fin': case 'tag': case 'out': case 'hit': this.gameMsg(me, msg); break;
       case 'hb': this.tick(); break;
+      case 'look': { // you bought or changed clothes: show everyone (read from your account, so nobody can fake it)
+        const now = Date.now();
+        if (me.kind !== 'play' || now - (lim.look || 0) < 2000 || !this.env.DB) return;
+        lim.look = now;
+        try {
+          const u = await this.env.DB.prepare('SELECT look FROM users WHERE id = ?').bind(me.uid).first();
+          const l = JSON.parse((u && u.look) || '{}'), str = (v) => String(v || 'none').slice(0, 20);
+          me.look = { color: /^#[0-9a-f]{6}$/i.test(l.color) ? l.color : me.look.color, hat: str(l.hat), trail: str(l.trail), pet: str(l.pet), gear: str(l.gear) };
+          ws.serializeAttachment(me);
+          this.broadcast({ t: 'look', id: me.id, look: me.look });
+        } catch (e) { /* keep the old look */ }
+        break;
+      }
     }
   }
 
@@ -287,7 +300,7 @@ export class Room {
       R.phase = 'play'; R.start = now; R.ends = now + GAMES[R.mode].secs * 1000;
       R.ids = new Set(here.map((a) => a.id)); R.names = Object.fromEntries(here.map((a) => [a.id, { name: a.name, uid: a.uid }]));
       R.alive = new Set(R.ids); R.fin = []; R.scores = new Map(); R.seen = new Map(); R.startCount = R.ids.size;
-      R.it = new Set(); R.hits = new Map(); R.lastShot = new Map();
+      R.it = new Set(); R.hits = new Map(); R.lastShot = new Map(); R.safe = new Map();
       if (R.mode === 'tag') { const list = [...R.ids]; const k = n >= 6 ? 2 : 1; while (R.it.size < k) R.it.add(list[Math.floor(Math.random() * list.length)]); R.firstIt = new Set(R.it); }
       R.lava = R.mode === 'lava' ? lavaLevel(this.game.areas.lava, 0) : undefined;
       this.sendRound();
@@ -338,16 +351,20 @@ export class Room {
       if (a && b && Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < ROUND.tagReach + 1.2) { R.it.add(msg.id); this.sendRound({ ev: { tag: msg.id, by: me.id } }); }
     }
     else if (msg.t === 'hit' && R.mode === 'paint' && msg.id !== me.id && R.ids.has(msg.id)) {
-      const now = Date.now();
-      if (now - (R.lastShot.get(me.id) || 0) < ROUND.shotEvery - 60) return;
-      R.lastShot.set(me.id, now);
+      // the blaster decides how often you can hit, how far, and how much paint
+      const wid = Object.hasOwn(WEAPONS, msg.w) ? msg.w : 'blaster', wp = WEAPONS[wid], now = Date.now();
+      const last = R.lastShot.get(me.id) || { at: 0, w: wid };
+      // reload time is the blaster you last hit with; switching blasters takes a moment too
+      if (now - last.at < WEAPONS[last.w].every - 60 || (last.w !== wid && now - last.at < ROUND.swapMs)) return;
+      if (now - (R.safe.get(msg.id) || 0) < ROUND.safeMs) return; // just splatted: a moment to get away
       const a = this.posOf(me.id), b = this.posOf(msg.id);
-      if (!a || !b || Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > ROUND.shotRange + 2) return;
-      const n = (R.hits.get(msg.id) || 0) + 1;
-      if (n >= ROUND.hitsToSplat) {
-        R.hits.set(msg.id, 0); R.scores.set(me.id, (R.scores.get(me.id) || 0) + 1);
-        this.sendRound({ ev: { splat: msg.id, by: me.id } });
-      } else { R.hits.set(msg.id, n); this.broadcast({ t: 'paint', id: msg.id, by: me.id, n }); }
+      if (!a || !b || Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > wp.range + 2) return;
+      R.lastShot.set(me.id, { at: now, w: wid });
+      const n = (R.hits.get(msg.id) || 0) + wp.dmg;
+      if (n >= ROUND.hp) {
+        R.hits.set(msg.id, 0); R.safe.set(msg.id, now); R.scores.set(me.id, (R.scores.get(me.id) || 0) + 1);
+        this.sendRound({ ev: { splat: msg.id, by: me.id, w: wid } });
+      } else { R.hits.set(msg.id, n); this.broadcast({ t: 'paint', id: msg.id, by: me.id, n, w: wid }); }
     }
     this.tick();
   }

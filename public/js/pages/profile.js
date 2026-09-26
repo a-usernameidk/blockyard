@@ -46,7 +46,7 @@ async function showProfile(name) {
       el('div', {},
         el('h1', {}, u.name, u.role === 'builder' ? el('span', { class: 'role-badge' }, 'Builder') : null, u.admin ? el('span', { class: 'role-badge admin' }, 'Admin') : null),
         el('p', { class: 'lede' }, `Playing since ${new Date(u.since).toLocaleDateString()}.`),
-        el('div', { class: 'card-meta' }, el('span', { class: 'tag' }, plural(u.stars, 'star')), el('span', { class: 'tag' }, `Closet worth ${u.value} coins`), el('span', { class: 'tag' }, plural(u.games.length, 'published game'))),
+        el('div', { class: 'card-meta' }, u.rstars ? el('span', { class: 'tag tag-diff', title: 'Stars from beating rated levels and obbies' }, `${u.rstars}★ difficulty stars`) : null, el('span', { class: 'tag' }, plural(u.stars, 'level star')), el('span', { class: 'tag' }, `Closet worth ${u.value} coins`), el('span', { class: 'tag' }, plural(u.games.length, 'published game'))),
         u.playing ? el('p', { class: 'playing' }, el('span', { class: 'live-dot' }), `Playing ${u.playing.name || 'a player world'} right now`) : null,
         el('div', { class: 'row' },
           !me ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => (session.user ? go('#/closet/trade/' + u.name) : needLogin('Trading needs an account.')) }, 'Trade with them') : el('button', { class: 'btn', type: 'button', 'data-go': '#/closet' }, 'Change my look'),

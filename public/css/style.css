@@ -614,9 +614,32 @@ body[data-view="w3"] .announce, body[data-view="build"] .announce, body[data-vie
 .play-tip.on { opacity: 1; transform: translate(-50%, 0); }
 .w3-toast { max-width: min(560px, calc(100% - 40px)); }
 .w3-tip { top: auto; bottom: 120px; }
-.w3-tag.gate .w3-name { background: var(--sun); color: var(--ink); font-size: 15px; padding: 2px 10px; border: 2px solid var(--ink); }
-.w3-tag.gate .gate-n { display: block; text-align: center; font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 0 var(--ink), 1px 0 0 var(--ink), -1px 0 0 var(--ink), 0 -1px 0 var(--ink); }
-.w3-tag.gate .gate-n:empty { display: none; }
+.w3-tag.shopkeep .w3-name { background: var(--sun); color: var(--ink); border: 2px solid var(--ink); }
+.w3-tag.shopkeep .w3-bubble { font-size: 11px; }
+.w3-reload { position: absolute; left: -9px; right: -9px; bottom: -12px; height: 4px; background: var(--grass); border-radius: 3px; box-shadow: 0 0 0 2px var(--ink); transform-origin: left; }
+.w3-cross .w3-reload { display: none; }
+.w3-cross.paint .w3-reload { display: block; }
+.w3-weapons { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%); display: flex; gap: 6px; z-index: 3; }
+.w3-weapons .btn { padding: 4px 10px; font-size: 13px; box-shadow: 0 3px 0 var(--line); }
+.w3-weapons .btn b { opacity: .6; }
+.w3-weapons .btn.on { background: var(--pink); color: #fff; }
+@media (max-width: 720px) { .w3-weapons { bottom: 150px; } .w3-weapons .btn b { display: none; } }
+.w3-shopbtn { position: absolute; left: 50%; bottom: 100px; transform: translateX(-50%); z-index: 4; font-size: 17px; }
+.w3-shop { z-index: 8; }
+.shop-panel { width: min(640px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; }
+.shop-head { display: flex; align-items: center; gap: 10px; }
+.shop-head h2 { margin: 0; flex: 1; }
+.shop-panel .items { max-height: 300px; overflow: auto; }
+.shop-cap { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.w3-stage.locked canvas { cursor: none; }
+/* difficulty stars (Geometry Dash style) */
+.tag-diff { background: #1d2340; color: #ffd23f; border-color: #1d2340; font-weight: 800; }
+.tag-diff.diff-easy { background: #2f9e57; color: #fff; }
+.tag-diff.diff-normal { background: #3a86ff; color: #fff; }
+.tag-diff.diff-hard { background: #ff9f1c; color: #1d2340; }
+.tag-diff.diff-harder { background: #ff5a1f; color: #fff; }
+.tag-diff.diff-insane { background: #b06cff; color: #fff; }
+.tag-diff.diff-demon { background: #8a1c2b; color: #fff; }
 /* ---------- mailbox and roles ---------- */
 .mail-btn { position: relative; }
 .mail-btn .count { position: absolute; top: -8px; right: -8px; min-width: 20px; font-size: 12px; line-height: 20px; border-radius: 999px; background: var(--pink); color: #fff; text-align: center; font-weight: 800; border: 2px solid var(--line); padding: 0 4px; }

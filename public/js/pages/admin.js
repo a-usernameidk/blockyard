@@ -8,6 +8,7 @@ import { showAnnounce } from './worlds.js';
 import { normalizeLevel } from '../format.js';
 import { thumb } from './play.js';
 import { drawWorldThumb } from '../thumb3d.js';
+import { diffName } from '../stars.js';
 
 let tab = 'chat';
 async function showAdmin() {
@@ -61,8 +62,12 @@ async function loadGames() {
       if (![0, 10, 25, 50, 100, 200].includes(g.reward)) reward.append(el('option', { value: String(g.reward) }, `Pays ${g.reward} coins`));
       reward.value = String(g.reward || 0);
       reward.addEventListener('change', async () => { try { await api.admin('POST', '/games/' + g.id, { action: 'reward', amount: Number(reward.value) }); toast(Number(reward.value) ? `"${g.name}" pays ${reward.value} coins now (once per player).` : `"${g.name}" doesn't pay coins anymore.`); } catch (e) { toast(e.message); } });
+      // difficulty rating, Geometry Dash style
+      const rate = el('select', { 'aria-label': 'Difficulty stars' }, el('option', { value: '0' }, 'Unrated'), ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => el('option', { value: String(n) }, `${n}★ ${diffName(n)}`)));
+      rate.value = String(g.stars || 0);
+      rate.addEventListener('change', async () => { try { await api.admin('POST', '/games/' + g.id, { action: 'stars', amount: Number(rate.value) }); toast(Number(rate.value) ? `"${g.name}" is rated ${rate.value}★ ${diffName(Number(rate.value))}.` : `"${g.name}" is unrated now.`); } catch (e) { toast(e.message); } });
       box.append(el('div', { class: 'admin-row' + (g.hidden ? ' hidden-game' : '') }, pic,
-        el('div', {}, el('h3', {}, g.name), el('p', { class: 'small' }, `${g.kind === '3d' ? '3D world' : '2D level'} by ${g.creator}. ${plural(g.plays, 'play')}, ${plural(g.likes, 'like')}. ${g.visibility !== 'public' ? g.visibility + '. ' : ''}${g.hidden ? 'Hidden.' : 'Visible.'}`), el('p', { class: 'small' }, g.reports ? `Reports: ${reasons}` : 'No reports.'), reward),
+        el('div', {}, el('h3', {}, g.name), el('p', { class: 'small' }, `${g.kind === '3d' ? '3D world' : '2D level'} by ${g.creator}. ${plural(g.plays, 'play')}, ${plural(g.likes, 'like')}. ${g.visibility !== 'public' ? g.visibility + '. ' : ''}${g.hidden ? 'Hidden.' : 'Visible.'}`), el('p', { class: 'small' }, g.reports ? `Reports: ${reasons}` : 'No reports.'), el('div', { class: 'row' }, reward, rate)),
         el('div', { class: 'row' }, el('a', { class: 'btn', href: g.kind === '3d' ? '#/w/' + g.id : '#/p/' + g.id }, 'Play'), g.hidden ? act('Show', 'btn-grass', 'show') : act('Hide', '', 'hide'), g.reports ? act('Clear reports', '', 'clear') : null, act('Delete', 'btn-danger', 'delete'),
           el('button', { class: 'btn btn-danger', type: 'button', onclick: () => adminUser(g.creator, 'ban') }, 'Ban creator'))));
     }
@@ -189,7 +194,7 @@ function describe(l) {
   if (p === '/announce') return d.text ? `announced "${d.text}"` : 'removed the announcement';
   if (p === '/stock') return `set ${item} stock to ${d.left}`;
   if (p === '/deals') return d.sale === null ? 'ended the sale' : d.sale ? `started a ${d.sale.off}% sale for ${d.sale.hours} hours` : d.pin ? (d.pin.items && d.pin.items.length ? `picked deals for ${d.pin.date}` : `let ${d.pin.date} pick its own deals`) : `changed deals (${d.off}% off, ${d.count} a day)`;
-  if (p.startsWith('/games/')) return d.action === 'reward' ? `made game ${p.slice(7)} pay ${d.amount} coins` : `${d.action} game ${p.slice(7)}`;
+  if (p.startsWith('/games/')) return d.action === 'reward' ? `made game ${p.slice(7)} pay ${d.amount} coins` : d.action === 'stars' ? `rated game ${p.slice(7)} ${d.amount}★` : `${d.action} game ${p.slice(7)}`;
   if (p.startsWith('/chat/')) return `${d.action} chat report`;
   return `${p} ${JSON.stringify(d)}`;
 }

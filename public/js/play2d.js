@@ -432,7 +432,7 @@ function showEnd() {
     stats = `Cleared on attempt ${G.attempt}.`;
     if (r && r.earned) reward.textContent = `+${r.earned} coins`;
   } else {
-    const r = opts.onWin ? opts.onWin({ time: G.runTime, deaths: G.runDeaths, coins: G.coins, totalCoins: G.totalCoins, replay, rush: G.rush }) : null;
+    const r = opts.onWin ? opts.onWin({ won: true, progress: 1, time: G.runTime, deaths: G.runDeaths, coins: G.coins, totalCoins: G.totalCoins, replay, rush: G.rush }) : null;
     stats = G.rush
       ? `Beaten on attempt ${G.attempt}. Coins: ${G.coins} of ${G.totalCoins}.`
       : `Time: ${G.runTime.toFixed(1)} seconds. Coins: ${G.coins} of ${G.totalCoins}. Falls: ${G.deaths}.`;

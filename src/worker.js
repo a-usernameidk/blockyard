@@ -85,6 +85,7 @@ const COLUMNS = [
   'ALTER TABLE games ADD COLUMN reward INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE games ADD COLUMN project_id TEXT',
   'ALTER TABLE games ADD COLUMN thumb TEXT',
+  'ALTER TABLE games ADD COLUMN stars INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE users ADD COLUMN look TEXT NOT NULL DEFAULT '{}'",
   'ALTER TABLE users ADD COLUMN econ INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT ''",
@@ -97,7 +98,7 @@ function ensureSchema(db) {
     ready = (async () => {
       await db.batch(SCHEMA.map((s) => db.prepare(s)));
       for (const c of COLUMNS) { try { await db.prepare(c).run(); } catch (e) { /* already there */ } }
-      for (const [c, once] of ECON_COLUMNS) { let added = false; try { await db.prepare(c).run(); added = true; } catch (e) { /* already there */ } if (added) await db.prepare(once).run(); }
+      for (const [c, once] of ECON_COLUMNS) { let added = false; try { await db.prepare(c).run(); added = true; } catch (e) { /* already there */ } if (added) for (const q of [].concat(once)) await db.prepare(q).run(); }
       await db.batch([
         db.prepare('CREATE INDEX IF NOT EXISTS games_user ON games (user_id, created_at)'),
         db.prepare('CREATE INDEX IF NOT EXISTS games_list ON games (kind, visibility, hidden, created_at DESC)'),
@@ -555,7 +556,7 @@ async function checkFields(ctx, input) {
 function row(g) {
   return {
     id: g.id, kind: g.kind || '2d', name: g.name, creator: g.creator, descr: g.descr, style: g.style, theme: g.theme, plays: g.plays, likes: g.likes,
-    created_at: g.created_at, visibility: g.visibility || 'public', reward: g.reward || 0, level: (g.kind || '2d') === '2d' ? JSON.parse(g.data) : undefined,
+    created_at: g.created_at, visibility: g.visibility || 'public', reward: g.reward || 0, stars: g.stars || 0, level: (g.kind || '2d') === '2d' ? JSON.parse(g.data) : undefined,
     world: g.kind === '3d' && g.withWorld ? JSON.parse(g.data) : undefined, blocks: g.kind === '3d' ? g.w : undefined,
     coins: g.kind === '3d' ? g.h : undefined, thumb: g.kind === '3d' ? g.thumb || '' : undefined,
   };
@@ -563,7 +564,7 @@ function row(g) {
 async function listGames(ctx) {
   const { db, url } = ctx;
   const kind = url.searchParams.get('kind') === '3d' ? '3d' : '2d';
-  const sort = { new: 'created_at DESC', top: 'plays DESC, created_at DESC', liked: 'likes DESC, created_at DESC', reward: 'reward DESC, plays DESC' }[url.searchParams.get('sort')] || 'created_at DESC';
+  const sort = { new: 'created_at DESC', top: 'plays DESC, created_at DESC', liked: 'likes DESC, created_at DESC', reward: 'reward DESC, plays DESC', rated: 'stars DESC, plays DESC' }[url.searchParams.get('sort')] || 'created_at DESC';
   const style = url.searchParams.get('style');
   const q = (url.searchParams.get('q') || '').trim().slice(0, 40);
   const creator = (url.searchParams.get('creator') || '').trim().slice(0, 20);
@@ -571,12 +572,13 @@ async function listGames(ctx) {
   const where = ['hidden = 0', "visibility = 'public'", 'kind = ?'], args = [kind];
   if (['rush', 'adventure', 'obby', 'hangout'].includes(style)) { where.push('style = ?'); args.push(style); }
   if (url.searchParams.get('rewarding') === '1') where.push('reward > 0');
+  if (url.searchParams.get('sort') === 'rated') where.push('stars > 0');
   if (creator) { where.push('creator = ? COLLATE NOCASE'); args.push(creator); }
   if (q) {
     const like = '%' + q.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
     where.push("(name LIKE ? ESCAPE '\\' OR creator LIKE ? ESCAPE '\\')"); args.push(like, like);
   }
-  const cols = kind === '3d' ? 'id, kind, name, creator, descr, style, theme, plays, likes, created_at, visibility, reward, w, h, thumb' : '*';
+  const cols = kind === '3d' ? 'id, kind, name, creator, descr, style, theme, plays, likes, created_at, visibility, reward, stars, w, h, thumb' : '*';
   const { results } = await db.prepare(`SELECT ${cols} FROM games WHERE ${where.join(' AND ')} ORDER BY ${sort} LIMIT ? OFFSET ?`).bind(...args, PAGE + 1, page * PAGE).all();
   return json({ games: results.slice(0, PAGE).map(row), more: results.length > PAGE });
 }
@@ -646,10 +648,11 @@ async function updateGame(ctx, id, input) {
   }
   const f = await checkFields(ctx, { ...input, kind: g.kind || '2d' });
   // a changed game has to be checked by an admin again before it pays coins
-  const old = await ctx.db.prepare('SELECT data, reward FROM games WHERE id = ?').bind(id).first();
-  const reward = old && old.data === JSON.stringify(f.data) ? old.reward : 0;
-  await ctx.db.prepare('UPDATE games SET name = ?, descr = ?, style = ?, theme = ?, w = ?, h = ?, data = ?, visibility = ?, thumb = ?, reward = ?, updated_at = ? WHERE id = ?')
-    .bind(f.name, f.desc, f.style, f.theme, f.w, f.h, JSON.stringify(f.data), f.visibility, f.thumb || null, reward, Date.now(), id).run();
+  const old = await ctx.db.prepare('SELECT data, reward, stars FROM games WHERE id = ?').bind(id).first();
+  // changing the level itself resets its pay and its rating (an admin checks it again)
+  const same = old && old.data === JSON.stringify(f.data), reward = same ? old.reward : 0, stars = same ? old.stars || 0 : 0;
+  await ctx.db.prepare('UPDATE games SET name = ?, descr = ?, style = ?, theme = ?, w = ?, h = ?, data = ?, visibility = ?, thumb = ?, reward = ?, stars = ?, updated_at = ? WHERE id = ?')
+    .bind(f.name, f.desc, f.style, f.theme, f.w, f.h, JSON.stringify(f.data), f.visibility, f.thumb || null, reward, stars, Date.now(), id).run();
   return json({ ok: true, id });
 }
 async function deleteGame(ctx, id) {
@@ -984,6 +987,10 @@ async function admin(ctx, path, method) {
       const amount = Math.floor(Number(input.amount) || 0);
       if (amount < 0 || amount > 1000) fail(400, 'Rewards can be 0 to 1000 coins.');
       await db.prepare('UPDATE games SET reward = ? WHERE id = ?').bind(amount, m[1]).run();
+    } else if (action === 'stars') { // difficulty rating, 0 = unrated
+      const n = Math.floor(Number(input.amount) || 0);
+      if (n < 0 || n > 10) fail(400, 'Ratings are 0 (unrated) to 10 stars.');
+      await db.prepare('UPDATE games SET stars = ? WHERE id = ?').bind(n, m[1]).run();
     } else fail(400, 'Unknown action.');
     return json({ ok: true });
   }

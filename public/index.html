@@ -41,7 +41,7 @@
       <p class="tagline">Play it. Build it with friends. Hang out in 3D.</p>
       <div class="row">
         <button class="btn btn-big btn-grass" data-go="#/w/plaza">Enter the Plaza</button>
-        <button class="btn btn-big btn-pink" data-go="#/w/arena/play">Minigames</button>
+        <button class="btn btn-big btn-pink" data-go="#/worlds/games">Minigames</button>
         <button class="btn btn-big btn-sun" id="hero-play">Play levels</button>
         <button class="btn btn-big" data-go="#/create">Create</button>
       </div>
@@ -93,6 +93,7 @@
         <button class="chip" data-sort="top" aria-pressed="false">Most played</button>
         <button class="chip" data-sort="liked" aria-pressed="false">Most liked</button>
         <button class="chip" data-sort="reward" aria-pressed="false">Pays coins</button>
+        <button class="chip" data-sort="rated" aria-pressed="false">Rated ★</button>
       </div>
       <select id="disc-style" aria-label="Style">
         <option value="">All styles</option>
@@ -216,13 +217,19 @@
     <form class="join-code" id="join-form"><label for="join-code">Got a server code?</label><div class="row"><input id="join-code" placeholder="Server code" maxlength="12" autocomplete="off"><button class="btn btn-sun" type="submit">Join</button></div></form>
   </div>
   <div id="friends-online" hidden></div>
-  <h2>Blockyard worlds</h2>
+  <h2>Hangouts</h2>
+  <div class="grid" id="worlds-hangout"></div>
+  <h2 id="minigames">Minigames</h2>
+  <p class="small">Each minigame has its own servers. Wait in the lobby (the shop keeper is there too) and the next round starts when 2 players are in.</p>
+  <div class="grid" id="worlds-games"></div>
+  <h2>Obbies</h2>
   <div class="grid" id="worlds-builtin"></div>
   <div class="section-head"><h2>Player worlds</h2>
     <div class="chips" role="group" aria-label="Sort">
       <button class="chip" data-wsort="top" aria-pressed="true">Popular</button>
       <button class="chip" data-wsort="new" aria-pressed="false">Newest</button>
       <button class="chip" data-wsort="reward" aria-pressed="false">Pays coins</button>
+      <button class="chip" data-wsort="rated" aria-pressed="false">Rated ★</button>
     </div>
   </div>
   <div class="grid" id="worlds-grid"></div>

@@ -9,7 +9,9 @@ import { setWallet, friendsNow, checkFriends, openFriends, refreshWallet } from 
 import { manageUser } from './admin.js';
 import { levelOf } from '../cosmetics.js';
 import { gameConfig, GAMES } from '../games.js';
-import { openReport } from './play.js';
+import { openReport, diffTag } from './play.js';
+import { starsFor } from '../stars.js';
+import { shopPanel } from './closet.js';
 
 let game = null;
 onLeave('w3', () => { if (game) { game.stop(); game = null; } $('#w3-root').replaceChildren(); });
@@ -37,12 +39,13 @@ $('#announce-x').addEventListener('click', () => { store.set('announce-hidden', 
 
 /* ---------------- cards ---------------- */
 const builtinThumbs = new Map();
-export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, done, game }) {
+export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, done, game, stars }) {
   const cv = el('canvas', { class: 'thumb3d', 'aria-hidden': 'true' });
   requestAnimationFrame(() => drawWorldThumb(cv, thumb, sky));
   const n = online.worlds[id] || 0;
   const meta = el('div', { class: 'card-meta' },
-    el('span', { class: 'tag tag-3d' + (game ? ' tag-game' : '') }, game === 'mix' ? 'Minigames' : game ? GAMES[game].name : mode === 'hangout' ? 'Hangout' : 'Obby'),
+    diffTag(stars),
+    el('span', { class: 'tag tag-3d' + (game ? ' tag-game' : '') }, game ? GAMES[game].name : mode === 'hangout' ? 'Hangout' : 'Obby'),
     n ? el('span', { class: 'tag tag-live' }, `${n} playing`) : null,
     reward ? el('span', { class: 'tag tag-pay' }, done ? 'Paid out' : `Pays ${reward} coins`) : null,
     plays != null ? el('span', { class: 'tag' }, plural(plays, 'visit')) : null,
@@ -52,21 +55,25 @@ export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays
       el('div', {}, el('h3', {}, name), by ? el('p', { class: 'by-line' }, 'by ', el('a', { class: 'linkish', href: '#/u/' + encodeURIComponent(by) }, by)) : null, blurb ? el('p', {}, blurb) : null, meta),
       el('div', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go(`#/w/${id}/play`) }, 'Play'), el('button', { class: 'btn', type: 'button', onclick: () => go('#/w/' + id) }, 'Servers'))));
 }
-export function builtinCards() {
-  return WORLDS3D.filter((w) => !w.hidden).map((w) => {
+export function builtinCards(only) {
+  const kind = (w) => (w.game ? 'games' : w.mode === 'hangout' ? 'hangout' : 'obby');
+  return WORLDS3D.filter((w) => !w.hidden && (!only || kind(w) === only)).map((w) => {
     if (!builtinThumbs.has(w.id)) builtinThumbs.set(w.id, thumbOfWorld(w.get().world));
     const done = progress.level('w:' + w.id);
-    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game });
+    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, stars: starsFor('w:' + w.id) });
   });
 }
-export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, reward: g.reward, thumb: g.thumb, plays: g.plays, likes: g.likes });
+export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, reward: g.reward, thumb: g.thumb, plays: g.plays, likes: g.likes, stars: g.stars });
 
 /* ---------------- the worlds page ---------------- */
 const wl = { sort: 'top', page: 0, busy: false };
-async function showWorlds() {
+async function showWorlds(jump) {
   show('worlds');
   await loadOnline(true);
-  $('#worlds-builtin').replaceChildren(...builtinCards());
+  $('#worlds-hangout').replaceChildren(...builtinCards('hangout'));
+  $('#worlds-games').replaceChildren(...builtinCards('games'));
+  $('#worlds-builtin').replaceChildren(...builtinCards('obby'));
+  if (jump) requestAnimationFrame(() => $('#minigames').scrollIntoView({ block: 'start' }));
   loadWorlds(true);
   renderFriendsOnline();
   if (session.user) checkFriends().then(renderFriendsOnline);
@@ -99,7 +106,7 @@ async function loadWorlds(reset) {
     const r = await api.list({ kind: '3d', sort: wl.sort, page: wl.page, rewarding: wl.sort === 'reward' ? '1' : '' });
     for (const g of r.games) $('#worlds-grid').append(playerWorldCard(g));
     $('#worlds-more').hidden = !r.more;
-    msg.textContent = !r.games.length && reset ? (wl.sort === 'reward' ? 'No player worlds pay coins right now.' : 'No player worlds yet. Go to Create and build the first one!') : '';
+    msg.textContent = !r.games.length && reset ? (wl.sort === 'reward' ? 'No player worlds pay coins right now.' : wl.sort === 'rated' ? 'No rated worlds yet. Admins give great worlds a star rating.' : 'No player worlds yet. Go to Create and build the first one!') : '';
   } catch (e) { msg.textContent = e.message; }
   wl.busy = false;
 }
@@ -115,10 +122,10 @@ $('#join-form').addEventListener('submit', (e) => {
 /* ---------------- one world ---------------- */
 async function loadWorld(id) {
   const b = builtinWorld(id);
-  if (b) return { id, builtin: true, name: b.name, mode: b.mode, sky: b.sky, blurb: b.blurb, reward: b.reward, world: b.get().world, by: null };
+  if (b) return { id, builtin: true, name: b.name, mode: b.mode, sky: b.sky, blurb: b.blurb, reward: b.reward, world: b.get().world, by: null, stars: starsFor('w:' + id) };
   const { game: g } = await api.get(id);
   if (g.kind !== '3d') { go('#/p/' + id); throw new Error('2d'); }
-  return { id, builtin: false, name: g.name, mode: g.style, sky: g.theme, blurb: g.descr, reward: g.reward, world: g.world, by: g.creator, plays: g.plays, likes: g.likes, visibility: g.visibility };
+  return { id, builtin: false, name: g.name, mode: g.style, sky: g.theme, blurb: g.descr, reward: g.reward, world: g.world, by: g.creator, plays: g.plays, likes: g.likes, visibility: g.visibility, stars: g.stars || 0 };
 }
 async function showWorld(id) {
   show('world', 'worlds');
@@ -135,10 +142,11 @@ async function showWorld(id) {
   const done = progress.level('w:' + id);
   page.replaceChildren(
     el('div', { class: 'world-hero' }, cv, el('div', { class: 'world-info' },
-      el('p', { class: 'detail-kicker' }, w.world.game ? `Minigame: ${GAMES[w.world.game].name}` : w.id === 'arena' ? 'Minigames' : w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
+      el('p', { class: 'detail-kicker' }, w.world.game ? `Minigame: ${GAMES[w.world.game].name}` : w.builtin && builtinWorld(id).game ? 'Minigame' : w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
       el('h1', {}, w.name),
       w.blurb ? el('p', { class: 'lede' }, w.blurb) : null,
       el('div', { class: 'card-meta' },
+        diffTag(w.stars),
         el('span', { class: 'tag' }, SKIES[w.sky] ? SKIES[w.sky].name : 'Sky'),
         online.worlds[id] ? el('span', { class: 'tag tag-live' }, `${online.worlds[id]} playing now`) : null,
         w.reward ? el('span', { class: 'tag tag-pay' }, w.builtin ? `First clear pays ${w.reward} coins, +25 with no falls, +2 per coin` : `Pays ${w.reward} coins the first time you beat it`) : null,
@@ -197,10 +205,9 @@ async function enterWorld(id, code) {
     onManage: (name) => manageUser(name),
     game: (() => { try { return gameConfig(w.world, w.builtin ? builtinWorld(id) : null); } catch (e) { return null; } })(),
     onPrize: () => refreshWallet(),
-    portals: w.builtin ? builtinWorld(id).portals || null : null,
     snow: !!(w.builtin && builtinWorld(id).snow),
-    onPortal: (to) => go(to.startsWith('#') ? to : `#/w/${to}/play`),
-    onlineCount: (wid) => online.worlds[wid] || 0,
+    shop: w.builtin ? builtinWorld(id).shop || null : null,
+    onShop: shopPanel,
     onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },
     room: multi ? async () => { if (first) { const f = first; first = null; return f; } return api.joinRoom(joined ? { code: joined } : { world: id }); } : null,
     soloNote: !session.user ? 'You are playing solo. Log in to see other players and chat.' : !session.rooms ? 'Multiplayer is off on this server, so you are playing solo.' : null,
@@ -215,7 +222,7 @@ async function enterWorld(id, code) {
       if (r.noProof) return { text: 'Admin flying was on, so this run does not count.' };
       const res = await api.finish(w.builtin ? { kind: 'world', id, replay: r.replay } : { kind: 'game', id, replay: r.replay });
       if (res.wallet) setWallet(res.wallet);
-      const coins = res.earned ? `+${res.earned} coins! ` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '';
+      const coins = (res.earned ? `+${res.earned} coins! ` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '') + (res.rated ? `+${res.rated}★ difficulty stars! ` : '');
       const b = res.board;
       const rank = b && b.me ? (b.newBest ? `New best: you're #${b.me.rank} on the leaderboard!` : `Your best is #${b.me.rank} (${b.me.time.toFixed(2)}s).`) : '';
       return { text: coins + rank, extra: b ? boardList(b, true) : null };
@@ -229,6 +236,7 @@ async function enterWorld(id, code) {
 let firstTicket = null;
 
 addRoute(/^#\/worlds$/, () => showWorlds());
+addRoute(/^#\/worlds\/games$/, () => showWorlds(true));
 addRoute(/^#\/w\/([A-Za-z0-9-]+)\/play$/, (m) => enterWorld(m[1]));
 addRoute(/^#\/w\/([A-Za-z0-9-]+)$/, (m) => showWorld(m[1]));
 addRoute(/^#\/join\/([A-Za-z0-9]+)$/, (m) => enterWorld(null, m[1]));

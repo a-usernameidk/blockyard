@@ -9,6 +9,7 @@ import { endlessCourse, dailyCourse, todayUTC } from '../endless.js';
 import { store, mine, newId, api, isOnline } from '../api.js';
 import { progress } from '../progress.js';
 import { setWallet, openAccount } from './account.js';
+import { starsFor, diffName, diffClass } from '../stars.js';
 
 onLeave('play', () => stopPlay());
 
@@ -26,11 +27,14 @@ export function bestText(key, lv) {
   if (b.won) return lv.style === 'rush' ? 'Beaten' : `Best ${b.time}s`;
   return b.progress ? `Best ${Math.round(b.progress * 100)}%` : null;
 }
-export function card(lv, { meta = [], text, by, actions, reward }) {
+// the difficulty rating: "4★ Normal" (nothing when unrated)
+export function diffTag(n) { return n ? el('span', { class: 'tag tag-diff ' + diffClass(n), title: `Beat it to earn ${n} difficulty stars` }, `${n}★ ${diffName(n)}`) : null; }
+export function card(lv, { meta = [], text, by, actions, reward, stars }) {
   const coins = countTiles(lv.d, 'o');
   const metaEl = el('div', { class: 'card-meta' }, styleTag(lv.style), ...meta.filter(Boolean).map((m) => el('span', { class: 'tag' }, m)));
   if (coins) metaEl.append(el('span', { class: 'tag' }, `${coins} coins inside`));
   if (reward) metaEl.prepend(el('span', { class: 'tag tag-pay' }, `Pays ${reward} coins`));
+  if (stars) metaEl.prepend(diffTag(stars));
   return el('article', { class: 'card' }, thumb(lv),
     el('div', { class: 'card-body' },
       el('div', {}, el('h3', {}, lv.n), by || null, text ? el('p', {}, text) : null, metaEl),
@@ -151,7 +155,7 @@ function renderDetail() {
     el('p', { class: 'detail-kicker' }, `${w.name}, level ${w.n}`),
     el('h3', {}, lv.n),
     el('p', {}, open ? lv.blurb : `Beat ${MAP[selected - 1].n} to unlock this one.`),
-    el('div', { class: 'card-meta' }, styleTag(lv.style), best ? el('span', { class: 'tag' }, best) : null),
+    el('div', { class: 'card-meta' }, diffTag(starsFor(lv.id)), styleTag(lv.style), best ? el('span', { class: 'tag' }, best) : null),
     open ? goals : null,
     el('div', { class: 'row' },
       open ? el('button', { class: 'btn btn-grass btn-big', type: 'button', onclick: () => go('#/play/' + lv.id) }, beaten(lv.id) ? 'Play again' : 'Play') : null,
@@ -188,7 +192,8 @@ function rewardLine(p, guess) {
   line.textContent = 'Checking your run…';
   p.then((r) => {
     if (r.wallet) setWallet(r.wallet);
-    line.textContent = r.earned ? `+${r.earned} coins` : r.note || '';
+    const rated = r.rated ? ` +${r.rated}★ difficulty stars!` : '';
+    line.textContent = (r.earned ? `+${r.earned} coins` : r.note || '') + rated;
   }).catch((e) => { line.textContent = e.message; });
 }
 
@@ -270,7 +275,7 @@ export function publishedCard(g) {
   try { lv = normalizeLevel(g.level); } catch (e) { return null; }
   const by = el('p', { class: 'by-line' }, 'by ', el('a', { class: 'linkish', href: '#/u/' + encodeURIComponent(g.creator) }, g.creator));
   return card(lv, {
-    by, text: g.descr || null, reward: g.reward,
+    by, text: g.descr || null, reward: g.reward, stars: g.stars,
     meta: [plural(g.plays, 'play'), plural(g.likes, 'like'), bestText('p:' + g.id, lv)],
     actions: [['Play', 'btn-grass', () => go('#/p/' + g.id)], ['Remix', '', () => editLevel(remixOf(lv))]],
   });
@@ -283,10 +288,10 @@ async function loadDiscover(reset) {
   $('#disc-creator-name').textContent = disc.creator;
   $('#disc-msg').textContent = 'Loading…';
   try {
-    const r = await api.list({ ...disc, sort: disc.sort === 'reward' ? 'reward' : disc.sort, rewarding: disc.sort === 'reward' ? '1' : '' });
+    const r = await api.list({ ...disc, rewarding: disc.sort === 'reward' ? '1' : '' });
     for (const g of r.games) { const c = publishedCard(g); if (c) $('#disc-grid').append(c); }
     $('#disc-more').hidden = !r.more;
-    $('#disc-msg').textContent = !r.games.length && reset ? (disc.q || disc.creator ? 'No levels match.' : disc.sort === 'reward' ? 'No levels pay coins right now. Admins pick great levels to pay out.' : 'No levels yet. Build one and publish it to be the first.') : '';
+    $('#disc-msg').textContent = !r.games.length && reset ? (disc.q || disc.creator ? 'No levels match.' : disc.sort === 'reward' ? 'No levels pay coins right now. Admins pick great levels to pay out.' : disc.sort === 'rated' ? 'No rated levels yet. Admins give great levels a star rating.' : 'No levels yet. Build one and publish it to be the first.') : '';
   } catch (e) { $('#disc-msg').textContent = e.message; }
   disc.busy = false;
 }

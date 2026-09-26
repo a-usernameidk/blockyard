@@ -6,6 +6,7 @@ import { BUILTIN } from '../public/js/levels.js';
 import { normalizeLevel } from '../public/js/format.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
 import { endlessCourse, todayUTC } from '../public/js/endless.js';
+import { BUILTIN_STARS, starsFor, MAX_STARS } from '../public/js/stars.js';
 import { runReplay } from '../public/js/replay.js';
 import { runReplay3d } from '../public/js/physics3d.js';
 import { normalizeWorld, worldThumb } from '../public/js/world.js';
@@ -40,6 +41,12 @@ export const ECON_SCHEMA = [
 export const ECON_COLUMNS = [
   ["ALTER TABLE wallets ADD COLUMN xp INTEGER NOT NULL DEFAULT 0",
     "UPDATE wallets SET xp = COALESCE((SELECT SUM(delta) FROM ledger l WHERE l.user_id = wallets.user_id AND l.delta > 0 AND (l.why LIKE 'run%' OR l.why LIKE 'quest%' OR l.why LIKE 'bonus%')), 0)"],
+  // difficulty stars: count the built-in levels and obbies people already beat (and mark them as counted)
+  ["ALTER TABLE wallets ADD COLUMN rstars INTEGER NOT NULL DEFAULT 0", [
+    `INSERT OR IGNORE INTO claims (user_id, what, at) SELECT user_id, 'st:' || level, 0 FROM level_progress WHERE (stars & 1) = 1 AND level IN (${Object.keys(BUILTIN_STARS).map((k) => `'${k}'`).join(', ')})`,
+    `INSERT INTO wallets (user_id, coins, rstars) SELECT user_id, 0, SUM(CASE level ${Object.entries(BUILTIN_STARS).map(([k, v]) => `WHEN '${k}' THEN ${v}`).join(' ')} ELSE 0 END) AS n
+      FROM level_progress WHERE (stars & 1) = 1 GROUP BY user_id HAVING n > 0 ON CONFLICT (user_id) DO UPDATE SET rstars = excluded.rstars`,
+  ]],
 ];
 export const seedStock = (db) => LIMITED.map((l) => db.prepare('INSERT OR IGNORE INTO stock (item, left) VALUES (?, ?)').bind(l.key, l.stock));
 
@@ -83,13 +90,13 @@ export function cleanLook(look, items) {
 
 export async function getWallet(db, uid) {
   const [w, inv, u] = await Promise.all([
-    db.prepare('SELECT coins, xp FROM wallets WHERE user_id = ?').bind(uid).first(),
+    db.prepare('SELECT coins, xp, rstars FROM wallets WHERE user_id = ?').bind(uid).first(),
     db.prepare('SELECT item, qty FROM inventory WHERE user_id = ? AND qty > 0').bind(uid).all(),
     db.prepare('SELECT look FROM users WHERE id = ?').bind(uid).first(),
   ]);
   const items = {};
   for (const r of inv.results) items[r.item] = r.qty;
-  return { coins: w ? w.coins : 0, xp: w ? w.xp || 0 : 0, level: levelOf(w ? w.xp : 0), items, look: cleanLook(parse(u && u.look), items) };
+  return { coins: w ? w.coins : 0, xp: w ? w.xp || 0 : 0, rstars: w ? w.rstars || 0 : 0, level: levelOf(w ? w.xp : 0), items, look: cleanLook(parse(u && u.look), items) };
 }
 // After selling or trading, make sure nobody is wearing something they gave away.
 async function fixLook(db, uid) {
@@ -378,6 +385,14 @@ const claimStmt = (db, uid, what) => db.prepare('INSERT INTO claims (user_id, wh
 async function payOnce(db, stmts) {
   try { await db.batch(stmts); return true; } catch (e) { if (isConstraint(e)) return false; throw e; }
 }
+// Difficulty stars for beating a rated level (once per level). Returns how many you just got.
+async function earnStars(db, uid, key, n) {
+  n = Math.max(0, Math.min(MAX_STARS, n | 0));
+  if (!n) return 0;
+  const ok = await payOnce(db, [claimStmt(db, uid, 'st:' + key),
+    db.prepare('INSERT INTO wallets (user_id, coins, rstars) VALUES (?, 0, ?) ON CONFLICT (user_id) DO UPDATE SET rstars = rstars + excluded.rstars').bind(uid, n)]).catch(() => false);
+  return ok ? n : 0;
+}
 
 /* ---------------- leaderboards ---------------- */
 export async function boardInfo(db, board, uid, n = 10) {
@@ -423,9 +438,11 @@ async function finishLevel(ctx, user, id, replay) {
   if (earned) stmts.push(claimStmt(db, user.id, `r:${id}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run level ' + id));
   stmts.push(...questBumps(db, user.id, { levels: 1, coins: run.coins }));
   if (id === 'b-party' && run.deaths === 0) stmts.push(db.prepare("INSERT OR IGNORE INTO claims (user_id, what, at) VALUES (?, 'b:flawless', ?)").bind(user.id, Date.now()));
-  if (!(await payOnce(db, stmts))) return json({ ok: true, earned: 0, stars: [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i))), newStars: [], time: run.time, wallet: await getWallet(db, user.id) });
+  const paid = await payOnce(db, stmts);
+  const rated = await earnStars(db, user.id, id, starsFor(id));
+  if (!paid) return json({ ok: true, earned: 0, rated, stars: [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i))), newStars: [], time: run.time, wallet: await getWallet(db, user.id) });
   const stars = [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i)));
-  return json({ ok: true, earned, stars, newStars: [0, 1, 2].filter((i) => fresh & (1 << i)), time: run.time, wallet: await getWallet(db, user.id) });
+  return json({ ok: true, earned, rated, stars, newStars: [0, 1, 2].filter((i) => fresh & (1 << i)), time: run.time, wallet: await getWallet(db, user.id) });
 }
 
 async function finishWorld(ctx, user, id, replay) {
@@ -443,13 +460,15 @@ async function finishWorld(ctx, user, id, replay) {
   const earned = (fresh & 1 ? w.reward : 0) + (fresh & 2 ? REWARD.obbyNoFall : 0) + Math.max(0, run.coins - old.coins) * REWARD.coin3d;
   const stmts = [progressStmt(db, user.id, key, bits, run.coins, Math.round(run.time * 10) / 10)];
   if (earned) stmts.push(claimStmt(db, user.id, `r:${key}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run world ' + id));
-  if (!(await payOnce(db, stmts))) return json({ ok: true, earned: 0, first: false, noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
-  return json({ ok: true, earned, first: !!(fresh & 1), noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
+  const paid = await payOnce(db, stmts);
+  const rated = await earnStars(db, user.id, key, starsFor(key));
+  if (!paid) return json({ ok: true, earned: 0, rated, first: false, noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
+  return json({ ok: true, earned, rated, first: !!(fresh & 1), noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
 }
 
 async function finishGame(ctx, user, id, replay) {
   const { db, env } = ctx;
-  const g = await db.prepare('SELECT id, kind, data, reward, user_id, hidden, project_id FROM games WHERE id = ?').bind(id).first();
+  const g = await db.prepare('SELECT id, kind, data, reward, stars, user_id, hidden, project_id FROM games WHERE id = ?').bind(id).first();
   if (!g || g.hidden) fail(404, 'That game was not found.');
   // every checked win goes on the leaderboard, even when the game doesn't pay
   const data = JSON.parse(g.data);
@@ -459,7 +478,8 @@ async function finishGame(ctx, user, id, replay) {
   if (!run.won) fail(400, "That run didn't reach the goal.");
   const board = await saveTime(db, user.id, 'g:' + id, run.time);
   await db.batch(questBumps(db, user.id, { player: 1, obby: g.kind === '3d' ? 1 : 0, coins: run.coins || 0 })).catch(() => {});
-  if (!g.reward) return json({ ok: true, earned: 0, board });
+  const rated = g.stars && g.user_id !== user.id ? await earnStars(db, user.id, 'g:' + id, g.stars) : 0;
+  if (!g.reward) return json({ ok: true, earned: 0, rated, board, wallet: rated ? await getWallet(db, user.id) : undefined });
   if (g.user_id === user.id) return json({ ok: true, earned: 0, board, note: "You made this one, so it doesn't pay you." });
   if (g.project_id) {
     const builder = await db.prepare('SELECT 1 FROM projects WHERE id = ? AND owner_id = ? UNION SELECT 1 FROM collabs WHERE project_id = ? AND user_id = ?').bind(g.project_id, user.id, g.project_id, user.id).first();
@@ -470,7 +490,7 @@ async function finishGame(ctx, user, id, replay) {
   try {
     await db.batch([db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(user.id, 'g:' + id, Date.now()), ...coinStmts(db, user.id, g.reward, 'run game ' + id)]);
   } catch (e) { if (isConstraint(e)) return json({ ok: true, earned: 0, board }); throw e; }
-  return json({ ok: true, earned: g.reward, board, wallet: await getWallet(db, user.id) });
+  return json({ ok: true, earned: g.reward, rated, board, wallet: await getWallet(db, user.id) });
 }
 
 async function finishEndless(ctx, user, seedIn, replay) {
@@ -587,5 +607,5 @@ export async function publicItems(db, uid) {
   const w = await getWallet(db, uid);
   const items = Object.entries(w.items).filter(([k]) => { const f = findItem(k); return f && canTrade(f.item); }).map(([key, qty]) => ({ key, qty }));
   const value = items.reduce((n, i) => n + valueOf(findItem(i.key).item) * i.qty, 0);
-  return { look: w.look, items, value, stars: await starCount(db, uid), badges: await badges(db, uid) };
+  return { look: w.look, items, value, rstars: w.rstars, level: w.level, stars: await starCount(db, uid), badges: await badges(db, uid) };
 }

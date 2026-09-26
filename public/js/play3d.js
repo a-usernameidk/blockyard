@@ -7,7 +7,7 @@ import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
 import { openRoom } from './net.js';
 import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
 import { store } from './api.js';
-import { GAMES, ROUND, onHill, inBox } from './games.js';
+import { GAMES, ROUND, WEAPONS, WEAPON_IDS, onHill, inBox } from './games.js';
 import { GEAR_MODS } from './cosmetics.js';
 
 const h = (tag, attrs = {}, ...kids) => {
@@ -91,10 +91,11 @@ export function startWorld(root, opts) {
   const inviteBtn = h('button', { class: 'btn', type: 'button', hidden: true }, 'Invite');
   const fullBtn = h('button', { class: 'btn', type: 'button', title: 'Full screen' }, 'Full screen');
   const gfxBtn = h('button', { class: 'btn', type: 'button', title: 'Graphics quality' }, opts.low ? 'Graphics: fast' : 'Graphics: pretty');
+  const lockBtn = h('button', { class: 'btn', type: 'button', title: 'Shift lock: the camera follows your mouse and you face where you look (Shift)' }, 'Shift lock');
   const bar = h('div', { class: 'bar w3-bar' },
     h('button', { class: 'btn', type: 'button', onclick: () => opts.onExit && opts.onExit() }, opts.test ? 'Back to building' : 'Leave'),
     h('div', { class: 'bar-title' }, h('h2', {}, opts.title || world.n), h('span', { class: 'by' }, opts.by ? 'by ' + opts.by : opts.game ? 'Minigames' : obby ? 'Obby' : 'Hangout')),
-    obby ? restartBtn : null, resetBtn, inviteBtn, gfxBtn, fullBtn);
+    obby ? restartBtn : null, resetBtn, inviteBtn, lockBtn, gfxBtn, fullBtn);
   /* ---------------- admin tools (only for admins) ---------------- */
   const isAdminMe = !!(opts.me && opts.me.admin);
   let fly = false, flySpeed = 12, noProof = false;
@@ -104,7 +105,7 @@ export function startWorld(root, opts) {
   const adminBox = h('div', { class: 'w3-admin panel', hidden: true },
     h('h3', {}, 'Admin'),
     h('div', { class: 'row' }, flyBtn, ...speedBtns),
-    h('p', { class: 'small' }, 'F turns flying on and off. Space goes up, Shift goes down. Runs where you flew don\'t count.'),
+    h('p', { class: 'small' }, 'F turns flying on and off. Space goes up, C goes down. Runs where you flew don\'t count.'),
     h('form', { class: 'row', onsubmit: (e) => { e.preventDefault(); const m = shoutIn.value.trim(); if (m && room) { room.send({ t: 'shout', m }); shoutIn.value = ''; } shoutIn.blur(); } }, shoutIn, h('button', { class: 'btn btn-sun', type: 'submit' }, 'Shout')),
     h('p', { class: 'small' }, 'Click a player in the Players list to go to them, kick them, or manage them.'));
   function setFly(on) {
@@ -115,7 +116,7 @@ export function startWorld(root, opts) {
     bar.append(h('button', { class: 'btn btn-sun', type: 'button', onclick: () => { adminBox.hidden = !adminBox.hidden; } }, 'Admin'));
     stage.append(adminBox);
   }
-  const hint = h('p', { class: 'hint hint-keys' }, 'W A S D or arrows to move, Space to jump, drag to look around, scroll to zoom, Q and E turn the camera. R respawns. Enter to chat, 1 to 5 for emotes.');
+  const hint = h('p', { class: 'hint hint-keys' }, 'W A S D or arrows to move, Space to jump, drag to look around, scroll to zoom, Q and E turn the camera. Shift turns shift lock on and off. R respawns. Enter to chat, 1 to 7 for emotes.');
   root.replaceChildren(bar, stage, hint);
 
   let R;
@@ -159,9 +160,12 @@ export function startWorld(root, opts) {
     }
     if (down && (e.key === 'Enter' || e.key === '/') && room) { e.preventDefault(); chatInput.focus(); return; }
     if (down && e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) { resetPress = true; }
-    if (down && /^Digit[1-7]$/.test(e.code)) { emote(EMOTES[Number(e.code.slice(5)) - 1]); return; }
+    if (shopOpen) { if (down && e.key === 'Escape') closeShop(); return; }
+    if (down && /^Digit[1-7]$/.test(e.code)) { const n = Number(e.code.slice(5)); if (paintWorld && n <= WEAPON_IDS.length) pickWeapon(WEAPON_IDS[n - 1]); else emote(EMOTES[n - 1]); return; }
+    if (down && (e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) { setShiftLock(!shiftLock); return; }
+    if (down && e.code === 'KeyB' && nearShop) { openShop(); return; }
     if (down && e.code === 'KeyF' && isAdminMe && !e.repeat) { setFly(!fly); return; }
-    const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'j', KeyQ: 'ql', KeyE: 'qr', ShiftLeft: 'dn', ShiftRight: 'dn' }[e.code];
+    const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'j', KeyQ: 'ql', KeyE: 'qr', KeyC: 'dn', ControlLeft: 'dn' }[e.code];
     if (!k) return;
     e.preventDefault();
     unlockAudio();
@@ -207,12 +211,30 @@ export function startWorld(root, opts) {
   };
   canvas.addEventListener('pointerup', endPointer); canvas.addEventListener('pointercancel', endPointer);
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.dist = Math.max(2.5, Math.min(18, cam.dist * (e.deltaY > 0 ? 1.1 : 0.9))); }, { passive: false });
+  /* ----- shift lock: the mouse turns the camera (no dragging) and Pip faces where you look ----- */
+  let shiftLock = false, shoulder = 0;
+  function setShiftLock(on) {
+    shiftLock = on; lockBtn.textContent = on ? 'Shift lock: on' : 'Shift lock'; lockBtn.classList.toggle('on', on);
+    stage.classList.toggle('locked', on);
+    if (on) { try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* drag still works */ } toast('Shift lock on. Press Shift or Esc to turn it off.', 1.8); }
+    else if (document.pointerLockElement === canvas) document.exitPointerLock();
+  }
+  lockBtn.addEventListener('click', () => { setShiftLock(!shiftLock); lockBtn.blur(); });
+  const onLockChange = () => { if (document.pointerLockElement !== canvas && shiftLock) setShiftLock(false); };
+  const onMouseMove = (e) => {
+    if (document.pointerLockElement !== canvas) return;
+    cam.yaw += e.movementX * 0.0035;
+    cam.pitch = Math.max(-0.25, Math.min(1.35, cam.pitch + e.movementY * 0.003));
+  };
+  document.addEventListener('pointerlockchange', onLockChange);
+  document.addEventListener('mousemove', onMouseMove);
   jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); jumpTouch = true; });
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) jumpBtn.addEventListener(ev, () => { jumpTouch = false; });
   fullBtn.addEventListener('click', () => { const el = stage; if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); else if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); });
   gfxBtn.addEventListener('click', () => { store.set('gfx-low', !opts.low); if (opts.onGraphics) opts.onGraphics(!opts.low); });
 
   function inputBits() {
+    if (performance.now() < frozenUntil) return 0;
     let f = keys.has('f'), b = keys.has('b'), l = keys.has('l'), r = keys.has('r');
     if (joyVec) { f = f || joyVec.y < -0.35; b = b || joyVec.y > 0.35; l = l || joyVec.x < -0.35; r = r || joyVec.x > 0.35; }
     let bits = (f ? KEY.fwd : 0) | (b ? KEY.back : 0) | (l ? KEY.left : 0) | (r ? KEY.right : 0) | (keys.has('j') || jumpTouch ? KEY.jump : 0);
@@ -392,7 +414,7 @@ export function startWorld(root, opts) {
   stage.append(roundBox);
   if (cfg) roundBox.textContent = opts.room ? 'Connecting to the minigames…' : 'Minigames need other players. Log in and invite a friend!';
   const rs = { phase: null, mode: null, endsLocal: 0, it: new Set(), alive: new Set(), fin: [], scores: {}, lava: null, results: null };
-  let inRound = false, lastTag = 0, roundText = '';
+  let inRound = false, lastTag = 0, roundText = '', frozenUntil = 0, lastCount = -1, kothKing = null, myPaint = 0;
   const nameOf = (id) => (id === myId ? 'You' : (others.get(id) || {}).name || 'Someone');
   const toXYZ = (a, spread) => ({ x: a[0] + (spread ? (Math.random() - 0.5) * spread : 0), y: a[1], z: a[2] + (spread ? (Math.random() - 0.5) * spread : 0) });
   // gear works in hangouts, Tag and Paintball. Never in obbies (timed and checked) or the other minigames (fair play).
@@ -403,13 +425,25 @@ export function startWorld(root, opts) {
   /* ----- paintball ----- */
   const aim = { from: [0, 0, 0], dir: [0, 0, 1] };
   const shots = [];
-  let lastShot = 0;
-  const cross = h('div', { class: 'w3-cross', hidden: true, 'aria-hidden': 'true' });
+  let lastShot = 0, swapUntil = 0, lastW = 'blaster';
+  const paintWorld = !!cfg && cfg.modes.includes('paint');
+  let weapon = WEAPONS[store.get('paint-weapon', 'blaster')] ? store.get('paint-weapon', 'blaster') : 'blaster';
+  const reload = h('i', { class: 'w3-reload' });
+  const cross = h('div', { class: 'w3-cross', hidden: true, 'aria-hidden': 'true' }, reload);
   const shootBtn = h('button', { class: 'tbtn w3-shoot', type: 'button', hidden: true, 'aria-label': 'Shoot paint' }, 'Shoot');
-  stage.append(cross, shootBtn);
+  const weaponBar = h('div', { class: 'w3-weapons', hidden: !paintWorld, role: 'group', 'aria-label': 'Blasters' },
+    ...WEAPON_IDS.map((id, i) => h('button', { class: 'btn' + (id === weapon ? ' on' : ''), type: 'button', 'data-w': id, title: WEAPONS[id].info, onclick: (e) => { pickWeapon(id); e.currentTarget.blur(); } }, h('b', {}, String(i + 1)), ' ' + WEAPONS[id].name)));
+  stage.append(cross, shootBtn, weaponBar);
   shootBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); shoot(); });
-  addEventListener('keydown', (e) => { if (e.code !== 'KeyX' || typing() || !stage.isConnected || stopped) return; if (paintOn()) shoot(); else if (snowOn()) throwSnow(); });
+  addEventListener('keydown', (e) => { if (e.code !== 'KeyX' || typing() || !stage.isConnected || stopped || shopOpen) return; if (paintOn()) shoot(); else if (snowOn()) throwSnow(); });
   function paintOn() { return !!cfg && rs.phase === 'play' && rs.mode === 'paint' && inRound; }
+  function pickWeapon(id) {
+    if (!WEAPONS[id] || id === weapon) return;
+    weapon = id; store.set('paint-weapon', id);
+    for (const b of weaponBar.children) b.classList.toggle('on', b.dataset.w === id);
+    swapUntil = performance.now() + ROUND.swapMs;
+    toast(`${WEAPONS[id].name}: ${WEAPONS[id].info}`, 1.6); sfx('checkpoint');
+  }
   /* ----- snowballs (Snowy Town): only for fun ----- */
   const snowOn = () => !!opts.snow && !paintOn();
   const snowballs = [];
@@ -438,34 +472,41 @@ export function startWorld(root, opts) {
   }
   if (opts.snow) setTimeout(() => { if (!stopped) toast('Click or press X to throw snowballs!', 3); }, 5000);
   function shoot() {
-    const now = performance.now();
-    if (!paintOn() || now - lastShot < ROUND.shotEvery) return;
-    lastShot = now;
-    const [ox, oy, oz] = aim.from, [dx, dy, dz] = aim.dir;
-    // how far until a wall?
-    let wall = ROUND.shotRange;
-    for (let t = 0.8; t < ROUND.shotRange; t += 0.4) if (camSolid(ox + dx * t, oy + dy * t, oz + dz * t)) { wall = t; break; }
-    let best = null, bestT = wall;
-    for (const o of others.values()) {
-      if (!o.pos || !rs.alive.has(o.id)) continue;
-      const cx = o.pos[0] - ox, cy = o.pos[1] + 0.7 - oy, cz = o.pos[2] - oz;
-      const t = cx * dx + cy * dy + cz * dz;
-      if (t < 0.5 || t > bestT) continue;
-      const qx = cx - dx * t, qy = cy - dy * t, qz = cz - dz * t;
-      if (Math.hypot(qx, qy, qz) < 0.8) { best = o; bestT = t; }
+    const now = performance.now(), wp = WEAPONS[weapon];
+    if (!paintOn() || now - lastShot < WEAPONS[lastW].every || now < swapUntil) return;
+    lastShot = now; lastW = weapon;
+    const [ox, oy, oz] = aim.from, color = hexRGB(look.color);
+    let best = null, bestT = Infinity;
+    for (let k = 0; k < wp.pellets; k++) {
+      let [dx, dy, dz] = aim.dir;
+      if (wp.spread) { dx += (Math.random() - 0.5) * 2 * wp.spread; dy += (Math.random() - 0.5) * 2 * wp.spread; dz += (Math.random() - 0.5) * 2 * wp.spread; const l = Math.hypot(dx, dy, dz); dx /= l; dy /= l; dz /= l; }
+      // how far until a wall?
+      let wall = wp.range;
+      for (let t = 0.8; t < wp.range; t += 0.4) if (camSolid(ox + dx * t, oy + dy * t, oz + dz * t)) { wall = t; break; }
+      let hitO = null, hitT = wall;
+      for (const o of others.values()) {
+        if (!o.pos || !rs.alive.has(o.id)) continue;
+        const cx = o.pos[0] - ox, cy = o.pos[1] + 0.7 - oy, cz = o.pos[2] - oz;
+        const t = cx * dx + cy * dy + cz * dz;
+        if (t < 0.5 || t > hitT) continue;
+        if (Math.hypot(cx - dx * t, cy - dy * t, cz - dz * t) < 0.8) { hitO = o; hitT = t; }
+      }
+      shots.push({ x: ox, y: oy, z: oz, dx, dy, dz, left: hitT, color, speed: wp.speed, size: wp.size });
+      if (hitO && hitT < bestT) { best = hitO; bestT = hitT; }
     }
-    shots.push({ x: ox, y: oy, z: oz, dx, dy, dz, left: bestT, color: hexRGB(look.color) });
-    sfx('jump');
-    if (best && room) room.send({ t: 'hit', id: best.id });
+    sfx(weapon === 'sniper' ? 'bounce' : 'jump');
+    if (weapon === 'splatter' || weapon === 'sniper') cam.pitch = Math.min(1.35, cam.pitch + 0.02); // a little kick
+    if (best && room) room.send({ t: 'hit', id: best.id, w: weapon });
   }
   function splash(pos, color, n = 10) { if (pos) burst(pos[0], pos[1] + 0.8, pos[2], [color || '#ff5d8f', '#ffffff'], n, 4, 3); }
   function onPaint(m) {
     const by = m.by === myId ? look : (others.get(m.by) || {}).look;
     const target = m.id === myId ? [S.p.x, S.p.y, S.p.z] : (others.get(m.id) || {}).pos;
     splash(target, by && by.color, 8);
-    if (m.id === myId) { toast(`Hit! ${m.n}/${ROUND.hitsToSplat}`, 0.8); sfx('land'); }
-    else if (m.by === myId) toast(`Hit ${nameOf(m.id)}! ${m.n}/${ROUND.hitsToSplat}`, 0.8);
+    if (m.id === myId) { myPaint = m.n; toast(`Paint on you: ${m.n}/${ROUND.hp}`, 0.9); sfx('land'); }
+    else if (m.by === myId) toast(`Hit ${nameOf(m.id)}! ${m.n}/${ROUND.hp}`, 0.8);
   }
+  const paintSpawn = () => { const a = cfg.areas.paint, l = a.spawns; return l && l.length ? toXYZ(l[Math.floor(Math.random() * l.length)], 1) : toXYZ(a.spawn, 8); };
   function placeAt(at, obbyNow) {
     S.spawn = at; S.p = { ...at }; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p };
     S.cp = null; S.cpIdx = -1; S.won = false; S.obby = obbyNow; S.onGround = false; winShown = false; winBox.hidden = true;
@@ -475,32 +516,44 @@ export function startWorld(root, opts) {
   function enterArea(mode) {
     const a = cfg.areas[mode];
     inRound = true;
-    placeAt(toXYZ(a.spawn, mode === 'race' ? 2 : 5), mode === 'race');
+    myPaint = 0; frozenUntil = 0;
+    placeAt(mode === 'paint' ? paintSpawn() : toXYZ(a.spawn, mode === 'race' ? 2 : 5), mode === 'race');
     // look toward the goal (race) or the hill
     const g = mode === 'koth' && a.hill ? { x: (a.hill[0] + a.hill[3] + 1) / 2, z: (a.hill[2] + a.hill[5] + 1) / 2 } : mode === 'race' ? goals.find((q) => inBox(a, q.x, q.z)) : null;
     if (g) cam.yaw = Math.atan2(g.x - S.p.x, -(g.z - S.p.z));
-    toast(GAMES[mode].name + '!', 1.6); sfx('checkpoint');
+    toast(GAMES[mode].name + ': GO!', 1.6); sfx('checkpoint');
+    if (shopOpen) closeShop();
   }
   function backToLobby() { inRound = false; placeAt(toXYZ(cfg.lobby, 4), world.mode !== 'hangout' && !cfg); }
   function onRound(m) {
     if (!cfg) return;
     const was = rs.phase;
+    if (m.phase === 'play' && m.mode === 'lava' && rs.phase === 'play' && m.lava != null && rs.lava != null && m.lava > rs.lava && inRound) { toast('The lava is rising!', 1); sfx('crumble'); }
     Object.assign(rs, { phase: m.phase, mode: m.mode, endsLocal: performance.now() + (m.left || 0), it: new Set(m.it || []), alive: new Set(m.alive || []), fin: m.fin || [], scores: m.scores || {}, lava: m.lava, results: m.results, need: m.need });
     if (m.phase === 'play' && was !== 'play' && rs.alive.has(myId)) enterArea(m.mode);
     else if (m.phase !== 'play' && inRound) backToLobby();
     if (m.ev) {
-      if (m.ev.tag) { toast(m.ev.tag === myId ? "You got tagged! Now you're IT!" : `${nameOf(m.ev.tag)} got tagged!`, 1.6); sfx(m.ev.tag === myId ? 'die' : 'bounce'); }
+      if (m.ev.tag) {
+        // a freshly tagged player freezes for a moment, so they can't tag right back
+        if (m.ev.tag === myId) { frozenUntil = performance.now() + 1500; toast("You got tagged! You're IT! (frozen for a sec)", 1.8); sfx('die'); }
+        else { toast(`${nameOf(m.ev.tag)} got tagged!`, 1.6); sfx('bounce'); }
+        const o = m.ev.tag === myId ? { pos: [S.p.x, S.p.y, S.p.z] } : others.get(m.ev.tag);
+        if (o && o.pos) burst(o.pos[0], o.pos[1] + 1, o.pos[2], ['#ff5a1f', '#ffd23f', '#ffffff'], 18, 4, 4);
+      }
       if (m.ev.out && m.ev.out !== myId) toast(`${nameOf(m.ev.out)} fell in the lava!`, 1.4);
       if (m.ev.fin) toast(`${nameOf(m.ev.fin)} finished #${rs.fin.indexOf(m.ev.fin) + 1}!`, 1.6);
       if (m.ev.splat) {
         const by = m.ev.by === myId ? look : (others.get(m.ev.by) || {}).look;
         splash(m.ev.splat === myId ? [S.p.x, S.p.y, S.p.z] : (others.get(m.ev.splat) || {}).pos, by && by.color, 24);
-        if (m.ev.splat === myId) { toast(`SPLAT! ${nameOf(m.ev.by)} got you.`, 1.8); sfx('die'); placeAt(toXYZ(cfg.areas.paint.spawn, 8), false); }
+        if (m.ev.splat === myId) { myPaint = 0; toast(`SPLAT! ${nameOf(m.ev.by)} got you${m.ev.w ? ` with the ${WEAPONS[m.ev.w].name}` : ''}.`, 1.8); sfx('die'); placeAt(paintSpawn(), false); }
         else toast(m.ev.by === myId ? `You splatted ${nameOf(m.ev.splat)}!` : `${nameOf(m.ev.by)} splatted ${nameOf(m.ev.splat)}!`, 1.6);
         if (m.ev.by === myId) sfx('coin');
       }
     }
     if (m.phase === 'results' && was === 'play') sfx('win');
+    // King of the Hill: whoever is winning wears a crown
+    const top = m.phase === 'play' && m.mode === 'koth' ? Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0] : null;
+    kothKing = top && top[1] >= 1 ? top[0] : null;
     for (const o of others.values()) o.tag.classList.toggle('it', rs.phase === 'play' && rs.mode === 'tag' && rs.it.has(o.id));
     myTag.classList.toggle('it', rs.phase === 'play' && rs.mode === 'tag' && rs.it.has(myId));
   }
@@ -536,35 +589,31 @@ export function startWorld(root, opts) {
       return;
     }
   }
-  /* ----- gates to other worlds (the Plaza hub) ----- */
-  const gateList = (opts.portals || []).map((g) => {
-    const box = g.axis === 'x' ? [g.x - 1, g.z, g.x + 2, g.z + 1] : [g.x, g.z - 1, g.x + 1, g.z + 2];
-    const tag = h('div', { class: 'w3-tag gate' }, h('span', { class: 'w3-name' }, g.label), h('span', { class: 'gate-n' }));
-    tags.append(tag);
-    return { ...g, box, tag, cx: (box[0] + box[2]) / 2, cz: (box[1] + box[3]) / 2, color: hexRGB(PALETTE[g.c & 15]) };
-  });
-  let travel = null, gateCountT = 0;
-  function gateTick(px, py, pz, scene, dt) {
-    if (!gateList.length) return;
-    gateCountT -= dt;
-    for (const g of gateList) {
-      // the glowing portal surface
-      const wx = g.axis === 'x' ? 3 : 0.25, wz = g.axis === 'x' ? 0.25 : 3;
-      const gy = g.y || 0;
-      scene.push({ prim: 'cube', color: g.color, glow: 1, alpha: 0.35 + Math.sin(clock * 3 + g.x) * 0.12, m: M4.trs(g.cx, gy + 3, g.cz, 0, 0, 0, wx, 4.8, wz) });
-      scene.push({ prim: 'cube', color: [1, 1, 1], glow: 1, alpha: 0.25, m: M4.trs(g.cx, gy + 1 + ((clock * 1.5 + g.x) % 4.5), g.cz, 0, 0, 0, wx * 0.9, 0.12, wz * 0.9) });
-      placeTag(g.tag, g.cx, gy + 7.6, g.cz, false, 90);
-      if (gateCountT <= 0 && opts.onlineCount) { const n = opts.onlineCount(g.to); g.tag.lastChild.textContent = n ? `${n} playing` : ''; }
-    }
-    if (gateCountT <= 0) gateCountT = 3;
-    if (fly || (inRound && rs.phase === 'play')) { travel = null; return; }
-    const inside = gateList.find((g) => px >= g.box[0] && px <= g.box[2] && pz >= g.box[1] && pz <= g.box[3] && py >= (g.y || 0) + 0.5 && py <= (g.y || 0) + 6);
-    if (!inside) { if (travel) { travel = null; toast('', 0.01); } return; }
-    if (!travel || travel.g !== inside) { travel = { g: inside, t: 0 }; toast(`Going to ${inside.label}…`, 1.2); sfx('checkpoint'); }
-    travel.t += dt;
-    if (travel.t > 0.7 && !travel.done && opts.onPortal) { travel.done = true; fade.classList.remove('on'); void fade.offsetWidth; fade.classList.add('on'); opts.onPortal(inside.to); }
+  /* ----- the shop keeper: walk up and press B (or the button) to buy and wear things right here ----- */
+  const shopAt = opts.shop && opts.onShop ? { x: opts.shop[0], y: opts.shop[1], z: opts.shop[2] } : null;
+  const SHOPKEEP = { color: '#ffd23f', hat: 'tophat', trail: 'none', pet: 'none', gear: 'none' };
+  const shopTag = h('div', { class: 'w3-tag shopkeep' }, h('span', { class: 'w3-name' }, 'Shop keeper'), h('span', { class: 'w3-bubble' }, 'Hats, pets and more!'));
+  const shopBtn = h('button', { class: 'btn btn-sun w3-shopbtn', type: 'button', hidden: true }, 'Shop (B)');
+  const shopBox = h('div', { class: 'overlay w3-shop', hidden: true });
+  if (shopAt) { tags.append(shopTag); stage.append(shopBtn, shopBox); }
+  shopBtn.addEventListener('click', () => { openShop(); shopBtn.blur(); });
+  let nearShop = false, shopOpen = false;
+  function openShop() {
+    if (!shopAt || shopOpen) return;
+    shopOpen = true; clearKeys(); if (shiftLock) setShiftLock(false);
+    shopBox.hidden = false;
+    opts.onShop(shopBox, { close: closeShop, looked: (eq) => { Object.assign(look, eq); applyGear(); renderList(); if (room) room.send({ t: 'look' }); } });
   }
-  if (gateList.length) setTimeout(() => { if (!stopped) toast('Walk through a gate to go somewhere!', 3); }, 1500);
+  function closeShop() { shopOpen = false; shopBox.hidden = true; shopBox.replaceChildren(); }
+  function shopTick(px, py, pz, scene) {
+    if (!shopAt) return;
+    const d = Math.hypot(px - shopAt.x, pz - shopAt.z);
+    avatarParts({ x: shopAt.x, y: shopAt.y, z: shopAt.z, yaw: d < 12 ? Math.atan2(px - shopAt.x, pz - shopAt.z) : 0, walk: 0, move: 0, air: false, emote: d < 5 ? 'wave' : null, et: clock, t: clock, look: SHOPKEEP }, scene);
+    shadow(scene, shopAt.x, shopAt.y, shopAt.z);
+    placeTag(shopTag, shopAt.x, shopAt.y + 2.05, shopAt.z, false, 40);
+    const near = d < 3.6 && Math.abs(py - shopAt.y) < 2.5 && !(inRound && rs.phase === 'play');
+    if (near !== nearShop) { nearShop = near; shopBtn.hidden = !near; }
+  }
   // automated tests can move the player (only with ?w3test in the address)
   if (location.search.includes('w3test')) window.__w3 = { at: (x, y, z) => { S.p.x = x; S.p.y = y; S.p.z = z; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; } };
   let lastHb = 0;
@@ -579,18 +628,22 @@ export function startWorld(root, opts) {
     else if (rs.phase === 'results') t = rs.results && rs.results.length ? 'Winners: ' + rs.results.map((w) => `${w.id === myId ? 'You' : w.name}${w.coins ? ` (+${w.coins})` : ''}`).join(', ') : 'Nobody won that one!';
     else if (!inRound) t = `${GAMES[rs.mode].name} in progress (${clockTxt}). You're watching, you'll join the next round.`;
     else if (rs.mode === 'race') t = `RACE ${clockTxt}. ${rs.fin.includes(myId) ? `You finished #${rs.fin.indexOf(myId) + 1}!` : 'Get to the goal!'}`;
-    else if (rs.mode === 'tag') t = `TAG ${clockTxt}. ${rs.it.has(myId) ? "You're IT! Tag the others!" : `Run! ${rs.it.size} ${rs.it.size === 1 ? 'player is' : 'players are'} IT.`}`;
+    else if (rs.mode === 'tag') t = `TAG ${clockTxt}. ${rs.it.has(myId) ? "You're IT! Tag the others!" : `Run! ${rs.it.size} ${rs.it.size === 1 ? 'player is' : 'players are'} IT, ${Math.max(0, rs.alive.size - rs.it.size)} still free.`}`;
     else if (rs.mode === 'koth') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `KING OF THE HILL ${clockTxt}. You: ${Math.floor(rs.scores[myId] || 0)}s${top ? `, leader: ${nameOf(top[0])} ${Math.floor(top[1])}s` : ''}`; }
-    else if (rs.mode === 'paint') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `PAINTBALL ${clockTxt}. Your splats: ${rs.scores[myId] || 0}${top ? `, leader: ${nameOf(top[0])} ${top[1]}` : ''}. Click or X to shoot!`; }
+    else if (rs.mode === 'paint') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `PAINTBALL ${clockTxt}. ${WEAPONS[weapon].name}. Splats: ${rs.scores[myId] || 0}${top ? `, leader: ${nameOf(top[0])} ${top[1]}` : ''}. Paint on you: ${myPaint}/${ROUND.hp}`; }
     else if (rs.mode === 'lava') t = `RISING LAVA ${clockTxt}. ${rs.alive.has(myId) ? `${rs.alive.size} left. Keep climbing!` : 'You fell in. Watch the rest!'}`;
+    if (rs.phase === 'intro' && secs <= 3 && secs !== lastCount) { lastCount = secs; if (secs > 0) { toast(String(secs), 0.9); sfx('coin'); } }
+    if (rs.phase !== 'intro') lastCount = -1;
     if (t !== roundText) { roundText = t; roundBox.textContent = t; roundBox.hidden = false; }
     roundBox.classList.toggle('hot', rs.phase === 'play' && inRound && (rs.mode !== 'tag' || rs.it.has(myId)));
     const pOn = paintOn();
-    cross.hidden = !pOn; shootBtn.hidden = !pOn;
+    shootBtn.hidden = !pOn;
+    if (pOn) reload.style.transform = `scaleX(${Math.min(1, (performance.now() - Math.max(lastShot, swapUntil - ROUND.swapMs)) / WEAPONS[lastW].every).toFixed(2)})`;
     for (let i = shots.length - 1; i >= 0; i--) {
-      const sh = shots[i], step = Math.min(sh.left, 45 * 0.016);
+      const sh = shots[i], step = Math.min(sh.left, (sh.speed || 45) * 0.016);
       sh.x += sh.dx * step; sh.y += sh.dy * step; sh.z += sh.dz * step; sh.left -= step;
-      scene.push({ prim: 'sphere', color: sh.color, glow: 0.4, m: M4.trs(sh.x, sh.y, sh.z, 0, 0, 0, 0.22, 0.22, 0.22) });
+      const sz = sh.size || 0.22;
+      scene.push({ prim: 'sphere', color: sh.color, glow: 0.4, m: M4.trs(sh.x, sh.y, sh.z, 0, 0, 0, sz, sz, sz) });
       if (sh.left <= 0) { burst(sh.x, sh.y, sh.z, ['#ffffff'], 4, 2, 1); shots.splice(i, 1); }
     }
     if (rs.phase !== 'play') return;
@@ -603,6 +656,12 @@ export function startWorld(root, opts) {
     if (rs.mode === 'koth' && cfg.areas.koth.hill) {
       const hl = cfg.areas.koth.hill, on = inRound && onHill(cfg.areas.koth, px, py, pz);
       scene.push({ prim: 'cube', color: hexRGB(on ? '#44c06a' : '#ffd23f'), glow: 1, alpha: 0.18 + Math.sin(clock * 4) * 0.06, m: M4.trs((hl[0] + hl[3] + 1) / 2, hl[4] + 2.5, (hl[2] + hl[5] + 1) / 2, 0, 0, 0, hl[3] - hl[0] + 1.1, 3, hl[5] - hl[2] + 1.1) });
+    }
+    if (rs.mode === 'tag' && parts.length < 240) {
+      // IT players leave a trail of sparks so you can see them coming
+      const spark = (p) => parts.push({ x: p[0] + (Math.random() - 0.5) * 0.5, y: p[1] + 0.4 + Math.random() * 1.2, z: p[2] + (Math.random() - 0.5) * 0.5, vx: 0, vy: 1.4, vz: 0, life: 0.5, max: 0.5, size: 0.1, color: hexRGB(Math.random() < 0.5 ? '#ff5a1f' : '#ffd23f'), g: 0 });
+      if (rs.it.has(myId) && Math.random() < 0.5) spark([px, py, pz]);
+      for (const o of others.values()) if (o.pos && rs.it.has(o.id) && Math.random() < 0.5) spark(o.pos);
     }
     if (rs.mode === 'tag' && inRound && rs.it.has(myId) && room && performance.now() - lastTag > 350) {
       for (const o of others.values()) {
@@ -692,7 +751,12 @@ export function startWorld(root, opts) {
     const k = Math.min(1, acc / STEP3);
     const px = prevP.x + (S.p.x - prevP.x) * k, py = prevP.y + (S.p.y - prevP.y) * k, pz = prevP.z + (S.p.z - prevP.z) * k;
     const hv = Math.hypot(S.v.x, S.v.z), moving = hv > 0.6;
-    if (moving) { const target = Math.atan2(S.v.x, S.v.z); let d = target - facing; d = Math.atan2(Math.sin(d), Math.cos(d)); facing += d * Math.min(1, dt * 14); emoteNow = null; }
+    if (moving || shiftLock) {
+      // shift lock: face where the camera looks. Otherwise face the way you're going.
+      const target = shiftLock ? Math.atan2(Math.sin(cam.yaw), -Math.cos(cam.yaw)) : Math.atan2(S.v.x, S.v.z);
+      let d = target - facing; d = Math.atan2(Math.sin(d), Math.cos(d)); facing += d * Math.min(1, dt * (shiftLock ? 20 : 14));
+      if (moving) emoteNow = null;
+    }
     walk += hv * dt * 2.2;
     if (emoteNow) emoteAt += dt;
     // crumble blocks disappear and come back
@@ -700,7 +764,8 @@ export function startWorld(root, opts) {
     for (const [i, t] of gone) if (!S.crumbles.has(i)) { viewGrid.t[i] = t; gone.delete(i); R.markDirty(i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ); }
 
     // camera: orbit around the player, pulled in if a wall is in the way
-    const tgt = [px, py + 1.25, pz];
+    shoulder += ((shiftLock ? 0.9 : 0) - shoulder) * Math.min(1, dt * 10);
+    const tgt = [px + Math.cos(cam.yaw) * shoulder, py + 1.25, pz + Math.sin(cam.yaw) * shoulder];
     aim.from = tgt;
     const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     const dir = [-Math.sin(cam.yaw) * cp, sp, Math.cos(cam.yaw) * cp];
@@ -720,7 +785,7 @@ export function startWorld(root, opts) {
     /* ----- build the scene ----- */
     const scene = [];
     const air = !S.onGround && S.air > 4;
-    avatarParts({ x: px, y: py, z: pz, yaw: facing, walk, move: Math.min(1, hv / P3.speed), air, emote: emoteNow, et: emoteAt, t: clock, look }, scene);
+    avatarParts({ x: px, y: py, z: pz, yaw: facing, walk, move: Math.min(1, hv / P3.speed), air, emote: emoteNow, et: emoteAt, t: clock, look: kothKing && kothKing === myId ? { ...look, hat: 'crown' } : look }, scene);
     shadow(scene, px, py, pz);
     if (look.pet && look.pet !== 'none') { petFollow(myPet, px, py, pz, facing, dt); petParts(look.pet, myPet.x, myPet.y, myPet.z, myPet.yaw, clock, myPet.moving ? Math.abs(Math.sin(clock * 10)) : 0, scene); }
     if (moverDraw.length) {
@@ -735,7 +800,7 @@ export function startWorld(root, opts) {
       if (oMove) { o.walk += dt * 13; o.emote = null; }
       if (em && !o.emote) { o.emote = EMOTES[em - 1]; o.et = 0; }
       if (o.emote) o.et += dt;
-      avatarParts({ x: st.p[0], y: st.p[1], z: st.p[2], yaw: st.r, walk: o.walk, move: oMove ? 1 : 0, air: oAir, emote: o.emote, et: o.et, t: clock, look: o.look }, scene);
+      avatarParts({ x: st.p[0], y: st.p[1], z: st.p[2], yaw: st.r, walk: o.walk, move: oMove ? 1 : 0, air: oAir, emote: o.emote, et: o.et, t: clock, look: kothKing === o.id ? { ...o.look, hat: 'crown' } : o.look }, scene);
       shadow(scene, st.p[0], st.p[1], st.p[2]);
       if (o.look && o.look.pet && o.look.pet !== 'none') { o.pet = o.pet || {}; petFollow(o.pet, st.p[0], st.p[1], st.p[2], st.r, dt); petParts(o.look.pet, o.pet.x, o.pet.y, o.pet.z, o.pet.yaw, clock, o.pet.moving ? Math.abs(Math.sin(clock * 10)) : 0, scene); }
       o.trailT -= dt;
@@ -767,7 +832,9 @@ export function startWorld(root, opts) {
       scene.push({ prim: 'cube', color: p.color, glow: 0.5, alpha: Math.max(0.05, Math.min(0.95, p.life / p.max)), m: M4.trs(p.x, p.y, p.z, p.spin || 0, p.spin || 0, 0, s, s, s) });
     }
     roundTick(px, py, pz, scene, clock);
-    gateTick(px, py, pz, scene, dt);
+    shopTick(px, py, pz, scene);
+    const pOn2 = paintOn();
+    cross.hidden = !(pOn2 || (shiftLock && !shopOpen)); cross.classList.toggle('paint', pOn2);
     if (snowballs.length) snowTick(dt, scene);
     if (!fly) tipTick(dt);
     R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, far: opts.low ? 140 : 230 });
@@ -833,6 +900,8 @@ export function startWorld(root, opts) {
     stopped = true;
     cancelAnimationFrame(raf);
     removeEventListener('keydown', onKey); removeEventListener('keyup', onKey); removeEventListener('blur', clearKeys);
+    document.removeEventListener('pointerlockchange', onLockChange); document.removeEventListener('mousemove', onMouseMove);
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
     document.removeEventListener('visibilitychange', onVis);
     if (room) room.close();
     stopMusic();
