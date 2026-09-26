@@ -51,6 +51,8 @@ export function avatarParts(st, out = []) {
   box(0, by - 0.13, 0.4, em === 'cheer' || st.air ? 0.14 : 0.18, em === 'cheer' || st.air ? 0.1 : 0.04, 0.02, INK);
   box(-0.3, by - 0.06, 0.4, 0.1, 0.05, 0.015, [1, 0.6, 0.7], 0, 0, 0, { alpha: 0.9 });
   box(0.3, by - 0.06, 0.4, 0.1, 0.05, 0.015, [1, 0.6, 0.7], 0, 0, 0, { alpha: 0.9 });
+  // gear you can see: a jetpack on your back, coils, boots
+  gearParts((st.look && st.look.gear) || 'none', by, t, at, box, !!st.air, liftL, liftR, footL, footR);
   // antenna, hidden under hats
   const top = by + 0.41;
   if (hat === 'none') {
@@ -58,6 +60,44 @@ export function avatarParts(st, out = []) {
     at(0, top + 0.28, 0, 0.16, 0.16, 0.16, hexRGB('#ffd23f'), 'sphere');
   } else hatParts(hat, top, t, at);
   return out;
+}
+
+function gearParts(gear, by, t, at, box, air, liftL, liftR, footL, footR) {
+  const C = (h) => hexRGB(h);
+  switch (gear) {
+    case 'jetpack': {
+      // two tanks on the back, straps, and flames when you're in the air
+      for (const s of [-1, 1]) {
+        at(s * 0.22, by + 0.1, -0.5, 0.24, 0.72, 0.24, C('#a3abc2'), 'cyl');
+        at(s * 0.22, by + 0.5, -0.5, 0.22, 0.1, 0.22, C('#e63946'), 'cyl', 0, 0, 0, { glow: 0.2 });
+        at(s * 0.22, by - 0.3, -0.5, 0.14, 0.1, 0.14, C('#3d405b'), 'cyl');
+        if (air) {
+          const f = 0.75 + Math.sin(t * 40 + s) * 0.25;
+          at(s * 0.22, by - 0.46 - 0.12 * f, -0.5, 0.14, 0.28 * f, 0.14, C('#ff9f1c'), 'cube', t * 9, 0, 0, { glow: 1, alpha: 0.9 });
+          at(s * 0.22, by - 0.42 - 0.06 * f, -0.5, 0.08, 0.16 * f, 0.08, C('#ffe66d'), 'cube', -t * 9, 0, 0, { glow: 1 });
+        }
+      }
+      at(0, by + 0.02, -0.44, 0.6, 0.4, 0.08, C('#3d405b'));
+      // straps over the shoulders and a belt you can see from the front
+      for (const s of [-1, 1]) at(s * 0.3, by + 0.42, 0, 0.1, 0.04, 0.84, C('#3d405b'));
+      at(0, by - 0.29, 0.4, 0.88, 0.08, 0.03, C('#3d405b'));
+      at(0, by - 0.29, 0.42, 0.14, 0.1, 0.02, C('#ffd23f'), 'cube', 0, 0, 0, { glow: 0.3 });
+      break;
+    }
+    case 'speed':
+      // glowing coils around the feet
+      box(-0.2, 0.1 + liftL, footL, 0.32, 0.06, 0.44, C('#ffd23f'), 0, 0, 0, { glow: 0.6 });
+      box(0.2, 0.1 + liftR, footR, 0.32, 0.06, 0.44, C('#ffd23f'), 0, 0, 0, { glow: 0.6 });
+      break;
+    case 'gravity':
+      // a purple ring floating around your middle
+      at(0, by - 0.3 + Math.sin(t * 3) * 0.04, 0, 1.08, 0.05, 1.0, C('#b06cff'), 'cyl', t * 2, 0, 0, { glow: 0.7, alpha: 0.85 });
+      break;
+    case 'boots':
+      box(-0.2, 0.13 + liftL, footL, 0.3, 0.12, 0.42, C('#ff5d8f'));
+      box(0.2, 0.13 + liftR, footR, 0.3, 0.12, 0.42, C('#ff5d8f'));
+      break;
+  }
 }
 
 function hatParts(hat, y, t, at) {

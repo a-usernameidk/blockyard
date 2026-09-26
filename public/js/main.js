@@ -1,5 +1,6 @@
 // Blockyard starts here. Each page lives in js/pages/, shared bits are in js/app.js.
 import { $, route, currentView } from './app.js';
+import './settings.js';
 import './pages/home.js';
 import './pages/play.js';
 import './pages/worlds.js';
@@ -8,6 +9,7 @@ import './pages/closet.js';
 import './pages/profile.js';
 import './pages/admin.js';
 import './pages/social.js';
+import './pages/settings.js';
 import { renderMe, startSession, onSession, checkFriends, checkMail } from './pages/account.js';
 import { checkTrades } from './pages/closet.js';
 import { loadOnline } from './pages/worlds.js';

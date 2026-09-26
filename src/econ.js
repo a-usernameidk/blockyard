@@ -11,6 +11,7 @@ import { runReplay } from '../public/js/replay.js';
 import { runReplay3d } from '../public/js/physics3d.js';
 import { normalizeWorld, worldThumb } from '../public/js/world.js';
 import { json, fail, body, needUser, DAY, randomId, isConstraint, startOfDay } from './util.js';
+import { mailAdmin } from './mod.js';
 
 export const REWARD = { star: 10, dailyWin: 30, endlessCap: 200, obbyNoFall: 25, coin3d: 2, migrateCap: 2000, finishPerHour: 120 };
 export const TRADE = { maxItems: 8, maxCoins: 100000, days: 3, openPerUser: 10 };
@@ -385,6 +386,24 @@ const claimStmt = (db, uid, what) => db.prepare('INSERT INTO claims (user_id, wh
 async function payOnce(db, stmts) {
   try { await db.batch(stmts); return true; } catch (e) { if (isConstraint(e)) return false; throw e; }
 }
+// Beating a built-in level or obby again still pays a little (a few times a day each, with a daily limit).
+// Final Rush pays 150 coins the first time you beat it each day.
+export const REPLAY = { level: 5, obby: 10, perLevelDay: 3, dayCap: 100, final: 150, finalId: 'b-final' };
+async function replayPay(db, uid, key, kind) {
+  const day = startOfDay(Date.now()), dayKey = new Date(day).toISOString().slice(0, 10);
+  if (key === REPLAY.finalId) {
+    const ok = await payOnce(db, [claimStmt(db, uid, 'fr:' + dayKey), ...coinStmts(db, uid, REPLAY.final, 'run final rush')]).catch(() => false);
+    return ok ? { coins: REPLAY.final, note: 'Final Rush pays 150 coins a day!' } : { coins: 0, note: 'Final Rush already paid today. Come back tomorrow for another 150!' };
+  }
+  const [mine, all] = await Promise.all([
+    db.prepare('SELECT COUNT(*) AS n FROM ledger WHERE user_id = ? AND why = ? AND at >= ?').bind(uid, 'run replay ' + key, day).first(),
+    db.prepare("SELECT COALESCE(SUM(delta), 0) AS n FROM ledger WHERE user_id = ? AND why LIKE 'run replay %' AND at >= ?").bind(uid, day).first(),
+  ]);
+  const want = Math.min(REPLAY[kind], REPLAY.dayCap - all.n);
+  if (mine.n >= REPLAY.perLevelDay || want <= 0) return { coins: 0, note: all.n >= REPLAY.dayCap ? "You've hit today's replay coin limit." : `Replays of this one paid ${REPLAY.perLevelDay} times today already.` };
+  const ok = await payOnce(db, [claimStmt(db, uid, `rp:${key}:${dayKey}:${mine.n}`), ...coinStmts(db, uid, want, 'run replay ' + key)]).catch(() => false);
+  return ok ? { coins: want, note: `Replay bonus: +${want} coins` } : { coins: 0 };
+}
 // Difficulty stars for beating a rated level (once per level). Returns how many you just got.
 async function earnStars(db, uid, key, n) {
   n = Math.max(0, Math.min(MAX_STARS, n | 0));
@@ -440,9 +459,10 @@ async function finishLevel(ctx, user, id, replay) {
   if (id === 'b-party' && run.deaths === 0) stmts.push(db.prepare("INSERT OR IGNORE INTO claims (user_id, what, at) VALUES (?, 'b:flawless', ?)").bind(user.id, Date.now()));
   const paid = await payOnce(db, stmts);
   const rated = await earnStars(db, user.id, id, starsFor(id));
-  if (!paid) return json({ ok: true, earned: 0, rated, stars: [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i))), newStars: [], time: run.time, wallet: await getWallet(db, user.id) });
+  // nothing new this time (or it's Final Rush): the replay bonus
+  const extra = !paid || !earned || id === REPLAY.finalId ? await replayPay(db, user.id, id, 'level') : { coins: 0 };
   const stars = [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i)));
-  return json({ ok: true, earned, rated, stars, newStars: [0, 1, 2].filter((i) => fresh & (1 << i)), time: run.time, wallet: await getWallet(db, user.id) });
+  return json({ ok: true, earned: (paid ? earned : 0) + extra.coins, bonus: extra.coins || undefined, note: extra.note, rated, stars, newStars: paid ? [0, 1, 2].filter((i) => fresh & (1 << i)) : [], time: run.time, wallet: await getWallet(db, user.id) });
 }
 
 async function finishWorld(ctx, user, id, replay) {
@@ -462,8 +482,8 @@ async function finishWorld(ctx, user, id, replay) {
   if (earned) stmts.push(claimStmt(db, user.id, `r:${key}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run world ' + id));
   const paid = await payOnce(db, stmts);
   const rated = await earnStars(db, user.id, key, starsFor(key));
-  if (!paid) return json({ ok: true, earned: 0, rated, first: false, noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
-  return json({ ok: true, earned, rated, first: !!(fresh & 1), noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
+  const extra = !paid || !earned ? await replayPay(db, user.id, key, 'obby') : { coins: 0 };
+  return json({ ok: true, earned: (paid ? earned : 0) + extra.coins, bonus: extra.coins || undefined, note: extra.note, rated, first: paid && !!(fresh & 1), noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
 }
 
 async function finishGame(ctx, user, id, replay) {
@@ -648,6 +668,7 @@ export async function checkFarm(ctx, uid) {
       db.prepare("INSERT INTO admin_log (admin, path, detail, at) VALUES ('Blockyard', 'farm', ?, ?)").bind(JSON.stringify({ user: me.name, alts: alts.length }), now),
     ]).then(() => true, (e) => { if (isConstraint(e)) return false; throw e; });
     if (!ok) return false;
+    await mailAdmin(ctx, 'farm', `Coin farming: ${me.name}`, `${me.name} got coins or items from ${alts.length} brand-new accounts made on their network. Their coins were wiped and they got 2 warnings. If that was a mistake, open Admin > Players > Manage.`).catch(() => {});
     const w = await db.prepare('SELECT warnings FROM users WHERE id = ?').bind(uid).first();
     if (w && w.warnings >= FARM.banAt && ctx.ban) await ctx.ban(me);
     return true;

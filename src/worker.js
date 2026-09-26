@@ -15,13 +15,14 @@ import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
 import { findItem } from '../public/js/cosmetics.js';
 import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
+import { MOD, ROLES, ROLE_NAME, addWarning, creditReporters, checkPopular, adminNotify, setAdminNotify, mailAdmin, setPay } from './mod.js';
 import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool, ECON_COLUMNS, questBumps } from './econ.js';
 export { Room } from './room.js';
 
 const PAGE = 24;
 const SESSION_DAYS = 90;
 const LIMITS_PER = { publishHour: 5, publishDay: 20, reportsDay: 20, loginFails: 10, signupsDay: 5, projects: 60, collaborators: 8, privateServers: 5 };
-const HIDE_AFTER_REPORTS = 3;
+const HIDE_AFTER_REPORTS = MOD.hideAfter; // reports from different players before a level is hidden for review
 const ROOM_SIZE = 16;
 const VIS = ['public', 'unlisted', 'private'];
 
@@ -93,6 +94,7 @@ const COLUMNS = [
   "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT ''",
   'ALTER TABLE users ADD COLUMN warnings INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE users ADD COLUMN signup_ip TEXT',
+  'ALTER TABLE users ADD COLUMN good_reports INTEGER NOT NULL DEFAULT 0',
 ];
 
 // Tables are created automatically the first time the Worker runs.
@@ -651,16 +653,14 @@ async function ownGame(ctx, id) {
   fail(403, 'You can only change games you published.');
 }
 async function updateGame(ctx, id, input) {
-  const g = await ownGame(ctx, id);
   if (input.only === 'reward') {
-    // Builders (a role the admin gives out) can make their own games pay a few coins
-    if (!ctx.user || (ctx.user.role !== 'builder' && !ctx.user.admin)) fail(403, 'Only Builders can make their levels pay coins. Ask the admin!');
-    if (g.user_id !== ctx.user.id && !ctx.user.admin) fail(403, 'You can only do that for your own games.');
-    const amount = Math.floor(Number(input.amount) || 0);
-    if (![0, 10, 25].includes(amount)) fail(400, 'Pick 0, 10 or 25 coins.');
-    await ctx.db.prepare('UPDATE games SET reward = ? WHERE id = ?').bind(amount, id).run();
-    return json({ ok: true, id, reward: amount });
+    // Builders set their own levels' pay; Builder Pros can set anyone's (and the admin hears about it)
+    const row = await ctx.db.prepare('SELECT id, user_id FROM games WHERE id = ?').bind(id).first();
+    if (!row) fail(404, 'That game was not found. It may have been removed.');
+    if (!ctx.user) fail(401, 'Log in first.');
+    return setPay(ctx, row, input.amount);
   }
+  const g = await ownGame(ctx, id);
   if (input.only === 'visibility') {
     if (!VIS.includes(input.visibility)) fail(400, 'Pick public, unlisted or private.');
     await ctx.db.prepare('UPDATE games SET visibility = ? WHERE id = ?').bind(input.visibility, id).run();
@@ -692,7 +692,7 @@ async function gameAction(ctx, id, action) {
   if (!game || !(await canSeeGame(ctx, game))) fail(404, 'That game was not found. It may have been removed.');
   if (action === 'play') {
     const r = await db.prepare('INSERT OR IGNORE INTO plays (game_id, who, at) VALUES (?, ?, ?)').bind(id, ctx.ip, Date.now()).run();
-    if (r.meta.changes) await db.prepare('UPDATE games SET plays = plays + 1 WHERE id = ?').bind(id).run();
+    if (r.meta.changes) { await db.prepare('UPDATE games SET plays = plays + 1 WHERE id = ?').bind(id).run(); await checkPopular(db, id).catch(() => {}); }
     await payCreator(ctx, game, 'play').catch(() => {});
     return json({ ok: true });
   }
@@ -700,7 +700,7 @@ async function gameAction(ctx, id, action) {
   const who = 'u:' + user.id;
   if (action === 'like') {
     const r = await db.prepare('INSERT OR IGNORE INTO likes (game_id, who) VALUES (?, ?)').bind(id, who).run();
-    if (r.meta.changes) { await db.prepare('UPDATE games SET likes = likes + 1 WHERE id = ?').bind(id).run(); await payCreator(ctx, game, 'like').catch(() => {}); }
+    if (r.meta.changes) { await db.prepare('UPDATE games SET likes = likes + 1 WHERE id = ?').bind(id).run(); await payCreator(ctx, game, 'like').catch(() => {}); await checkPopular(db, id).catch(() => {}); }
     return json({ ok: true });
   }
   const input = await body(ctx.request);
@@ -710,6 +710,12 @@ async function gameAction(ctx, id, action) {
   const r = await db.prepare('INSERT OR IGNORE INTO reports (game_id, who, reason, at) VALUES (?, ?, ?, ?)').bind(id, who, reason, Date.now()).run();
   if (r.meta.changes) {
     await db.prepare(`UPDATE games SET reports = reports + 1, hidden = CASE WHEN reports + 1 >= ${HIDE_AFTER_REPORTS} THEN 1 ELSE hidden END WHERE id = ?`).bind(id).run();
+    // just reached the limit: hidden and held for the admin to review
+    const after = await db.prepare('SELECT reports, name, user_id FROM games WHERE id = ?').bind(id).first();
+    if (after && after.reports === HIDE_AFTER_REPORTS) {
+      if (after.user_id) await mailStmt(db, after.user_id, 'warning', `"${after.name}" is hidden for review`, `${HIDE_AFTER_REPORTS} players reported "${after.name}", so it's hidden until the admin checks it. If it's fine, it comes back.`).run();
+      await mailAdmin(ctx, 'review', `"${after.name}" needs a review`, `"${after.name}" got ${HIDE_AFTER_REPORTS} reports from different players and is hidden. Open Admin > Games to show it again or take it down.`);
+    }
   }
   return json({ ok: true });
 }
@@ -985,11 +991,14 @@ async function admin(ctx, path, method) {
     const { action } = await body(ctx.request);
     const r = await db.prepare('SELECT * FROM chat_reports WHERE id = ?').bind(Number(m[1])).first();
     if (!r) fail(404, 'That report is gone.');
-    if (action === 'ban') {
+    if (action === 'ban' || action === 'warn') {
       const u = await db.prepare('SELECT id, name FROM users WHERE id = ?').bind(r.target_id).first();
-      if (u && isAdmin(env, u)) fail(400, "You can't ban an admin.");
-      if (u) await banUser(ctx, u);
+      if (u && isAdmin(env, u)) fail(400, `You can't ${action} an admin.`);
+      const open = await db.prepare("SELECT reporter FROM chat_reports WHERE target_id = ? AND status = 'open'").bind(r.target_id).all();
+      if (u && action === 'ban') await banUser(ctx, u);
+      if (u && action === 'warn') await addWarning(ctx, u.id, `An admin read a report about what you said (${r.reason}) and gave you a warning. Be kind in chat!`);
       await db.prepare("UPDATE chat_reports SET status = 'done' WHERE target_id = ? AND status = 'open'").bind(r.target_id).run();
+      await creditReporters(db, open.results.map((x) => x.reporter));
     } else if (action === 'dismiss') {
       await db.prepare("UPDATE chat_reports SET status = 'dismissed' WHERE id = ?").bind(r.id).run();
     } else fail(400, 'Unknown action.');
@@ -1003,7 +1012,17 @@ async function admin(ctx, path, method) {
     else if (action === 'show') await db.prepare('UPDATE games SET hidden = 0 WHERE id = ?').bind(m[1]).run();
     else if (action === 'clear') await db.batch([db.prepare('UPDATE games SET reports = 0, hidden = 0 WHERE id = ?').bind(m[1]), db.prepare('DELETE FROM reports WHERE game_id = ?').bind(m[1])]);
     else if (action === 'delete') await removeGame(db, m[1]);
-    else if (action === 'reward') {
+    else if (action === 'warn') {
+      // reviewed and it's bad: stays hidden, the maker gets a warning, and the players who reported it get credit
+      const g = await db.prepare('SELECT id, name, user_id FROM games WHERE id = ?').bind(m[1]).first();
+      if (!g) fail(404, 'That game is gone.');
+      await db.prepare('UPDATE games SET hidden = 1 WHERE id = ?').bind(g.id).run();
+      const reps = await db.prepare('SELECT who FROM reports WHERE game_id = ?').bind(g.id).all();
+      let warnings = 0;
+      if (g.user_id) warnings = await addWarning(ctx, g.user_id, `Your level "${g.name}" was reviewed and taken down${input.note ? ': ' + String(input.note).slice(0, 200) : '.'}`);
+      await creditReporters(db, reps.results.map((x) => (String(x.who).startsWith('u:') ? x.who.slice(2) : null)));
+      return json({ ok: true, warnings });
+    } else if (action === 'reward') {
       const amount = Math.floor(Number(input.amount) || 0);
       if (amount < 0 || amount > 1000) fail(400, 'Rewards can be 0 to 1000 coins.');
       await db.prepare('UPDATE games SET reward = ? WHERE id = ?').bind(amount, m[1]).run();
@@ -1014,6 +1033,8 @@ async function admin(ctx, path, method) {
     } else fail(400, 'Unknown action.');
     return json({ ok: true });
   }
+  if (path === '/notify' && method === 'GET') return json(await adminNotify(db));
+  if (path === '/notify' && method === 'POST') return json(await setAdminNotify(db, await body(ctx.request)));
   if (path === '/log' && method === 'GET') {
     const { results } = await db.prepare('SELECT admin, path, detail, at FROM admin_log ORDER BY id DESC LIMIT 200').all();
     return json({ log: results.map((x) => ({ ...x, detail: JSON.parse(x.detail || '{}') })) });
@@ -1110,12 +1131,13 @@ async function admin(ctx, path, method) {
       return json({ ok: true });
     }
     if (action === 'role') {
-      const role = ['builder', ''].includes(input.role) ? input.role : null;
+      const role = ROLES.includes(input.role) ? input.role : null;
       if (role === null) fail(400, 'Unknown role.');
       await db.batch([
         db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u.id),
-        role ? mailStmt(db, u.id, 'role', "You're a Builder now!", `${user.name} made you a Builder. You get a Builder badge, and you can make your own published levels and worlds pay coins (on the Create page).`)
-          : mailStmt(db, u.id, 'role', 'Your Builder role was removed', `${user.name} took away your Builder role.`),
+        role === 'builderpro' ? mailStmt(db, u.id, 'role', "You're a Builder Pro now!", `${user.name} made you a Builder Pro. Open the Builder page (in your account menu) to set what your levels pay, and other players' levels too (up to 100 coins). The admin sees every change you make to someone else's level.`)
+          : role ? mailStmt(db, u.id, 'role', "You're a Builder now!", `${user.name} made you a Builder. You get a Builder badge, and you can make your own published levels and worlds pay coins on the Builder page (in your account menu).`)
+          : mailStmt(db, u.id, 'role', 'Your role was removed', `${user.name} took away your Builder role.`),
       ]);
       return json({ ok: true, role });
     }

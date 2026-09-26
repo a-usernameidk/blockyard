@@ -76,6 +76,29 @@ const SONGS = {
     bass: [-12, null, -12, null, -9, null, -9, null, -5, null, -5, null, -7, null, -7, null],
   },
 };
+// more little tunes: Snowy Town, minigames, space and volcano levels
+Object.assign(SONGS, {
+  snow: {
+    bpm: 100,
+    lead: [19, null, 17, null, 15, null, 12, null, 14, null, 15, null, 17, null, null, null, 19, null, 22, null, 19, null, 17, 15, 14, null, 12, null, 14, null, null, null],
+    bass: [-5, null, null, null, -9, null, null, null, -7, null, null, null, -12, null, null, null],
+  },
+  game: {
+    bpm: 132,
+    lead: [12, null, 12, 15, null, 12, 17, null, 15, null, 12, null, 10, 12, null, null, 12, null, 12, 15, null, 17, 19, null, 22, null, 19, null, 17, null, 15, null],
+    bass: [-12, -12, null, -12, -9, -9, null, -9, -5, -5, null, -5, -7, -7, null, -7],
+  },
+  space: {
+    bpm: 84,
+    lead: [7, null, null, 12, null, null, 14, null, 19, null, null, 17, null, 14, null, null, 12, null, null, 14, null, null, 10, null, 7, null, null, null, 5, null, null, null],
+    bass: [-17, null, null, null, null, null, null, null, -14, null, null, null, null, null, null, null],
+  },
+  volcano: {
+    bpm: 126,
+    lead: [0, null, 3, null, 0, null, 6, 5, 3, null, 0, null, -2, null, 0, null, 0, null, 3, null, 7, null, 6, 5, 3, null, 5, null, 3, null, 0, null],
+    bass: [-24, null, -24, null, -21, null, -21, null, -19, null, -19, null, -18, null, -18, null],
+  },
+});
 const freq = (n) => 220 * Math.pow(2, n / 12);
 
 export function startMusic(name) {

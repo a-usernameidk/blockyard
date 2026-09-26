@@ -41,7 +41,7 @@ progress.onChange(() => {
 addEventListener('pagehide', () => { if (session.user && session.online) try { api.saveProgress(progress.data); } catch (e) { /* best effort */ } });
 
 /* ---------------- sound ---------------- */
-function renderMute() {
+export function renderMute() {
   const m = isMuted(), mu = isMusicOn();
   $('#mute').replaceChildren(iconCanvas(m ? 'mute' : 'sound', 24)); $('#mute').setAttribute('aria-pressed', String(!m)); $('#mute').title = m ? 'Sound effects off' : 'Sound effects on';
   $('#music').replaceChildren(iconCanvas(mu ? 'music' : 'music-off', 24)); $('#music').setAttribute('aria-pressed', String(mu)); $('#music').title = mu ? 'Music on' : 'Music off';
@@ -198,15 +198,17 @@ export function openAccount(mode, name) {
       $('#acct-xp-fill').style.width = `${Math.round((xp - a) / (b - a) * 100)}%`;
       $('#acct-xp-text').textContent = `Level ${lv}: ${xp - a} / ${b - a} XP to level ${lv + 1}. Every coin you earn playing is 1 XP.`;
       $('#acct-admin').hidden = !session.user.admin;
+      $('#acct-builder').hidden = !(session.user.admin || ['builder', 'builderpro'].includes(session.user.role));
+      const wn = session.user.warnings || 0;
+      $('#acct-warn').hidden = !wn;
+      $('#acct-warn').textContent = `⚠️ ${wn} of 3 warnings. 3 is a ban. Earn them back by making levels lots of people like and play, or by sending reports that turn out to be right.`;
       $('#acct-in-msg').textContent = '';
       $('#acct-pip').replaceWith(Object.assign(pipCanvas(56), { id: 'acct-pip' }));
     } else setAcctMode(mode || 'login');
-    $('#acct-gfx').textContent = store.get('gfx-low', false) ? 'Fast (switch to pretty)' : 'Pretty (switch to fast)';
     openModal('#account-modal');
   });
 }
 $('#me-btn').addEventListener('click', () => openAccount());
-$('#acct-gfx').addEventListener('click', () => { store.set('gfx-low', !store.get('gfx-low', false)); $('#acct-gfx').textContent = store.get('gfx-low', false) ? 'Fast (switch to pretty)' : 'Pretty (switch to fast)'; });
 $('#acct-profile').addEventListener('click', () => { closeModal($('#account-modal')); if (session.user) go('#/u/' + session.user.name); });
 $('#acct-form').addEventListener('submit', async (e) => {
   e.preventDefault();

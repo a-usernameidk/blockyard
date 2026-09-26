@@ -12,6 +12,7 @@ import { gameConfig, GAMES } from '../games.js';
 import { openReport, diffTag, diffFace } from './play.js';
 import { starsFor } from '../stars.js';
 import { shopPanel } from './closet.js';
+import { gfx } from '../settings.js';
 import { openDMs, startLive } from './social.js';
 
 let game = null;
@@ -200,13 +201,14 @@ async function enterWorld(id, code) {
   const multi = !!(session.user && session.online && session.rooms);
   let first = firstTicket; firstTicket = null;
   let joined = code || null;
-  const low = store.get('gfx-low', false);
+  const g3 = gfx(), low = g3.low;
   game = startWorld(root, {
-    world: w.world, title: w.name, by: w.by, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0 } : { name: 'You' }, low,
+    world: w.world, title: w.name, by: w.by, gfx: g3, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0 } : { name: 'You' }, low,
     onManage: (name) => manageUser(name),
     game: (() => { try { return gameConfig(w.world, w.builtin ? builtinWorld(id) : null); } catch (e) { return null; } })(),
     onPrize: () => refreshWallet(),
     snow: !!(w.builtin && builtinWorld(id).snow),
+    music: w.builtin ? (builtinWorld(id).snow ? 'snow' : builtinWorld(id).game ? 'game' : w.sky === 'night' && w.mode !== 'hangout' ? 'space' : null) : null,
     shop: w.builtin ? builtinWorld(id).shop || null : null,
     onShop: shopPanel,
     onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },
@@ -225,7 +227,7 @@ async function enterWorld(id, code) {
       if (r.noProof) return { text: 'Admin flying was on, so this run does not count.' };
       const res = await api.finish(w.builtin ? { kind: 'world', id, replay: r.replay } : { kind: 'game', id, replay: r.replay });
       if (res.wallet) setWallet(res.wallet);
-      const coins = (res.earned ? `+${res.earned} coins! ` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '') + (res.rated ? `+${res.rated}★ difficulty stars! ` : '');
+      const coins = (res.earned ? `+${res.earned} coins${res.bonus ? ' (replay bonus)' : ''}! ` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '') + (res.rated ? `+${res.rated}★ difficulty stars! ` : '');
       const b = res.board;
       const rank = b && b.me ? (b.newBest ? `New best: you're #${b.me.rank} on the leaderboard!` : `Your best is #${b.me.rank} (${b.me.time.toFixed(2)}s).`) : '';
       return { text: coins + rank, extra: b ? boardList(b, true) : null };

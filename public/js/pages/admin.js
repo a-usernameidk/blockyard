@@ -37,6 +37,7 @@ async function loadChat() {
         el('ol', { class: 'said' }, ...(r.messages.length ? r.messages.map((m) => el('li', {}, el('span', { class: 'small' }, new Date(m.at).toLocaleTimeString() + ' '), m.m)) : [el('li', { class: 'small' }, 'They had not said anything in that server.')])),
         el('div', { class: 'row' },
           el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { if (await ask(`Ban ${r.target}?`, 'They get logged out, kicked from every server, and their games are hidden.', [{ label: 'Ban', value: true, cls: 'btn-danger' }])) { try { await api.admin('POST', '/chat/' + r.id, { action: 'ban' }); toast(`${r.target} banned.`); loadChat(); } catch (e) { toast(e.message); } } } }, 'Ban'),
+          el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => { try { await api.admin('POST', '/chat/' + r.id, { action: 'warn' }); toast(`${r.target} got a warning. The players who reported it got credit.`); loadChat(); } catch (e) { toast(e.message); } } }, 'Warn'),
           el('button', { class: 'btn', type: 'button', onclick: async () => { try { await api.admin('POST', '/chat/' + r.id, { action: 'dismiss' }); loadChat(); } catch (e) { toast(e.message); } } }, 'Dismiss'),
           el('button', { class: 'btn', type: 'button', onclick: () => manageUser(r.target) }, 'Manage'),
           el('a', { class: 'btn', href: '#/u/' + r.target }, 'Profile'))));
@@ -55,7 +56,7 @@ async function loadGames() {
       else { try { pic = thumb(normalizeLevel(g.level)); } catch (e) { /* broken */ } }
       const reasons = Object.entries(g.reasons).map(([r, n]) => `${n} ${r}`).join(', ');
       const act = (label, cls, action, extra) => el('button', { class: 'btn ' + cls, type: 'button', onclick: async (e) => {
-        if (action === 'delete' && e.currentTarget.dataset.sure !== '1') { e.currentTarget.dataset.sure = '1'; e.currentTarget.textContent = 'Click again to delete'; return; }
+        if ((action === 'delete' || action === 'warn') && e.currentTarget.dataset.sure !== '1') { e.currentTarget.dataset.sure = '1'; e.currentTarget.textContent = action === 'warn' ? 'Click again: take down + warn' : 'Click again to delete'; return; }
         try { await api.admin('POST', '/games/' + g.id, { action, ...extra }); loadGames(); } catch (err) { toast(err.message); }
       } }, label);
       const reward = el('select', { 'aria-label': 'Coins this game pays' }, ...[0, 10, 25, 50, 100, 200].map((n) => el('option', { value: String(n) }, n ? `Pays ${n} coins` : 'Pays nothing')));
@@ -68,7 +69,7 @@ async function loadGames() {
       rate.addEventListener('change', async () => { try { await api.admin('POST', '/games/' + g.id, { action: 'stars', amount: Number(rate.value) }); toast(Number(rate.value) ? `"${g.name}" is rated ${rate.value}★ ${diffName(Number(rate.value))}.` : `"${g.name}" is unrated now.`); } catch (e) { toast(e.message); } });
       box.append(el('div', { class: 'admin-row' + (g.hidden ? ' hidden-game' : '') }, pic,
         el('div', {}, el('h3', {}, g.name), el('p', { class: 'small' }, `${g.kind === '3d' ? '3D world' : '2D level'} by ${g.creator}. ${plural(g.plays, 'play')}, ${plural(g.likes, 'like')}. ${g.visibility !== 'public' ? g.visibility + '. ' : ''}${g.hidden ? 'Hidden.' : 'Visible.'}`), el('p', { class: 'small' }, g.reports ? `Reports: ${reasons}` : 'No reports.'), el('div', { class: 'row' }, reward, rate)),
-        el('div', { class: 'row' }, el('a', { class: 'btn', href: g.kind === '3d' ? '#/w/' + g.id : '#/p/' + g.id }, 'Play'), g.hidden ? act('Show', 'btn-grass', 'show') : act('Hide', '', 'hide'), g.reports ? act('Clear reports', '', 'clear') : null, act('Delete', 'btn-danger', 'delete'),
+        el('div', { class: 'row' }, el('a', { class: 'btn', href: g.kind === '3d' ? '#/w/' + g.id : '#/p/' + g.id }, 'Play'), g.hidden ? act(g.reports ? 'Looks fine: show it' : 'Show', 'btn-grass', g.reports ? 'clear' : 'show') : act('Hide', '', 'hide'), g.reports && !g.hidden ? act('Clear reports', '', 'clear') : null, act('Take down + warn maker', 'btn-danger', 'warn'), act('Delete', 'btn-danger', 'delete'),
           el('button', { class: 'btn btn-danger', type: 'button', onclick: () => adminUser(g.creator, 'ban') }, 'Ban creator'))));
     }
   } catch (e) { $('#admin-msg').textContent = e.message; }
@@ -127,11 +128,13 @@ export async function manageUser(name) {
       act('password', { password: pw.value }, () => (self ? 'Password changed. Log in again on this computer.' : `Done. Tell ${u.name} their new password, and to change it.`));
     } }, 'Set password'))) : null;
   // roles
-  const roles = u.admin ? null : el('section', {}, el('h3', {}, 'Role'),
-    el('p', { class: 'small' }, u.role === 'builder' ? `${u.name} is a Builder: they have a Builder badge and can make their own games pay coins.` : 'Builders get a Builder badge and can make their own published games pay 10 or 25 coins.'),
-    el('div', { class: 'row', style: 'margin-top:8px' }, u.role === 'builder'
-      ? el('button', { class: 'btn', type: 'button', onclick: () => act('role', { role: '' }, () => `${u.name} isn't a Builder anymore.`) }, 'Remove Builder')
-      : el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('role', { role: 'builder' }, () => `${u.name} is a Builder now! They got a mail about it.`) }, 'Make Builder')));
+  const roleName = { builder: 'Builder', builderpro: 'Builder Pro' }[u.role] || 'Player';
+  const roles = u.admin ? null : el('section', {}, el('h3', {}, `Role: ${roleName}`),
+    el('p', { class: 'small' }, 'Builders set what their own levels pay (10 or 25 coins). Builder Pros can also set other players\' levels (up to 100), and you get a mail about every change they make to someone else\'s level (turn that off in Settings).'),
+    el('div', { class: 'row', style: 'margin-top:8px' },
+      u.role !== 'builder' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('role', { role: 'builder' }, () => `${u.name} is a Builder now! They got a mail about it.`) }, 'Make Builder') : null,
+      u.role !== 'builderpro' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('role', { role: 'builderpro' }, () => `${u.name} is a Builder Pro now! They got a mail about it.`) }, 'Make Builder Pro') : null,
+      u.role ? el('button', { class: 'btn', type: 'button', onclick: () => act('role', { role: '' }, () => `${u.name} is a normal player again.`) }, 'Remove role') : null));
   // kick / ban
   const safety = u.admin ? null : el('section', {}, el('h3', {}, `Safety: ${u.warnings || 0} of 3 warnings`),
     el('p', { class: 'small' }, '3 warnings is an automatic ban. Coin farming with extra accounts gives 2 at once.'),
@@ -198,7 +201,9 @@ function describe(l) {
   if (p === '/announce') return d.text ? `announced "${d.text}"` : 'removed the announcement';
   if (p === '/stock') return `set ${item} stock to ${d.left}`;
   if (p === '/deals') return d.sale === null ? 'ended the sale' : d.sale ? `started a ${d.sale.off}% sale for ${d.sale.hours} hours` : d.pin ? (d.pin.items && d.pin.items.length ? `picked deals for ${d.pin.date}` : `let ${d.pin.date} pick its own deals`) : `changed deals (${d.off}% off, ${d.count} a day)`;
-  if (p.startsWith('/games/')) return d.action === 'reward' ? `made game ${p.slice(7)} pay ${d.amount} coins` : d.action === 'stars' ? `rated game ${p.slice(7)} ${d.amount}★` : `${d.action} game ${p.slice(7)}`;
+  if (p === 'pay') return `changed "${d.name}" by ${d.creator} from ${d.from} to ${d.to} coins`;
+  if (p === 'farm') return `caught ${d.user} farming coins with ${d.alts} extra accounts (coins wiped, 2 warnings)`;
+  if (p.startsWith('/games/')) return d.action === 'warn' ? `took down game ${p.slice(7)} and warned its maker` : d.action === 'reward' ? `made game ${p.slice(7)} pay ${d.amount} coins` : d.action === 'stars' ? `rated game ${p.slice(7)} ${d.amount}★` : `${d.action} game ${p.slice(7)}`;
   if (p.startsWith('/chat/')) return `${d.action} chat report`;
   return `${p} ${JSON.stringify(d)}`;
 }

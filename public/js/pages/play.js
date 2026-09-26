@@ -104,6 +104,7 @@ function renderMap() {
     const b = el('button', { class: `node node-${lv.style}${open ? '' : ' locked'}${done ? ' done' : ''}${i === selected ? ' sel' : ''}${w.n === 1 ? ' world-start' : ''}`, type: 'button', 'data-world': w.name, 'aria-label': `${w.name} level ${w.n}: ${lv.n}${open ? '' : ' (locked)'}` },
       open ? el('span', { class: 'node-n' }, String(i + 1)) : iconCanvas('lock', 26));
     if (open) { const sr = starRow(progress.stars(lv.id), 13); sr.classList.add('node-stars'); b.append(sr); }
+    { const f = diffFace(starsFor(lv.id), 24); if (f) { f.classList.add('node-face'); b.append(f); } }
     b.addEventListener('click', () => { selected = i; renderMap(); });
     map.append(b);
     return b;
@@ -195,7 +196,7 @@ function rewardLine(p, guess) {
   p.then((r) => {
     if (r.wallet) setWallet(r.wallet);
     const rated = r.rated ? ` +${r.rated}★ difficulty stars!` : '';
-    line.textContent = (r.earned ? `+${r.earned} coins` : r.note || '') + rated;
+    line.textContent = (r.earned ? `+${r.earned} coins${r.bonus && r.note ? ` (${r.note.replace(/^Replay bonus: \+\d+ coins$/, 'replay bonus')})` : ''}` : r.note || '') + rated;
   }).catch((e) => { line.textContent = e.message; });
 }
 

@@ -69,7 +69,10 @@ export function rng(seed) {
 }
 
 // opts: { length (tiles), name, theme, ramp: true makes it faster and harder the further you go }
-export function buildCourse(seed, { length = 2400, name = 'Endless Rush', theme = 'night', ramp = true, maxDiff = 3 } = {}) {
+// wild: true (Endless Rush) mixes things up much more: random group sizes and gaps, forms coming back,
+// earlier or later speed-ups, coin trails in the breathers, and a random look. Only the gaps between
+// checked chunks change, and they never get shorter than before, so every course stays beatable.
+export function buildCourse(seed, { length = 2400, name = 'Endless Rush', theme = 'night', ramp = true, maxDiff = 3, wild = false } = {}) {
   const rand = rng(seed);
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
   const cols = []; // each column is an array of H chars
@@ -79,13 +82,18 @@ export function buildCourse(seed, { length = 2400, name = 'Endless Rush', theme 
   pushEmpty(10);
   cols[2][11] = 'S';
   let form = 'hopper', speed = '~';
+  // wild courses: each run unlocks forms and speeds up at slightly different points
+  const jit = (v) => (wild ? Math.round(v * (0.75 + rand() * 0.5)) : v);
+  const unlock = Object.fromEntries(Object.entries(UNLOCK).map(([f, v]) => [f, jit(v)]));
+  const tier2 = jit(250), tier3 = jit(700), fast = jit(600), faster = jit(1500);
+  const coinGap = (n) => { for (let i = 0; i < n; i++) { const c = empty(); if (wild && rand() < 0.35) c[5 + Math.floor(rand() * 6)] = 'o'; cols.push(c); } };
   while (cols.length < length) {
     const dist = cols.length;
-    const tier = !ramp ? maxDiff : dist < 250 ? 1 : dist < 700 ? 2 : maxDiff;
-    const wantSpeed = !ramp ? '~' : dist < 600 ? '~' : dist < 1500 ? '>' : '*';
+    const tier = !ramp ? maxDiff : dist < tier2 ? 1 : dist < tier3 ? 2 : maxDiff;
+    const wantSpeed = !ramp ? '~' : dist < fast ? '~' : dist < faster ? '>' : '*';
     let next = form;
-    if (dist >= 30) {
-      const forms = Object.keys(UNLOCK).filter((f) => UNLOCK[f] <= (ramp ? dist : 999) && f !== form);
+    if (dist >= 30 && !(wild && rand() < 0.25)) {
+      const forms = Object.keys(unlock).filter((f) => unlock[f] <= (ramp ? dist : 999) && f !== form);
       if (forms.length) next = pick(forms);
     }
     if (next !== form || wantSpeed !== speed) {
@@ -96,7 +104,7 @@ export function buildCourse(seed, { length = 2400, name = 'Endless Rush', theme 
     }
     form = next;
     const pool = CHUNKS.filter((c) => c.form === form && c.diff <= tier && !(speed === '*' && c.notFast));
-    const n = 2 + Math.floor(rand() * 3);
+    const n = wild ? 1 + Math.floor(rand() * 5) : 2 + Math.floor(rand() * 3);
     for (let k = 0; k < n; k++) {
       const ch = pick(pool);
       for (let x = 0; x < ch.w; x++) {
@@ -109,7 +117,7 @@ export function buildCourse(seed, { length = 2400, name = 'Endless Rush', theme 
         }
         cols.push(c);
       }
-      pushEmpty(3);
+      if (wild) coinGap(3 + Math.floor(rand() * 4)); else pushEmpty(3);
     }
   }
   portalCol('n'); portalCol('h'); pushEmpty(6);
@@ -128,4 +136,8 @@ export function dailyCourse(dateStr) {
   const r = rng('theme' + dateStr);
   return buildCourse('daily-' + dateStr, { length: 300, name: 'Daily ' + dateStr, theme: themes[Math.floor(r() * themes.length)], ramp: false, maxDiff: 2 });
 }
-export function endlessCourse(seed) { return buildCourse('endless-' + seed, { length: 2400 }); }
+export function endlessCourse(seed) {
+  const themes = ['night', 'meadow', 'dunes', 'frost', 'volcano'];
+  const r = rng('look-' + seed);
+  return buildCourse('endless-' + seed, { length: 2400, wild: true, theme: themes[Math.floor(r() * themes.length)] });
+}

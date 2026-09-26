@@ -700,3 +700,19 @@ body[data-view="w3"] .announce, body[data-view="build"] .announce, body[data-vie
 .detail-thumb > .diff-face { position: absolute; right: 6px; bottom: 6px; filter: drop-shadow(0 2px 0 rgba(29,35,64,.35)); }
 .hero-thumb { position: relative; min-width: 0; }
 .hero-thumb > .diff-face { position: absolute; right: 10px; bottom: 10px; filter: drop-shadow(0 2px 0 rgba(29,35,64,.35)); }
+/* settings */
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.settings-box { max-width: none; }
+.settings-box h2 { margin: 0 0 6px; font-size: 24px; }
+.choices { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.choice { display: flex; gap: 10px; align-items: flex-start; border: 2px solid var(--line); border-radius: 12px; padding: 8px 10px; cursor: pointer; }
+.choice:has(input:checked) { background: var(--sun); color: var(--ink); }
+.choice:has(input:checked) .small { color: var(--ink); }
+.choice span { display: flex; flex-direction: column; }
+.choice .small { margin: 0; }
+.warn-line { color: #c1121f; font-weight: 800; }
+.role-badge.pro { background: #b06cff; color: #fff; }
+.node .node-face { position: absolute; top: -12px; right: -12px; pointer-events: none; filter: drop-shadow(0 1px 0 rgba(29,35,64,.4)); }
+.node.locked .node-face { filter: grayscale(.8) opacity(.7); }
+.choice input[type=radio] { width: auto; flex: none; margin: 4px 0 0; }
+.check input[type=checkbox] { width: auto; flex: none; }

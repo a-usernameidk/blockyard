@@ -218,7 +218,7 @@ function faceLook(t, color, f) {
 }
 
 /* ---------------- the renderer ---------------- */
-export function createRenderer(canvas, { low = false } = {}) {
+export function createRenderer(canvas, { low = false, dpr: dprFn = null } = {}) {
   const gl = canvas.getContext('webgl', { antialias: !low, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false })
     || canvas.getContext('experimental-webgl');
   if (!gl) throw new Error('This browser or computer has 3D graphics (WebGL) turned off.');
@@ -392,7 +392,7 @@ export function createRenderer(canvas, { low = false } = {}) {
   let W = 1, H = 1, dpr = 1;
   const state = { vp: M4.ident(), view: null, proj: null, eye: [0, 0, 0], faces: 0, drawn: 0 };
   function resize() {
-    dpr = Math.min(low ? 1 : 2, window.devicePixelRatio || 1);
+    dpr = dprFn ? dprFn() : Math.min(low ? 1 : 2, window.devicePixelRatio || 1);
     W = canvas.clientWidth || 640; H = canvas.clientHeight || 360;
     const w = Math.max(1, Math.round(W * dpr)), h = Math.max(1, Math.round(H * dpr));
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }

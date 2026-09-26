@@ -66,7 +66,7 @@ export class Room {
       return new Response(null, { status: 101, webSocket: client });
     }
     const id = Math.random().toString(36).slice(2, 8);
-    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: info.role === 'builder' ? 'builder' : '', admin: !!info.admin, kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
+    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
     server.serializeAttachment(me);
 
     if (me.kind === 'edit') {

@@ -9,6 +9,7 @@ import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
 import { store } from './api.js';
 import { GAMES, ROUND, WEAPONS, WEAPON_IDS, onHill, inBox } from './games.js';
 import { GEAR_MODS } from './cosmetics.js';
+import { GFX, GFX_ORDER, gfxMode, setGfx } from './settings.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -90,7 +91,8 @@ export function startWorld(root, opts) {
   const resetBtn = h('button', { class: 'btn', type: 'button', title: 'Go back to your last checkpoint (R)' }, 'Respawn');
   const inviteBtn = h('button', { class: 'btn', type: 'button', hidden: true }, 'Invite');
   const fullBtn = h('button', { class: 'btn', type: 'button', title: 'Full screen' }, 'Full screen');
-  const gfxBtn = h('button', { class: 'btn', type: 'button', title: 'Graphics quality' }, opts.low ? 'Graphics: fast' : 'Graphics: pretty');
+  const G3 = opts.gfx || GFX[opts.low ? 'fast' : 'pretty'];
+  const gfxBtn = h('button', { class: 'btn', type: 'button', title: 'Graphics quality (click to change)' }, 'Graphics: ' + G3.name);
   const lockBtn = h('button', { class: 'btn', type: 'button', title: 'Shift lock: the camera follows your mouse and you face where you look (Shift)' }, 'Shift lock');
   const bar = h('div', { class: 'bar w3-bar' },
     h('button', { class: 'btn', type: 'button', onclick: () => opts.onExit && opts.onExit() }, opts.test ? 'Back to building' : 'Leave'),
@@ -120,7 +122,7 @@ export function startWorld(root, opts) {
   root.replaceChildren(bar, stage, hint);
 
   let R;
-  try { R = createRenderer(canvas, { low: !!opts.low }); }
+  try { R = createRenderer(canvas, { low: !!G3.low, dpr: G3.dpr }); }
   catch (e) { msgBox.replaceChildren(h('div', { class: 'panel' }, h('h2', {}, "3D can't start here"), h('p', {}, e.message))); return { stop() {} }; }
   R.setSky(world.sky);
   R.setGrid(viewGrid);
@@ -231,7 +233,7 @@ export function startWorld(root, opts) {
   jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); jumpTouch = true; });
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) jumpBtn.addEventListener(ev, () => { jumpTouch = false; });
   fullBtn.addEventListener('click', () => { const el = stage; if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); else if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); });
-  gfxBtn.addEventListener('click', () => { store.set('gfx-low', !opts.low); if (opts.onGraphics) opts.onGraphics(!opts.low); });
+  gfxBtn.addEventListener('click', () => { const m = GFX_ORDER[(GFX_ORDER.indexOf(gfxMode()) + 1) % GFX_ORDER.length]; setGfx(m); if (opts.onGraphics) opts.onGraphics(m); });
 
   function inputBits() {
     if (performance.now() < frozenUntil) return 0;
@@ -295,7 +297,7 @@ export function startWorld(root, opts) {
   }
   function addPlayer(p) {
     if (others.has(p.id)) return;
-    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.role === 'builder' ? h('span', { class: 'lvl builder' }, 'Builder') : null, p.name), h('span', { class: 'w3-bubble', hidden: true }));
+    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.role === 'builder' ? h('span', { class: 'lvl builder' }, 'Builder') : p.role === 'builderpro' ? h('span', { class: 'lvl builder' }, 'Builder Pro') : null, p.name), h('span', { class: 'w3-bubble', hidden: true }));
     tags.append(tag);
     others.set(p.id, { ...p, snaps: p.p ? [{ t: performance.now(), p: p.p, r: p.r || 0, a: p.a || 0 }] : [], tag, walk: 0, bubbleUntil: 0, emote: null, et: 0, trailT: 0 });
     renderList();
@@ -708,7 +710,7 @@ export function startWorld(root, opts) {
     frames = []; acc = 0; prevP = { ...S.p }; winShown = false; noProof = fly;
     for (const [i, t] of gone) { viewGrid.t[i] = t; const x = i % SX, z = Math.floor(i / SX) % SZ, y = Math.floor(i / (SX * SZ)); R.markDirty(x, y, z); }
     gone.clear();
-    startMusic(obby ? 'adventure' : 'chill');
+    startMusic(opts.music || (obby ? 'adventure' : 'chill'));
   }
 
   /* ---------------- the loop ---------------- */
@@ -717,7 +719,7 @@ export function startWorld(root, opts) {
   const onVis = () => { paused = document.hidden; last = performance.now(); acc = 0; if (paused) clearKeys(); };
   document.addEventListener('visibilitychange', onVis);
   msgBox.hidden = true;
-  startMusic(obby ? 'adventure' : 'chill');
+  startMusic(opts.music || (obby ? 'adventure' : 'chill'));
 
   function loop(now) {
     raf = requestAnimationFrame(loop);
@@ -825,7 +827,7 @@ export function startWorld(root, opts) {
       scene.push({ prim: 'cyl', color: hexRGB('#f0a500'), glow: 0.3, m: M4.trs(g.x, y - 0.42, g.z, clock, 0, 0, 0.22, 0.4, 0.22) });
       scene.push({ prim: 'cube', color: hexRGB('#f0a500'), glow: 0.3, m: M4.trs(g.x, y - 0.66, g.z, clock, 0, 0, 0.5, 0.1, 0.5) });
     }
-    for (const c of clouds) {
+    if (G3.clouds !== false) for (const c of clouds) {
       const x = ((c.x + clock * 0.6) % 160) - 16;
       scene.push({ prim: 'cube', color: [1, 1, 1], glow: 0.6, alpha: 0.85, m: M4.trs(x, c.y, c.z, 0, 0, 0, c.w, 1.2, c.d) });
     }
@@ -839,7 +841,7 @@ export function startWorld(root, opts) {
     cross.hidden = !(pOn2 || (shiftLock && !shopOpen)); cross.classList.toggle('paint', pOn2);
     if (snowballs.length) snowTick(dt, scene);
     if (!fly) tipTick(dt);
-    R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, far: opts.low ? 140 : 230 });
+    R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, far: G3.far || 230 });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 
     // name tags and chat bubbles
@@ -867,6 +869,7 @@ export function startWorld(root, opts) {
     }
   }
   function shadow(scene, x, y, z) {
+    if (G3.shadows === false) return;
     // drop a soft shadow on whatever is below
     for (let d = 0; d < 12; d++) {
       const gy = Math.floor(y - 0.01) - d;

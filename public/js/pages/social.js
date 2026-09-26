@@ -8,7 +8,7 @@ import { itemPreview } from './closet.js';
 import { setWallet, refreshWallet, onSession, setMailCount, friendsNow, checkFriends } from './account.js';
 
 /* ---------------- notification settings ---------------- */
-const NOTIFY = [
+export const NOTIFY = [
   ['dm', 'New messages from friends'],
   ['trade', 'Trade offers and live trade invites'],
   ['coins', 'Coins people send you'],
@@ -16,17 +16,6 @@ const NOTIFY = [
   ['sound', 'Play a sound with pop-ups'],
 ];
 export const notifyOn = (k) => store.get('notify', {})[k] !== false;
-function renderNotify() {
-  $('#notify-list').replaceChildren(...NOTIFY.map(([k, label]) => {
-    const box = el('input', { type: 'checkbox' });
-    box.checked = notifyOn(k);
-    box.addEventListener('change', () => { const s = store.get('notify', {}); s[k] = box.checked; store.set('notify', s); });
-    return el('label', { class: 'check' }, box, ' ', label);
-  }));
-}
-export function openNotify() { renderNotify(); openModal('#notify-modal'); }
-$('#acct-notify').addEventListener('click', () => { closeModal($('#account-modal')); openNotify(); });
-
 /* ---------------- pop-ups ---------------- */
 function note(title, text, actions = [], secs = 8) {
   const card = el('div', { class: 'note', role: 'status' },

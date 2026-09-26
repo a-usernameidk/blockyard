@@ -111,7 +111,7 @@ export function startPlay(level, o) {
   releaseAll();
   fitCanvas();
   running = true; last = performance.now(); acc = 0;
-  if (!G.rush) startMusic('adventure');
+  if (!G.rush) startMusic(songFor());
   requestAnimationFrame(frame);
 }
 
@@ -457,13 +457,15 @@ function showEnd() {
   if (opts.afterEnd) opts.afterEnd();
 }
 
+// each Adventure theme has its own little tune
+const songFor = () => ({ frost: 'snow', night: 'space', volcano: 'volcano' })[G.lv.theme] || 'adventure';
 /* ---------------- controls ---------------- */
 function releaseAll() { input.left = input.right = input.hold = input.pressed = false; }
 function press() {
   unlockAudio();
   if (waiting) {
     waiting = false; $('#ready').hidden = true; last = performance.now();
-    startMusic(G.rush ? 'rush' : 'adventure');
+    startMusic(G.rush ? 'rush' : songFor());
     return;
   }
   if (!input.hold) input.pressed = true;
