@@ -28,7 +28,9 @@ export function bestText(key, lv) {
   return b.progress ? `Best ${Math.round(b.progress * 100)}%` : null;
 }
 // the difficulty rating: "4★ Normal" (nothing when unrated)
-export function diffTag(n) { return n ? el('span', { class: 'tag tag-diff ' + diffClass(n), title: `Beat it to earn ${n} difficulty stars` }, `${n}★ ${diffName(n)}`) : null; }
+export function diffTag(n) { return n ? el('span', { class: 'tag tag-diff ' + diffClass(n), title: `Beat it to earn ${n} difficulty stars` }, diffFace(n, 20), `${n}★ ${diffName(n)}`) : null; }
+// the difficulty face picture (Easy, Normal, Hard, Harder, Insane, Demon)
+export function diffFace(n, size = 48) { return n ? el('img', { class: 'diff-face', src: `img/faces/${diffName(n).toLowerCase()}.png`, alt: diffName(n), width: String(size), height: String(size), draggable: 'false' }) : null; }
 export function card(lv, { meta = [], text, by, actions, reward, stars }) {
   const coins = countTiles(lv.d, 'o');
   const metaEl = el('div', { class: 'card-meta' }, styleTag(lv.style), ...meta.filter(Boolean).map((m) => el('span', { class: 'tag' }, m)));
@@ -151,7 +153,7 @@ function renderDetail() {
   const best = bestText(lv.id, lv);
   const got = progress.stars(lv.id);
   const goals = el('ul', { class: 'goals' }, ...starGoals(lv).map((g, i) => el('li', { class: got[i] ? 'got' : '' }, iconCanvas('star', 18), g, el('span', { class: 'goal-pay' }, '+10'))));
-  box.append(el('div', { class: 'detail-thumb' + (open ? '' : ' dim') }, cv), el('div', { class: 'detail-info' },
+  box.append(el('div', { class: 'detail-thumb' + (open ? '' : ' dim') }, cv, diffFace(starsFor(lv.id), 56)), el('div', { class: 'detail-info' },
     el('p', { class: 'detail-kicker' }, `${w.name}, level ${w.n}`),
     el('h3', {}, lv.n),
     el('p', {}, open ? lv.blurb : `Beat ${MAP[selected - 1].n} to unlock this one.`),

@@ -25,6 +25,7 @@
     <button class="btn icon-btn" id="mute" aria-pressed="false" aria-label="Sound effects"></button>
     <button class="btn icon-btn" id="music" aria-pressed="false" aria-label="Music"></button>
     <button class="btn icon-btn mail-btn" id="mail-btn" type="button" aria-label="Mailbox" title="Mailbox" hidden><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5" fill="#fff" stroke="#1d2340" stroke-width="2.4"/><path d="M3.5 6.5 12 13l8.5-6.5" fill="none" stroke="#1d2340" stroke-width="2.4" stroke-linejoin="round"/></svg><span class="count" id="mail-count" hidden></span></button>
+    <button class="btn icon-btn mail-btn" id="dm-btn" type="button" aria-label="Messages" title="Messages" hidden><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M4 4.5h16a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4H4A1.5 1.5 0 0 1 2.5 15V6A1.5 1.5 0 0 1 4 4.5z" fill="#fff" stroke="#1d2340" stroke-width="2.2" stroke-linejoin="round"/><circle cx="8" cy="10.5" r="1.3" fill="#1d2340"/><circle cx="12" cy="10.5" r="1.3" fill="#1d2340"/><circle cx="16" cy="10.5" r="1.3" fill="#1d2340"/></svg><span class="count" id="dm-count" hidden></span></button>
     <button class="btn coin-chip" id="coin-chip" data-go="#/closet" title="Your coins"><span id="coin-icon"></span><span id="coin-count">0</span></button>
     <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span class="lvl-chip" id="me-lvl" hidden></span><span id="me-name">Log in</span><span class="count" id="me-count" hidden></span></button>
   </div>
@@ -467,7 +468,7 @@
         <button class="btn btn-sun" id="acct-logout">Log out</button>
       </div>
       <div class="acct-saved" id="acct-switch"></div>
-      <p class="small">Password: <button class="linkish" id="acct-pw-change" type="button">Change my password</button></p>
+      <p class="small">Password: <button class="linkish" id="acct-pw-change" type="button">Change my password</button> · <button class="linkish" id="acct-notify" type="button">Notification settings</button></p>
       <p class="small">Graphics in 3D: <button class="linkish" id="acct-gfx" type="button"></button></p>
       <p class="small">Want your account gone? <button class="linkish" id="acct-delete" type="button">Delete my account</button></p>
       <p class="msg" id="acct-in-msg"></p>
@@ -492,6 +493,57 @@
     <div class="row"><button class="btn" type="button" id="mail-clear">Delete read mail</button><button class="btn" type="button" data-close>Close</button></div>
   </div>
 </div>
+
+<div class="modal" id="dm-modal" hidden role="dialog" aria-modal="true" aria-labelledby="dm-h">
+  <div class="panel dm-panel">
+    <div class="dm-head"><h2 id="dm-h">Messages</h2><button class="btn" type="button" data-close>Close</button></div>
+    <p class="small">You can message your friends. Be nice, and never share where you live, your school or your passwords.</p>
+    <div class="dm-grid">
+      <div class="dm-chats" id="dm-chats"></div>
+      <div class="dm-thread">
+        <div class="dm-who" id="dm-who"></div>
+        <ol class="dm-msgs" id="dm-msgs"></ol>
+        <form class="dm-form" id="dm-form" hidden><input id="dm-input" maxlength="300" placeholder="Type a message" aria-label="Message" autocomplete="off"><button class="btn btn-sun" type="submit">Send</button></form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="live-modal" hidden role="dialog" aria-modal="true" aria-labelledby="live-h">
+  <div class="panel live-panel">
+    <h2 id="live-h">Live trade</h2>
+    <p class="small" id="live-status"></p>
+    <div class="live-grid">
+      <div class="live-side"><h3>You give</h3><div class="live-items" id="live-mine"></div><label class="small">Coins <input type="number" id="live-coins" min="0" value="0"></label></div>
+      <div class="live-side"><h3 id="live-them-h">They give</h3><div class="live-items" id="live-theirs"></div><p class="small" id="live-them-coins"></p></div>
+    </div>
+    <h3>Your stuff (click to add or take out)</h3>
+    <div class="live-items live-pick" id="live-pick"></div>
+    <div class="row"><button class="btn btn-grass" type="button" id="live-ready">Ready</button><button class="btn btn-danger" type="button" id="live-cancel">Cancel trade</button></div>
+  </div>
+</div>
+
+<div class="modal" id="gift-modal" hidden role="dialog" aria-modal="true" aria-labelledby="gift-h">
+  <form class="panel" id="gift-form">
+    <h2 id="gift-h">Send coins</h2>
+    <p class="small" id="gift-info"></p>
+    <label>How many? <input type="number" id="gift-amount" min="1" max="500" value="10" required></label>
+    <label>Note (optional) <input id="gift-note" maxlength="80" placeholder="Happy birthday!"></label>
+    <p class="msg" id="gift-msg"></p>
+    <div class="row"><button class="btn btn-sun" type="submit">Send</button><button class="btn" type="button" data-close>Cancel</button></div>
+  </form>
+</div>
+
+<div class="modal" id="notify-modal" hidden role="dialog" aria-modal="true" aria-labelledby="notify-h">
+  <div class="panel">
+    <h2 id="notify-h">Notifications</h2>
+    <p class="small">Pick which pop-ups you get. Your mailbox and messages still keep everything.</p>
+    <div class="stack" id="notify-list"></div>
+    <div class="row"><button class="btn" type="button" data-close>Done</button></div>
+  </div>
+</div>
+
+<div class="notes" id="notes" aria-live="polite"></div>
 
 <div class="modal" id="manage-modal" hidden role="dialog" aria-modal="true" aria-labelledby="manage-h">
   <div class="panel manage-panel">

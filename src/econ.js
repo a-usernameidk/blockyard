@@ -13,7 +13,7 @@ import { normalizeWorld, worldThumb } from '../public/js/world.js';
 import { json, fail, body, needUser, DAY, randomId, isConstraint, startOfDay } from './util.js';
 
 export const REWARD = { star: 10, dailyWin: 30, endlessCap: 200, obbyNoFall: 25, coin3d: 2, migrateCap: 2000, finishPerHour: 120 };
-const TRADE = { maxItems: 8, maxCoins: 100000, days: 3, openPerUser: 10 };
+export const TRADE = { maxItems: 8, maxCoins: 100000, days: 3, openPerUser: 10 };
 export const DEFAULT_LOOK = { color: '#ff6b35', hat: 'none', trail: 'none', pet: 'none', gear: 'none' };
 
 export const ECON_SCHEMA = [
@@ -66,16 +66,16 @@ export function coinStmts(db, uid, delta, why) {
   ];
 }
 // Give one item / take one item. Taking cancels the batch if they don't have it.
-const giveItem = (db, uid, key) => db.prepare('INSERT INTO inventory (user_id, item, qty) VALUES (?, ?, 1) ON CONFLICT (user_id, item) DO UPDATE SET qty = qty + 1').bind(uid, key);
-const takeItem = (db, uid, key) => [
+export const giveItem = (db, uid, key) => db.prepare('INSERT INTO inventory (user_id, item, qty) VALUES (?, ?, 1) ON CONFLICT (user_id, item) DO UPDATE SET qty = qty + 1').bind(uid, key);
+export const takeItem = (db, uid, key) => [
   db.prepare('UPDATE inventory SET qty = qty - 1 WHERE user_id = ? AND item = ?').bind(uid, key),
   db.prepare('INSERT INTO inventory (user_id, item, qty) SELECT ?, ?, -1 WHERE NOT EXISTS (SELECT 1 FROM inventory WHERE user_id = ? AND item = ?)').bind(uid, key, uid, key),
 ];
 // For admins: add or remove one of an item (limited stock isn't touched).
 export const itemStmts = (db, uid, key, n) => (n > 0 ? [giveItem(db, uid, key)] : [...takeItem(db, uid, key), tidy(db, uid)]);
-const tidy = (db, a, b = a) => db.prepare('DELETE FROM inventory WHERE qty = 0 AND user_id IN (?, ?)').bind(a, b);
+export const tidy = (db, a, b = a) => db.prepare('DELETE FROM inventory WHERE qty = 0 AND user_id IN (?, ?)').bind(a, b);
 // a message in someone's mailbox
-const mail = (db, uid, kind, title, text) => db.prepare('INSERT INTO mail (user_id, kind, title, body, at) VALUES (?, ?, ?, ?, ?)').bind(uid, kind, title.slice(0, 90), text.slice(0, 600), Date.now());
+export const mail = (db, uid, kind, title, text) => db.prepare('INSERT INTO mail (user_id, kind, title, body, at) VALUES (?, ?, ?, ?, ?)').bind(uid, kind, title.slice(0, 90), text.slice(0, 600), Date.now());
 const parse = (t, fallback = {}) => { try { const v = JSON.parse(t || ''); return v && typeof v === 'object' ? v : fallback; } catch (e) { return fallback; } };
 
 const owns = (items, kind, id) => FREE.includes(id) || (items[kind + ':' + id] || 0) > 0;
@@ -99,7 +99,7 @@ export async function getWallet(db, uid) {
   return { coins: w ? w.coins : 0, xp: w ? w.xp || 0 : 0, rstars: w ? w.rstars || 0 : 0, level: levelOf(w ? w.xp : 0), items, look: cleanLook(parse(u && u.look), items) };
 }
 // After selling or trading, make sure nobody is wearing something they gave away.
-async function fixLook(db, uid) {
+export async function fixLook(db, uid) {
   const w = await getWallet(db, uid);
   await db.prepare('UPDATE users SET look = ? WHERE id = ?').bind(JSON.stringify(w.look), uid).run();
   return w;
@@ -192,7 +192,7 @@ export const QUESTS = {
   daily: { text: "Beat today's daily challenge", goal: 1 },
   coins: { text: 'Grab 25 coins in levels and obbies', goal: 25 },
   player: { text: 'Beat a level or obby another player made', goal: 1 },
-  game: { text: 'Win a minigame round (Minigame Arena)', goal: 1 },
+  game: { text: 'Win a minigame round', goal: 1 },
 };
 const QUEST_REWARD = 40, QUEST_ALL = 60;
 export const STREAK = [20, 30, 40, 50, 60, 80, 150];
@@ -516,14 +516,14 @@ async function finishEndless(ctx, user, seedIn, replay) {
 }
 
 /* ---------------- trading ---------------- */
-function cleanKeys(list) {
+export function cleanKeys(list) {
   if (list == null) return [];
   if (!Array.isArray(list) || list.length > TRADE.maxItems) fail(400, `Up to ${TRADE.maxItems} items on each side.`);
   const keys = [...new Set(list.map(String))];
   for (const k of keys) { const f = findItem(k); if (!f || !canTrade(f.item)) fail(400, 'One of those items can\'t be traded.'); }
   return keys;
 }
-const cleanCoins = (n) => { const v = Math.floor(Number(n) || 0); if (v < 0 || v > TRADE.maxCoins) fail(400, 'That coin amount is too big.'); return v; };
+export const cleanCoins = (n) => { const v = Math.floor(Number(n) || 0); if (v < 0 || v > TRADE.maxCoins) fail(400, 'That coin amount is too big.'); return v; };
 
 async function newTrade(ctx, input) {
   const user = needUser(ctx);
@@ -587,11 +587,7 @@ async function tradeAction(ctx, id, input) {
     db.prepare('INSERT INTO trade_done (id) VALUES (?)').bind(id),
     db.prepare("UPDATE trades SET status = 'done', done_at = ? WHERE id = ?").bind(Date.now(), id),
   ];
-  for (const k of give) stmts.push(...takeItem(db, A, k), giveItem(db, Bid, k));
-  for (const k of want) stmts.push(...takeItem(db, Bid, k), giveItem(db, A, k));
-  if (t.give_coins) stmts.push(...coinStmts(db, A, -t.give_coins, 'trade ' + id), ...coinStmts(db, Bid, t.give_coins, 'trade ' + id));
-  if (t.want_coins) stmts.push(...coinStmts(db, Bid, -t.want_coins, 'trade ' + id), ...coinStmts(db, A, t.want_coins, 'trade ' + id));
-  stmts.push(tidy(db, A, Bid));
+  stmts.push(...swapStmts(db, A, Bid, give, want, t.give_coins, t.want_coins, 'trade ' + id));
   try { await db.batch(stmts); } catch (e) {
     if (!isConstraint(e)) throw e;
     await db.prepare("UPDATE trades SET status = 'failed', done_at = ? WHERE id = ? AND status = 'open'").bind(Date.now(), id).run();
@@ -599,7 +595,63 @@ async function tradeAction(ctx, id, input) {
   }
   await fixLook(db, A);
   await mail(db, A, 'trade', 'Trade accepted!', `${user.name} accepted your trade. Your new stuff is in your closet.`).run().catch(() => {});
-  return json({ ok: true, wallet: await fixLook(db, Bid) });
+  const wallet = await fixLook(db, Bid);
+  await noteTransfers(ctx, A, Bid, give, want, t.give_coins, t.want_coins, 'trade');
+  return json({ ok: true, wallet });
+}
+// Everything that moves between two players in a trade: A gives `give` + giveCoins to B, B gives `want` + wantCoins to A.
+export function swapStmts(db, A, B, give, want, giveCoins, wantCoins, why) {
+  const stmts = [];
+  for (const k of give) stmts.push(...takeItem(db, A, k), giveItem(db, B, k));
+  for (const k of want) stmts.push(...takeItem(db, B, k), giveItem(db, A, k));
+  if (giveCoins) stmts.push(...coinStmts(db, A, -giveCoins, why), ...coinStmts(db, B, giveCoins, why));
+  if (wantCoins) stmts.push(...coinStmts(db, B, -wantCoins, why), ...coinStmts(db, A, wantCoins, why));
+  stmts.push(tidy(db, A, B));
+  return stmts;
+}
+const worth = (keys, coins) => (coins || 0) + keys.reduce((n, k) => { const f = findItem(k); return n + (f ? valueOf(f.item) : 0); }, 0);
+// Write down who got what in a trade, then check both players for coin farming.
+export async function noteTransfers(ctx, A, B, give, want, giveCoins, wantCoins, kind) {
+  const { db } = ctx, a = worth(give, giveCoins), b = worth(want, wantCoins), stmts = [];
+  if (a) stmts.push(transferStmt(db, A, B, a, kind));
+  if (b) stmts.push(transferStmt(db, B, A, b, kind));
+  if (!stmts.length) return;
+  await db.batch(stmts).catch(() => {});
+  if (a) await checkFarm(ctx, B);
+  if (b) await checkFarm(ctx, A);
+}
+
+/* ---------------- coin farming ---------------- */
+// Every gift and trade is written down. If one player gets coins or items from 3 or more brand-new, barely-played
+// accounts that were made on the same network as theirs, that's farming with extra accounts: their coins (and the
+// extra accounts' coins) are wiped and they get 2 warnings. 3 warnings is a ban.
+export const FARM = { senders: 3, days: 7, freshDays: 7, lowXp: 100, warnings: 2, banAt: 3 };
+export const transferStmt = (db, from, to, value, kind) => db.prepare('INSERT INTO transfers (from_id, to_id, value, kind, at) VALUES (?, ?, ?, ?, ?)').bind(from, to, value, kind, Date.now());
+export async function checkFarm(ctx, uid) {
+  const { db } = ctx, now = Date.now();
+  try {
+    const me = await db.prepare('SELECT id, name, signup_ip FROM users WHERE id = ?').bind(uid).first();
+    if (!me || !me.signup_ip) return false;
+    const { results } = await db.prepare(`SELECT DISTINCT t.from_id AS id FROM transfers t JOIN users u ON u.id = t.from_id LEFT JOIN wallets w ON w.user_id = u.id
+      WHERE t.to_id = ? AND t.at > ? AND u.signup_ip = ? AND u.created_at > ? AND COALESCE(w.xp, 0) < ?`).bind(uid, now - FARM.days * DAY, me.signup_ip, now - FARM.freshDays * DAY, FARM.lowXp).all();
+    if (results.length < FARM.senders) return false;
+    const alts = results.map((r) => r.id), week = Math.floor(now / (7 * DAY));
+    const wipe = (id) => [
+      db.prepare("INSERT INTO ledger (user_id, delta, why, at) SELECT user_id, -coins, 'farm wipe', ? FROM wallets WHERE user_id = ? AND coins > 0").bind(now, id),
+      db.prepare('UPDATE wallets SET coins = 0 WHERE user_id = ?').bind(id),
+    ];
+    const ok = await db.batch([
+      db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(uid, 'farm:' + week, now),
+      ...wipe(uid), ...alts.flatMap(wipe),
+      db.prepare('UPDATE users SET warnings = warnings + ? WHERE id = ?').bind(FARM.warnings, uid),
+      mail(db, uid, 'warning', 'Coin farming: coins wiped, 2 warnings', `Blockyard noticed ${alts.length} brand-new accounts from your network sending you coins or items. Making extra accounts to farm coins isn't allowed, so your coins (and theirs) were wiped and you got 2 warnings. 3 warnings is a ban. If this was a mistake, tell the admin.`),
+      db.prepare("INSERT INTO admin_log (admin, path, detail, at) VALUES ('Blockyard', 'farm', ?, ?)").bind(JSON.stringify({ user: me.name, alts: alts.length }), now),
+    ]).then(() => true, (e) => { if (isConstraint(e)) return false; throw e; });
+    if (!ok) return false;
+    const w = await db.prepare('SELECT warnings FROM users WHERE id = ?').bind(uid).first();
+    if (w && w.warnings >= FARM.banAt && ctx.ban) await ctx.ban(me);
+    return true;
+  } catch (e) { return false; }
 }
 
 // Everything a profile page shows about someone's closet.

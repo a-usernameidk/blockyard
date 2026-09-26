@@ -269,12 +269,12 @@ $('#acct-pw-change').addEventListener('click', async () => {
 });
 
 /* ---------------- mailbox ---------------- */
-function setMailCount(n) { const c = $('#mail-count'); c.hidden = !n; c.textContent = String(n); $('#mail-btn').hidden = !session.user; }
+export function setMailCount(n) { const c = $('#mail-count'); c.hidden = !n; c.textContent = String(n); $('#mail-btn').hidden = !session.user; }
 export async function checkMail() {
   if (!session.user) { setMailCount(0); return; }
   try { const r = await api.mail(); setMailCount(r.unread); return r; } catch (e) { return null; }
 }
-const MAIL_ICON = { gift: '🎁', role: '⭐', trade: '🔁', earn: '🪙' };
+const MAIL_ICON = { gift: '🎁', role: '⭐', trade: '🔁', earn: '🪙', coins: '🪙', welcome: '🎉', warning: '⚠️' };
 async function openMail() {
   const list = $('#mail-list');
   list.replaceChildren(el('p', { class: 'small' }, 'Loading…'));
@@ -285,6 +285,7 @@ async function openMail() {
     el('h3', {}, el('span', {}, `${MAIL_ICON[m.kind] || '✉️'} ${m.title}`), el('span', { class: 'small' }, timeAgo(m.at))),
     el('p', {}, m.body),
     el('div', { class: 'row' },
+      m.data && m.data.claim ? el('button', { class: 'btn btn-sun', type: 'button', onclick: async (e) => { const b = e.currentTarget; try { const r = await api.mailAction(m.id, 'claim'); setWallet(r.wallet); toast(`+${r.coins} coins!`); b.textContent = 'Claimed'; } catch (err) { b.textContent = err.status === 409 ? 'Claimed' : err.message; } b.disabled = true; } }, `Claim ${m.data.claim} coins`) : null,
       m.kind === 'trade' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet/trades'); } }, 'See trades') : null,
       m.kind === 'gift' ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet'); } }, 'Open closet') : null,
       m.kind === 'earn' && m.data && m.data.game ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/create'); } }, 'My games') : null,
@@ -321,6 +322,7 @@ function renderFriends() {
     ...d.friends.map((f) => el('div', { class: 'friend-row' }, friendDot(f),
       el('span', { class: 'who' }, el('a', { class: 'linkish', href: '#/u/' + f.name, 'data-go': '#/u/' + f.name }, f.name), el('span', { class: 'small' }, f.online ? `Playing ${f.online.name}` : 'Offline')),
       f.online && f.online.code ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#friends-list-modal')); go('#/join/' + f.online.code); } }, 'Join') : null,
+      el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#friends-list-modal')); dispatchEvent(new CustomEvent('by:dm', { detail: f.name })); } }, 'Message'),
       el('button', { class: 'btn', type: 'button', title: `Unfriend ${f.name}`, onclick: act(f.name, 'remove', `Removed ${f.name}.`) }, 'Remove'))),
     d.outgoing.length ? el('h3', {}, 'Waiting for them to say yes') : null,
     ...d.outgoing.map((f) => el('div', { class: 'friend-row' }, friendDot(f), el('span', { class: 'who' }, f.name), el('button', { class: 'btn', type: 'button', onclick: act(f.name, 'remove') }, 'Cancel'))));

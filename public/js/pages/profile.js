@@ -9,6 +9,7 @@ import { playerWorldCard } from './worlds.js';
 import { manageUser } from './admin.js';
 import { friendsNow, checkFriends, openFriends } from './account.js';
 import { toast } from '../app.js';
+import { openDMs, startLive, openGift } from './social.js';
 
 // "Add friend" / "Friends" / "Request sent" for someone's profile
 function friendButton(name) {
@@ -52,6 +53,10 @@ async function showProfile(name) {
           !me ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => (session.user ? go('#/closet/trade/' + u.name) : needLogin('Trading needs an account.')) }, 'Trade with them') : el('button', { class: 'btn', type: 'button', 'data-go': '#/closet' }, 'Change my look'),
           !me ? friendButton(u.name) : el('button', { class: 'btn', type: 'button', onclick: openFriends }, 'My friends'),
           u.playing && u.playing.code && !me ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + u.playing.code) }, 'Join them') : null),
+        !me ? el('div', { class: 'row' },
+          el('button', { class: 'btn', type: 'button', onclick: () => openDMs(u.name) }, 'Message'),
+          el('button', { class: 'btn btn-sun', type: 'button', onclick: () => startLive(u.name) }, 'Live trade'),
+          el('button', { class: 'btn', type: 'button', onclick: () => openGift(u.name) }, 'Send coins')) : null,
         session.user && session.user.admin ? el('div', { class: 'admin-strip row' }, el('b', {}, 'Admin'),
           el('button', { class: 'btn btn-sun', type: 'button', onclick: () => manageUser(u.name) }, me ? 'Give myself coins or items' : 'Coins, items, kick, ban…')) : null)),
     badges.length ? el('h2', {}, 'Badges') : null,

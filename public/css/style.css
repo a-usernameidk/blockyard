@@ -654,3 +654,49 @@ body[data-view="w3"] .announce, body[data-view="build"] .announce, body[data-vie
 .role-badge { display: inline-block; vertical-align: middle; margin-left: 10px; font: 800 14px Nunito, system-ui, sans-serif; background: var(--grass); color: var(--ink); border: 3px solid var(--line); border-radius: 10px; padding: 2px 10px; }
 .role-badge.admin { background: var(--sun); }
 .w3-name .lvl.builder { background: var(--grass); }
+
+/* pop-up notifications (top right) */
+.notes { position: fixed; top: 12px; right: 12px; z-index: 60; display: flex; flex-direction: column; gap: 8px; width: min(320px, calc(100vw - 24px)); pointer-events: none; }
+.note { pointer-events: auto; background: var(--card); color: var(--text); border: 3px solid var(--line); border-radius: 14px; padding: 10px 12px; box-shadow: 0 4px 0 var(--line); animation: note-in .25s ease-out; }
+.note b { display: block; }
+.note p { margin: 4px 0 8px; font-size: 14px; overflow-wrap: anywhere; }
+.note .row { gap: 6px; }
+.note .btn { padding: 3px 10px; font-size: 13px; }
+@keyframes note-in { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+/* messages */
+.dm-panel { width: min(760px, calc(100vw - 24px)); max-width: 760px; }
+.dm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dm-head h2 { margin: 0; }
+.dm-grid { display: grid; grid-template-columns: 220px 1fr; gap: 12px; min-height: 360px; }
+.dm-chats { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow: auto; }
+.dm-chat { display: flex; align-items: center; gap: 8px; text-align: left; background: var(--card); border: 2px solid var(--line); border-radius: 12px; padding: 6px 8px; cursor: pointer; color: var(--text); font: inherit; }
+.dm-chat.on { background: var(--sun); color: var(--ink); }
+.dm-chat .who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.dm-chat .who .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dm-chat .count, .note .count { position: static; }
+.dm-thread { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dm-who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 800; }
+.dm-msgs { list-style: none; margin: 0; padding: 8px; flex: 1; min-height: 240px; max-height: 360px; overflow: auto; border: 2px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
+.dm-msgs li { align-self: flex-start; max-width: 80%; background: #eef2ff; color: #1d2340; border-radius: 12px 12px 12px 3px; padding: 6px 10px; overflow-wrap: anywhere; }
+.dm-msgs li.me { align-self: flex-end; background: var(--sun); border-radius: 12px 12px 3px 12px; }
+.dm-msgs li small { display: block; font-size: 11px; opacity: .6; }
+.dm-msgs li.dm-empty { align-self: center; background: none; opacity: .7; }
+.dm-form { display: flex; gap: 8px; }
+.dm-form input { flex: 1; }
+@media (max-width: 640px) { .dm-grid { grid-template-columns: 1fr; } .dm-chats { max-height: 150px; } }
+/* live trades */
+.live-panel { width: min(720px, calc(100vw - 24px)); max-width: 720px; max-height: calc(100vh - 32px); overflow: auto; }
+.live-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.live-side { border: 2px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+.live-side h3 { margin: 0 0 6px; }
+.live-items { display: flex; flex-wrap: wrap; gap: 6px; min-height: 56px; }
+.live-pick { max-height: 200px; overflow: auto; }
+.item.mini { width: 84px; padding: 4px; font-size: 12px; }
+.item.mini.on { outline: 3px solid var(--grass); background: #dcf5e3; }
+.check { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.tag-diff { display: inline-flex; align-items: center; gap: 4px; }
+.tag-diff .diff-face { margin: -3px 0 -3px -4px; }
+.detail-thumb { position: relative; }
+.detail-thumb > .diff-face { position: absolute; right: 6px; bottom: 6px; filter: drop-shadow(0 2px 0 rgba(29,35,64,.35)); }
+.hero-thumb { position: relative; min-width: 0; }
+.hero-thumb > .diff-face { position: absolute; right: 10px; bottom: 10px; filter: drop-shadow(0 2px 0 rgba(29,35,64,.35)); }

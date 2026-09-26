@@ -9,9 +9,10 @@ import { setWallet, friendsNow, checkFriends, openFriends, refreshWallet } from 
 import { manageUser } from './admin.js';
 import { levelOf } from '../cosmetics.js';
 import { gameConfig, GAMES } from '../games.js';
-import { openReport, diffTag } from './play.js';
+import { openReport, diffTag, diffFace } from './play.js';
 import { starsFor } from '../stars.js';
 import { shopPanel } from './closet.js';
+import { openDMs, startLive } from './social.js';
 
 let game = null;
 onLeave('w3', () => { if (game) { game.stop(); game = null; } $('#w3-root').replaceChildren(); });
@@ -141,7 +142,7 @@ async function showWorld(id) {
   if (w.mode !== 'hangout') api.board((w.builtin ? 'w:' : 'g:') + id).then((b) => boardBox.replaceChildren(boardList(b))).catch(() => boardBox.replaceChildren(el('p', { class: 'small' }, 'Leaderboards need the online version.')));
   const done = progress.level('w:' + id);
   page.replaceChildren(
-    el('div', { class: 'world-hero' }, cv, el('div', { class: 'world-info' },
+    el('div', { class: 'world-hero' }, el('div', { class: 'hero-thumb' }, cv, diffFace(w.stars, 64)), el('div', { class: 'world-info' },
       el('p', { class: 'detail-kicker' }, w.world.game ? `Minigame: ${GAMES[w.world.game].name}` : w.builtin && builtinWorld(id).game ? 'Minigame' : w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
       el('h1', {}, w.name),
       w.blurb ? el('p', { class: 'lede' }, w.blurb) : null,
@@ -215,6 +216,8 @@ async function enterWorld(id, code) {
     onExit: () => go(w.builtin || !w.by ? '#/worlds' : '#/w/' + id),
     onProfile: (name) => go('#/u/' + name),
     onTrade: (name) => go('#/closet/trade/' + name),
+    onLiveTrade: (name) => startLive(name),
+    onMessage: (name) => openDMs(name),
     onGraphics: () => enterWorld(id, code),
     onWin: async (r) => {
       progress.finishWorld(id, r);

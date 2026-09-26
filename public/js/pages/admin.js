@@ -133,8 +133,12 @@ export async function manageUser(name) {
       ? el('button', { class: 'btn', type: 'button', onclick: () => act('role', { role: '' }, () => `${u.name} isn't a Builder anymore.`) }, 'Remove Builder')
       : el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('role', { role: 'builder' }, () => `${u.name} is a Builder now! They got a mail about it.`) }, 'Make Builder')));
   // kick / ban
-  const safety = u.admin ? null : el('section', {}, el('h3', {}, 'Safety'),
+  const safety = u.admin ? null : el('section', {}, el('h3', {}, `Safety: ${u.warnings || 0} of 3 warnings`),
+    el('p', { class: 'small' }, '3 warnings is an automatic ban. Coin farming with extra accounts gives 2 at once.'),
     el('div', { class: 'row' },
+      el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('warn', {}, (r) => (r.banned ? `${u.name} hit 3 warnings and is banned.` : `${u.name} has ${r.warnings} warning${r.warnings === 1 ? '' : 's'} now.`)) }, 'Give a warning'),
+      u.warnings ? el('button', { class: 'btn', type: 'button', onclick: () => act('unwarn', {}, (r) => `${u.name} has ${r.warnings} warning${r.warnings === 1 ? '' : 's'} now.`) }, 'Remove a warning') : null),
+    el('div', { class: 'row', style: 'margin-top:8px' },
       el('button', { class: 'btn', type: 'button', onclick: () => act('kick', {}, () => `${u.name} was removed from every 3D server.`) }, 'Kick from servers'),
       el('button', { class: 'btn ' + (u.banned ? 'btn-grass' : 'btn-danger'), type: 'button', onclick: async () => { const b = !u.banned; if (await ask(`${b ? 'Ban' : 'Unban'} ${u.name}?`, b ? 'They get logged out, kicked from every server, cannot log back in, and all their games are hidden.' : 'They can log in again and their games come back.', [{ label: b ? 'Ban' : 'Unban', value: true, cls: 'btn-danger' }])) { openModal('#manage-modal'); act(b ? 'ban' : 'unban', {}, () => `${u.name} ${b ? 'banned' : 'unbanned'}.`); } else openModal('#manage-modal'); } }, u.banned ? 'Unban' : 'Ban')));
   const history = el('section', {}, el('h3', {}, 'Recent coins'),
@@ -189,7 +193,7 @@ function describe(l) {
   if (who) return ({
     grant: d.amount >= 0 ? `gave ${who} ${d.amount} coins` : `took ${-d.amount} coins from ${who}`,
     setcoins: `set ${who}'s coins to ${d.amount}`, give: `gave ${who} a ${item}`, take: `took a ${item} from ${who}`,
-    password: `set a new password for ${who}`, kick: `kicked ${who}`, ban: `banned ${who}`, unban: `unbanned ${who}`,
+    password: `set a new password for ${who}`, kick: `kicked ${who}`, ban: `banned ${who}`, unban: `unbanned ${who}`, warn: `warned ${who}`, unwarn: `removed a warning from ${who}`,
   })[d.action] || `${d.action} ${who}`;
   if (p === '/announce') return d.text ? `announced "${d.text}"` : 'removed the announcement';
   if (p === '/stock') return `set ${item} stock to ${d.left}`;

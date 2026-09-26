@@ -14,6 +14,7 @@ import { builtinWorld } from '../public/js/worlds3d.js';
 import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
 import { findItem } from '../public/js/cosmetics.js';
+import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
 import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool, ECON_COLUMNS, questBumps } from './econ.js';
 export { Room } from './room.js';
 
@@ -76,6 +77,7 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS friends (a TEXT NOT NULL, b TEXT NOT NULL, status TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (a, b))',
   'CREATE INDEX IF NOT EXISTS friends_b ON friends (b, status)',
   ...ECON_SCHEMA,
+  ...SOCIAL_SCHEMA,
 ];
 // columns added after the first version
 const COLUMNS = [
@@ -89,6 +91,8 @@ const COLUMNS = [
   "ALTER TABLE users ADD COLUMN look TEXT NOT NULL DEFAULT '{}'",
   'ALTER TABLE users ADD COLUMN econ INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT ''",
+  'ALTER TABLE users ADD COLUMN warnings INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE users ADD COLUMN signup_ip TEXT',
 ];
 
 // Tables are created automatically the first time the Worker runs.
@@ -146,6 +150,7 @@ async function handle(request, env, url) {
   await ensureSchema(env.DB);
   const db = env.DB;
   const ctx = { db, env, request, url, ip: await visitorId(request, env), user: await sessionUser(db, request, env) };
+  ctx.ban = (u) => banUser(ctx, u);
   let m;
 
   // accounts
@@ -161,6 +166,8 @@ async function handle(request, env, url) {
   // coins, shop, trades, rewards
   const e = await econRoute(ctx, path, method);
   if (e) return e;
+  const so = await socialRoute(ctx, path, method);
+  if (so) return so;
 
   // players
   if (path === '/users' && method === 'GET') return findUsers(ctx);
@@ -291,13 +298,14 @@ function checkPassword(pw) {
 async function account(ctx, u, extra = {}) {
   const { db, env } = ctx;
   if (!u.econ) await migrateUser(db, u.id, u.progress);
-  const [ex, mail, rr] = await Promise.all([accountExtras(db, u.id), db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(u.id).first(), db.prepare('SELECT role FROM users WHERE id = ?').bind(u.id).first()]);
-  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u), role: (rr && rr.role) || '' }, progress: JSON.parse(u.progress || '{}'), ...ex, unread: mail.n };
+  const [ex, mail, rr] = await Promise.all([accountExtras(db, u.id), db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(u.id).first(), db.prepare('SELECT role, warnings FROM users WHERE id = ?').bind(u.id).first()]);
+  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u), role: (rr && rr.role) || '', warnings: (rr && rr.warnings) || 0 }, progress: JSON.parse(u.progress || '{}'), ...ex, unread: mail.n };
 }
 async function signup(ctx, input) {
   const { db, env, ip } = ctx;
   checkName(input.name); checkPassword(input.password);
-  if (await countEvents(db, 'signup', ip, Date.now() - DAY) >= LIMITS_PER.signupsDay) fail(429, 'Too many new accounts from here today. Try again tomorrow.');
+  const madeToday = await countEvents(db, 'signup', ip, Date.now() - DAY);
+  if (madeToday >= LIMITS_PER.signupsDay) fail(429, 'Too many new accounts from here today. Try again tomorrow.');
   const taken = await db.prepare('SELECT id FROM users WHERE name_lower = ?').bind(input.name.toLowerCase()).first();
   if (taken) fail(409, 'That username is taken. Try another one.');
   const id = randomId(12), salt = randomId(16), recovery = randomId(4) + '-' + randomId(4) + '-' + randomId(4);
@@ -308,8 +316,10 @@ async function signup(ctx, input) {
     const t = JSON.stringify(p); if (t.length < 64000) progress = t;
   }
   const look = input.progress && input.progress.equip ? JSON.stringify(cleanLook(input.progress.equip, {})) : '{}';
-  await db.prepare('INSERT INTO users (id, name, name_lower, pw_hash, pw_salt, rec_hash, progress, created_at, look, econ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)')
-    .bind(id, input.name, input.name.toLowerCase(), await hashPassword(input.password, salt, env), salt, await sha256(recovery.toUpperCase() + (env.SALT || '')), progress, Date.now(), look).run();
+  await db.prepare('INSERT INTO users (id, name, name_lower, pw_hash, pw_salt, rec_hash, progress, created_at, look, econ, signup_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)')
+    .bind(id, input.name, input.name.toLowerCase(), await hashPassword(input.password, salt, env), salt, await sha256(recovery.toUpperCase() + (env.SALT || '')), progress, Date.now(), look, ip).run();
+  // a welcome gift in the mailbox (only the first few new accounts from the same place each day get one)
+  if (madeToday < 3 && SIGNUP_BONUS) await mailStmt(db, id, 'welcome', `Welcome to Blockyard! Here are ${SIGNUP_BONUS} coins`, 'Press Claim to get your welcome coins. Spend them in the Closet on hats, colors, pets and more!', null, { claim: SIGNUP_BONUS }).run();
   await addEvent(db, 'signup', ip);
   const token = await newSession(db, id);
   return remember(json(await account(ctx, { id, name: input.name, progress, econ: 1 }, { token, recovery }), 201), input, token);
@@ -382,6 +392,8 @@ async function deleteMe(ctx) {
     db.prepare('DELETE FROM projects WHERE owner_id = ?').bind(user.id),
     ...['sessions', 'daily', 'wallets', 'inventory', 'level_progress', 'claims', 'collabs', 'presence', 'best_times', 'mail'].map((t) => db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(user.id)),
     db.prepare('DELETE FROM friends WHERE a = ? OR b = ?').bind(user.id, user.id),
+    db.prepare('DELETE FROM dms WHERE from_id = ? OR to_id = ?').bind(user.id, user.id),
+    db.prepare("UPDATE live_trades SET status = 'cancelled' WHERE (a = ? OR b = ?) AND status IN ('invite', 'open')").bind(user.id, user.id),
     db.prepare("UPDATE trades SET status = 'cancelled' WHERE status = 'open' AND (from_id = ? OR to_id = ?)").bind(user.id, user.id),
     db.prepare('DELETE FROM users WHERE id = ?').bind(user.id),
   ]);
@@ -412,7 +424,15 @@ async function mailAction(ctx, id, input) {
     else if (input.action === 'delete') await db.prepare('DELETE FROM mail WHERE user_id = ? AND read = 1').bind(user.id).run();
     else fail(400, 'Unknown action.');
   } else if (input.action === 'delete') await db.prepare('DELETE FROM mail WHERE id = ? AND user_id = ?').bind(Number(id), user.id).run();
-  else fail(400, 'Unknown action.');
+  else if (input.action === 'claim') {
+    // mail with coins inside (like the welcome gift): claim once
+    const row = await db.prepare('SELECT id, data FROM mail WHERE id = ? AND user_id = ?').bind(Number(id), user.id).first();
+    const coins = row && row.data ? Math.floor(Number(JSON.parse(row.data).claim) || 0) : 0;
+    if (!coins) fail(400, 'Nothing to claim in that mail.');
+    try { await db.batch([db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(user.id, 'mail:' + row.id, Date.now()), ...coinStmts(db, user.id, coins, 'mail gift')]); }
+    catch (e) { if (isConstraint(e)) fail(409, 'You already claimed that.'); throw e; }
+    return json({ ok: true, coins, wallet: await getWallet(db, user.id) });
+  } else fail(400, 'Unknown action.');
   return json({ ok: true });
 }
 
@@ -1041,14 +1061,14 @@ async function admin(ctx, path, method) {
   }
   m = path.match(/^\/users\/([A-Za-z0-9_]{3,16})$/);
   if (m && method === 'GET') {
-    const u = await db.prepare('SELECT id, name, banned, created_at, role FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
+    const u = await db.prepare('SELECT id, name, banned, created_at, role, warnings FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
     if (!u) fail(404, 'No user with that name.');
     const [w, ledger, games] = await Promise.all([
       getWallet(db, u.id),
       db.prepare('SELECT delta, why, at FROM ledger WHERE user_id = ? ORDER BY at DESC LIMIT 25').bind(u.id).all(),
       db.prepare('SELECT COUNT(*) AS n FROM games WHERE user_id = ?').bind(u.id).first(),
     ]);
-    return json({ name: u.name, banned: !!u.banned, since: u.created_at, admin: isAdmin(env, u), role: u.role || '', wallet: w, ledger: ledger.results, games: games.n });
+    return json({ name: u.name, banned: !!u.banned, since: u.created_at, admin: isAdmin(env, u), role: u.role || '', warnings: u.warnings || 0, wallet: w, ledger: ledger.results, games: games.n });
   }
   if (m && method === 'POST') {
     const input = await body(ctx.request);
@@ -1102,9 +1122,20 @@ async function admin(ctx, path, method) {
     if (action === 'kick') { if (isAdmin(env, u)) fail(400, "You can't kick an admin."); await kickEverywhere(env, db, u.id, 'An admin removed you from this server.'); return json({ ok: true }); }
     if (isAdmin(env, u)) fail(400, "You can't ban an admin.");
     if (action === 'ban') await banUser(ctx, u);
-    else if (action === 'unban') {
+    else if (action === 'warn' || action === 'unwarn') {
+      // 3 warnings is a ban
+      const up = action === 'warn';
       await db.batch([
-        db.prepare('UPDATE users SET banned = 0 WHERE id = ?').bind(u.id),
+        db.prepare(`UPDATE users SET warnings = MAX(0, warnings ${up ? '+' : '-'} 1) WHERE id = ?`).bind(u.id),
+        up ? mailStmt(db, u.id, 'warning', 'You got a warning', `${user.name} gave you a warning.${input.note ? ' "' + String(input.note).slice(0, 200) + '"' : ''} 3 warnings is a ban.`)
+          : mailStmt(db, u.id, 'warning', 'A warning was removed', `${user.name} took away one of your warnings. Nice!`),
+      ]);
+      const w = await db.prepare('SELECT warnings FROM users WHERE id = ?').bind(u.id).first();
+      if (up && w.warnings >= 3) await banUser(ctx, u);
+      return json({ ok: true, warnings: w.warnings, banned: up && w.warnings >= 3 });
+    } else if (action === 'unban') {
+      await db.batch([
+        db.prepare('UPDATE users SET banned = 0, warnings = MIN(warnings, 2) WHERE id = ?').bind(u.id),
         db.prepare('UPDATE games SET hidden = 0 WHERE user_id = ? AND reports < ?').bind(u.id, HIDE_AFTER_REPORTS),
       ]);
     } else fail(400, 'Unknown action.');

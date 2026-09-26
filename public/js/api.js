@@ -142,6 +142,16 @@ export const api = {
   board: (board) => request('GET', `/boards/${board.replace(/[^A-Za-z0-9:_-]/g, '')}`),
   announce: (text) => request('POST', '/admin/announce', { text }),
   setStock: (item, left) => request('POST', '/admin/stock', { item, left }),
+  // messages, live trades, sending coins, what's new
+  pulse: (since) => request('GET', `/me/pulse?${qs({ since })}`),
+  dms: () => request('GET', '/dms'),
+  dmThread: (name) => request('GET', `/dms/${enc(name)}`),
+  dmSend: (name, m) => request('POST', `/dms/${enc(name)}`, { m }),
+  dmReport: (name, reason) => request('POST', `/dms/${enc(name)}/report`, { reason }),
+  gift: (to, amount, note) => request('POST', '/gift', { to, amount, note }),
+  liveStart: (to) => request('POST', '/live', { to }),
+  live: (id) => request('GET', `/live/${enc(id)}`),
+  liveAct: (id, action, extra = {}) => request('POST', `/live/${enc(id)}`, { action, ...extra }),
   // coins, closet, trades
   look: (look) => request('PUT', '/me/look', look),
   shop: () => request('GET', '/shop'),

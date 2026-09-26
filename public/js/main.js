@@ -7,6 +7,7 @@ import './pages/create.js';
 import './pages/closet.js';
 import './pages/profile.js';
 import './pages/admin.js';
+import './pages/social.js';
 import { renderMe, startSession, onSession, checkFriends, checkMail } from './pages/account.js';
 import { checkTrades } from './pages/closet.js';
 import { loadOnline } from './pages/worlds.js';
