@@ -193,9 +193,30 @@ async function handle(request, env, url) {
 async function visitorId(request, env) {
   return (await sha256((request.headers.get('CF-Connecting-IP') || 'local') + '|' + (env.SALT || 'blockyard'))).slice(0, 32);
 }
-async function hashPassword(password, salt, env) {
-  const key = await crypto.subtle.importKey('raw', enc(password + '|' + (env.SALT || '')), 'PBKDF2', false, ['deriveBits']);
+async function hashPassword(password, salt, env) { return hashWith(password, salt, env.SALT || ''); }
+async function hashWith(password, salt, secret) {
+  const key = await crypto.subtle.importKey('raw', enc(password + '|' + secret), 'PBKDF2', false, ['deriveBits']);
   return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc(salt), iterations: 10000 }, key, 256));
+}
+// Accounts made before the SALT secret was added (or before it was changed) were saved with a
+// different secret, so their right password looked wrong. Check those older ways too; when one
+// matches, the password is saved again the current way so it's fast next time.
+// (If SALT was changed, put the old value in a secret called OLD_SALT.)
+const olderSecrets = (env) => [...new Set([env.SALT ? '' : null, env.OLD_SALT || null].filter((x) => x != null && x !== (env.SALT || '')))];
+async function passwordMatches(db, env, u, password) {
+  if (sameText(u.pw_hash, await hashPassword(password, u.pw_salt, env))) return true;
+  for (const old of olderSecrets(env)) {
+    if (sameText(u.pw_hash, await hashWith(password, u.pw_salt, old))) {
+      const salt = randomId(16);
+      await db.prepare('UPDATE users SET pw_hash = ?, pw_salt = ? WHERE id = ?').bind(await hashPassword(password, salt, env), salt, u.id).run();
+      return true;
+    }
+  }
+  return false;
+}
+async function recoveryMatches(env, u, code) {
+  for (const secret of [env.SALT || '', ...olderSecrets(env)]) if (sameText(u.rec_hash || '', await sha256(code + secret))) return true;
+  return false;
 }
 function sameText(a, b) {
   const x = enc(a), y = enc(b);
@@ -274,7 +295,7 @@ async function login(ctx, input) {
   const { db, env, ip } = ctx;
   await tooManyFails(ctx);
   const u = await db.prepare('SELECT * FROM users WHERE name_lower = ?').bind(String(input.name || '').toLowerCase()).first();
-  if (!u || !sameText(u.pw_hash, await hashPassword(String(input.password || ''), u.pw_salt, env))) {
+  if (!u || !(await passwordMatches(db, env, u, String(input.password || '')))) {
     await addEvent(db, 'fail', ip);
     fail(401, 'Wrong username or password.');
   }
@@ -288,7 +309,7 @@ async function recover(ctx, input) {
   checkPassword(input.password);
   const u = await db.prepare('SELECT * FROM users WHERE name_lower = ?').bind(String(input.name || '').toLowerCase()).first();
   const code = String(input.recovery || '').trim().toUpperCase();
-  if (!u || !sameText(u.rec_hash, await sha256(code + (env.SALT || '')))) {
+  if (!u || !(await recoveryMatches(env, u, code))) {
     await addEvent(db, 'fail', ip);
     fail(401, "That username and recovery code don't match.");
   }
