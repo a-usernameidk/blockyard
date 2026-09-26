@@ -7,6 +7,7 @@ import { isRude } from '../format.js';
 import { drawTile } from '../render2d.js';
 import { levelOf, xpFor } from '../cosmetics.js';
 import { iconCanvas } from '../art.js';
+import { diffName } from '../stars.js';
 import { isMuted, setMuted, unlockAudio, isMusicOn, setMusicOn } from '../audio.js';
 
 /* ---------------- header ---------------- */
@@ -276,7 +277,15 @@ export async function checkMail() {
   if (!session.user) { setMailCount(0); return; }
   try { const r = await api.mail(); setMailCount(r.unread); return r; } catch (e) { return null; }
 }
-const MAIL_ICON = { gift: '🎁', role: '⭐', trade: '🔁', earn: '🪙', coins: '🪙', welcome: '🎉', warning: '⚠️' };
+// the admin verifies a level's difficulty right from the mailbox
+function rateButtons(m) {
+  const r = m.data.rate, msg = el('span', { class: 'small' });
+  const set = async (n) => { try { await api.admin('POST', '/games/' + r.game, { action: 'stars', amount: n }); msg.textContent = n ? `Rated ${n}★ ${diffName(n)}. Beating it gives stars and coins now.` : 'Left unrated.'; } catch (e) { msg.textContent = e.message; } };
+  const pick = el('select', { 'aria-label': 'Pick a different rating' }, ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => el('option', { value: String(n) }, `${n}★ ${diffName(n)}`)));
+  pick.value = String(r.stars);
+  return el('span', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => set(r.stars) }, `Accept ${r.stars}★ ${diffName(r.stars)}`), pick, el('button', { class: 'btn', type: 'button', onclick: () => set(Number(pick.value)) }, 'Use this'), el('button', { class: 'btn', type: 'button', 'data-go': '#/p/' + r.game }, 'Play it'), msg);
+}
+const MAIL_ICON = { admin: '🛡️', gift: '🎁', role: '⭐', trade: '🔁', earn: '🪙', coins: '🪙', welcome: '🎉', warning: '⚠️' };
 async function openMail() {
   const list = $('#mail-list');
   list.replaceChildren(el('p', { class: 'small' }, 'Loading…'));
@@ -287,6 +296,7 @@ async function openMail() {
     el('h3', {}, el('span', {}, `${MAIL_ICON[m.kind] || '✉️'} ${m.title}`), el('span', { class: 'small' }, timeAgo(m.at))),
     el('p', {}, m.body),
     el('div', { class: 'row' },
+      m.data && m.data.rate ? rateButtons(m) : null,
       m.data && m.data.claim ? el('button', { class: 'btn btn-sun', type: 'button', onclick: async (e) => { const b = e.currentTarget; try { const r = await api.mailAction(m.id, 'claim'); setWallet(r.wallet); toast(`+${r.coins} coins!`); b.textContent = 'Claimed'; } catch (err) { b.textContent = err.status === 409 ? 'Claimed' : err.message; } b.disabled = true; } }, `Claim ${m.data.claim} coins`) : null,
       m.kind === 'trade' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet/trades'); } }, 'See trades') : null,
       m.kind === 'gift' ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet'); } }, 'Open closet') : null,

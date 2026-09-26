@@ -360,9 +360,9 @@ async function sell(ctx, input) {
   const { db } = ctx;
   const f = findItem(input.key);
   if (!f || !canTrade(f.item)) fail(400, "That item can't be sold.");
+  if (f.item.stock) fail(400, "Limited items can't go back to the shop (they never come back!). Sell it on the Reseller shop instead.");
   const back = sellPrice(f.item);
   const stmts = [...takeItem(db, user.id, f.key), ...coinStmts(db, user.id, back, 'sell ' + f.key), tidy(db, user.id)];
-  if (f.item.stock) stmts.push(db.prepare('UPDATE stock SET left = left + 1 WHERE item = ?').bind(f.key));
   try { await db.batch(stmts); } catch (e) { if (isConstraint(e)) fail(409, "You don't have that item."); throw e; }
   return json({ ok: true, got: back, wallet: await fixLook(db, user.id) });
 }
@@ -499,6 +499,8 @@ async function finishGame(ctx, user, id, replay) {
   const board = await saveTime(db, user.id, 'g:' + id, run.time);
   await db.batch(questBumps(db, user.id, { player: 1, obby: g.kind === '3d' ? 1 : 0, coins: run.coins || 0 })).catch(() => {});
   const rated = g.stars && g.user_id !== user.id ? await earnStars(db, user.id, 'g:' + id, g.stars) : 0;
+  // levels the admin rated (verified) pay 5 coins per difficulty star, unless they already pay more
+  g.reward = Math.max(g.reward || 0, g.stars ? g.stars * 5 : 0);
   if (!g.reward) return json({ ok: true, earned: 0, rated, board, wallet: rated ? await getWallet(db, user.id) : undefined });
   if (g.user_id === user.id) return json({ ok: true, earned: 0, board, note: "You made this one, so it doesn't pay you." });
   if (g.project_id) {

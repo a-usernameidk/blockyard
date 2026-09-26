@@ -1,5 +1,6 @@
 // Pip in 3D: a chunky little block buddy built from boxes, plus every hat in the closet.
 import { M4, hexRGB } from './gl.js';
+import { variant } from './cosmetics.js';
 
 const INK = hexRGB('#1d2340'), WHITE = [1, 1, 1];
 const shade = (c, k) => c.map((v) => Math.max(0, Math.min(1, v * k)));
@@ -97,20 +98,52 @@ function gearParts(gear, by, t, at, box, air, liftL, liftR, footL, footR) {
       box(-0.2, 0.13 + liftL, footL, 0.3, 0.12, 0.42, C('#ff5d8f'));
       box(0.2, 0.13 + liftR, footR, 0.3, 0.12, 0.42, C('#ff5d8f'));
       break;
+    case 'turbo':
+      box(-0.2, 0.12 + liftL, footL, 0.32, 0.14, 0.46, C('#ff9f1c'));
+      box(0.2, 0.12 + liftR, footR, 0.32, 0.14, 0.46, C('#ff9f1c'));
+      box(-0.2, 0.2 + liftL, footL - 0.18, 0.2, 0.04, 0.08, C('#ffd23f'), 0, 0, 0, { glow: 0.8 });
+      box(0.2, 0.2 + liftR, footR - 0.18, 0.2, 0.04, 0.08, C('#ffd23f'), 0, 0, 0, { glow: 0.8 });
+      break;
+    case 'moon':
+      box(-0.2, 0.14 + liftL, footL, 0.34, 0.2, 0.44, C('#c0c7d1'));
+      box(0.2, 0.14 + liftR, footR, 0.34, 0.2, 0.44, C('#c0c7d1'));
+      at(0.55, by + 0.55 + Math.sin(t * 2) * 0.06, -0.2, 0.18, 0.18, 0.18, C('#ffe66d'), 'sphere', 0, 0, 0, { glow: 0.8 });
+      break;
+    case 'spring':
+      for (const [x, l, f] of [[-0.2, liftL, footL], [0.2, liftR, footR]]) {
+        box(x, 0.2 + l, f, 0.28, 0.08, 0.4, C('#44c06a'));
+        for (let k = 0; k < 3; k++) box(x, 0.04 + k * 0.05 + l, f, 0.2, 0.025, 0.2, C('#a3abc2'));
+      }
+      break;
+    case 'feather':
+      for (const s of [-1, 1]) at(s * 0.25, by + 0.05, -0.46, 0.34, 0.6, 0.04, C('#f4f4f4'), 'cube', 0, 0.25, s * (0.35 + (air ? Math.sin(t * 12) * 0.25 : 0.05)));
+      break;
+    case 'rocket':
+      at(0, by + 0.1, -0.52, 0.34, 0.8, 0.34, C('#f4f4f4'), 'cyl');
+      at(0, by + 0.56, -0.52, 0.2, 0.18, 0.2, C('#e63946'), 'sphere');
+      at(0, by + 0.15, -0.36, 0.14, 0.14, 0.03, C('#3a86ff'), 'sphere');
+      for (const s of [-1, 1]) at(s * 0.2, by - 0.22, -0.52, 0.16, 0.2, 0.04, C('#e63946'));
+      if (air) {
+        const f = 0.75 + Math.sin(t * 45) * 0.25;
+        at(0, by - 0.42 - 0.18 * f, -0.52, 0.22, 0.4 * f, 0.22, C('#ff9f1c'), 'cube', t * 9, 0, 0, { glow: 1, alpha: 0.9 });
+        at(0, by - 0.36 - 0.08 * f, -0.52, 0.12, 0.22 * f, 0.12, C('#ffe66d'), 'cube', -t * 9, 0, 0, { glow: 1 });
+      }
+      break;
   }
 }
 
 function hatParts(hat, y, t, at) {
   const C = (h) => hexRGB(h);
+  const [base, c1, c2] = variant(hat); hat = base; // recolored hats are built like their base hat
   switch (hat) {
     case 'cap':
-      at(0, y + 0.08, 0, 0.8, 0.18, 0.76, C('#3a86ff'), 'cyl');
-      at(0, y + 0.02, 0.42, 0.56, 0.04, 0.3, C('#2a64c8'));
+      at(0, y + 0.08, 0, 0.8, 0.18, 0.76, C(c1 || '#3a86ff'), 'cyl');
+      at(0, y + 0.02, 0.42, 0.56, 0.04, 0.3, C(c2 || '#2a64c8'));
       at(0, y + 0.19, 0, 0.1, 0.06, 0.1, WHITE, 'sphere');
       break;
     case 'bow':
-      at(-0.3, y + 0.06, 0.1, 0.24, 0.2, 0.08, C('#ff5d8f'), 'cube', 0, 0, 0.5);
-      at(-0.06, y + 0.06, 0.1, 0.24, 0.2, 0.08, C('#ff5d8f'), 'cube', 0, 0, -0.5);
+      at(-0.3, y + 0.06, 0.1, 0.24, 0.2, 0.08, C(c1 || '#ff5d8f'), 'cube', 0, 0, 0.5);
+      at(-0.06, y + 0.06, 0.1, 0.24, 0.2, 0.08, C(c1 || '#ff5d8f'), 'cube', 0, 0, -0.5);
       at(-0.18, y + 0.06, 0.12, 0.1, 0.1, 0.1, C('#ffd23f'));
       break;
     case 'sprout':
@@ -119,11 +152,11 @@ function hatParts(hat, y, t, at) {
       at(0.1, y + 0.26, 0, 0.22, 0.05, 0.12, C('#5fd07c'), 'cube', 0, 0, -0.5 - Math.sin(t * 3) * 0.1);
       break;
     case 'party':
-      [[0.56, 0.1], [0.42, 0.22], [0.28, 0.34], [0.14, 0.46]].forEach(([r, h], i) => at(0, y + h - 0.05, 0, r, 0.13, r, C(i % 2 ? '#ffd23f' : '#b06cff'), 'cyl'));
+      [[0.56, 0.1], [0.42, 0.22], [0.28, 0.34], [0.14, 0.46]].forEach(([r, h], i) => at(0, y + h - 0.05, 0, r, 0.13, r, C(i % 2 ? (c2 || '#ffd23f') : (c1 || '#b06cff')), 'cyl'));
       at(0, y + 0.56, 0, 0.14, 0.14, 0.14, C('#ff5d8f'), 'sphere');
       break;
     case 'beanie':
-      at(0, y + 0.1, 0, 0.84, 0.26, 0.8, C('#e63946'), 'cyl');
+      at(0, y + 0.1, 0, 0.84, 0.26, 0.8, C(c1 || '#e63946'), 'cyl');
       at(0, y + 0.02, 0, 0.9, 0.1, 0.86, C('#f4f4f4'), 'cyl');
       at(0, y + 0.3, 0, 0.18, 0.18, 0.18, C('#f4f4f4'), 'sphere');
       break;
@@ -131,17 +164,17 @@ function hatParts(hat, y, t, at) {
       at(0, y + 0.08, 0, 0.9, 0.06, 0.1, C('#3d405b'));
       at(-0.46, y - 0.08, 0, 0.06, 0.34, 0.1, C('#3d405b'));
       at(0.46, y - 0.08, 0, 0.06, 0.34, 0.1, C('#3d405b'));
-      at(-0.49, y - 0.25, 0, 0.12, 0.26, 0.26, C('#ff5d8f'), 'cyl', 0, 0, Math.PI / 2);
-      at(0.49, y - 0.25, 0, 0.12, 0.26, 0.26, C('#ff5d8f'), 'cyl', 0, 0, Math.PI / 2);
+      at(-0.49, y - 0.25, 0, 0.12, 0.26, 0.26, C(c1 || '#ff5d8f'), 'cyl', 0, 0, Math.PI / 2);
+      at(0.49, y - 0.25, 0, 0.12, 0.26, 0.26, C(c1 || '#ff5d8f'), 'cyl', 0, 0, Math.PI / 2);
       break;
     case 'horns':
-      at(-0.26, y + 0.1, 0.05, 0.1, 0.24, 0.1, C('#e63946'), 'cube', 0, 0, 0.4);
-      at(0.26, y + 0.1, 0.05, 0.1, 0.24, 0.1, C('#e63946'), 'cube', 0, 0, -0.4);
+      at(-0.26, y + 0.1, 0.05, 0.1, 0.24, 0.1, C(c1 || '#e63946'), 'cube', 0, 0, 0.4);
+      at(0.26, y + 0.1, 0.05, 0.1, 0.24, 0.1, C(c1 || '#e63946'), 'cube', 0, 0, -0.4);
       break;
     case 'tophat':
-      at(0, y + 0.02, 0, 0.92, 0.05, 0.88, C('#1d2340'), 'cyl');
-      at(0, y + 0.25, 0, 0.56, 0.42, 0.56, C('#1d2340'), 'cyl');
-      at(0, y + 0.1, 0, 0.58, 0.08, 0.58, C('#e63946'), 'cyl');
+      at(0, y + 0.02, 0, 0.92, 0.05, 0.88, C(c1 || '#1d2340'), 'cyl');
+      at(0, y + 0.25, 0, 0.56, 0.42, 0.56, C(c1 || '#1d2340'), 'cyl');
+      at(0, y + 0.1, 0, 0.58, 0.08, 0.58, C(c2 || '#e63946'), 'cyl');
       break;
     case 'propeller':
       at(0, y + 0.07, 0, 0.78, 0.16, 0.74, C('#ffd23f'), 'cyl');
@@ -149,8 +182,8 @@ function hatParts(hat, y, t, at) {
       at(0, y + 0.28, 0, 0.8, 0.03, 0.1, C('#ff5d8f'), 'cube', t * 14);
       break;
     case 'crown':
-      at(0, y + 0.06, 0, 0.66, 0.14, 0.66, C('#ffd23f'), 'cyl', 0, 0, 0, { glow: 0.2 });
-      for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; at(Math.cos(a) * 0.28, y + 0.19, Math.sin(a) * 0.28, 0.1, 0.16, 0.1, C('#ffd23f'), 'cube', -a, 0, 0, { glow: 0.2 }); }
+      at(0, y + 0.06, 0, 0.66, 0.14, 0.66, C(c1 || '#ffd23f'), 'cyl', 0, 0, 0, { glow: 0.2 });
+      for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; at(Math.cos(a) * 0.28, y + 0.19, Math.sin(a) * 0.28, 0.1, 0.16, 0.1, C(c1 || '#ffd23f'), 'cube', -a, 0, 0, { glow: 0.2 }); }
       at(0, y + 0.07, 0.33, 0.08, 0.08, 0.04, C('#3a86ff'));
       break;
     case 'halo': {
@@ -159,7 +192,7 @@ function hatParts(hat, y, t, at) {
       break;
     }
     case 'wizard':
-      [[0.9, 0.04, '#5a3fd6'], [0.6, 0.18, '#5a3fd6'], [0.44, 0.34, '#6b4fe6'], [0.3, 0.5, '#5a3fd6'], [0.16, 0.64, '#6b4fe6']].forEach(([r, h, c], i) => at(i * -0.02, y + h, i * -0.03, r, i ? 0.17 : 0.06, r, C(c), 'cyl'));
+      [[0.9, 0.04, c1 || '#5a3fd6'], [0.6, 0.18, c1 || '#5a3fd6'], [0.44, 0.34, c1 || '#6b4fe6'], [0.3, 0.5, c1 || '#5a3fd6'], [0.16, 0.64, c1 || '#6b4fe6']].forEach(([r, h, c], i) => at(i * -0.02, y + h, i * -0.03, r, i ? 0.17 : 0.06, r, C(c), 'cyl'));
       at(0.12, y + 0.26, 0.2, 0.07, 0.07, 0.07, C('#ffd23f'), 'cube', t, t, 0, { glow: 0.6 });
       at(-0.14, y + 0.44, 0.1, 0.06, 0.06, 0.06, C('#ffd23f'), 'cube', -t, t, 0, { glow: 0.6 });
       break;
@@ -180,9 +213,43 @@ function hatParts(hat, y, t, at) {
       }
       break;
     case 'cowboy':
-      at(0, y + 0.02, 0, 1.2, 0.05, 1.1, C('#a0612b'), 'cyl');
-      at(0, y + 0.2, 0, 0.6, 0.34, 0.56, C('#b8733a'), 'cyl');
+      at(0, y + 0.02, 0, 1.2, 0.05, 1.1, C(c2 || '#a0612b'), 'cyl');
+      at(0, y + 0.2, 0, 0.6, 0.34, 0.56, C(c1 || '#b8733a'), 'cyl');
       at(0, y + 0.1, 0, 0.62, 0.07, 0.58, C('#5a3418'), 'cyl');
+      break;
+    case 'pirate':
+      at(0, y + 0.1, 0, 1.1, 0.22, 0.7, C('#1d2340'), 'cyl');
+      at(0, y + 0.22, 0.02, 0.9, 0.18, 0.12, C('#1d2340'));
+      at(0, y + 0.18, 0.36, 0.12, 0.12, 0.03, WHITE, 'sphere');
+      at(0, y + 0.02, 0, 1.12, 0.04, 0.72, C('#ffd23f'), 'cyl');
+      break;
+    case 'antlers':
+      for (const d of [-1, 1]) {
+        at(d * 0.24, y + 0.2, 0, 0.07, 0.4, 0.07, C('#8d5a2b'), 'cube', 0, 0, d * -0.4);
+        at(d * 0.42, y + 0.32, 0, 0.06, 0.26, 0.06, C('#8d5a2b'), 'cube', 0, 0, d * -1.1);
+        at(d * 0.3, y + 0.42, 0, 0.06, 0.24, 0.06, C('#8d5a2b'), 'cube', 0, 0, d * 0.2);
+      }
+      break;
+    case 'catears':
+      for (const d of [-1, 1]) {
+        at(d * 0.26, y + 0.1, 0.02, 0.22, 0.26, 0.08, C('#3d405b'), 'cube', 0, 0, d * -0.3);
+        at(d * 0.26, y + 0.09, 0.07, 0.12, 0.16, 0.02, C('#ff9ec4'), 'cube', 0, 0, d * -0.3);
+      }
+      break;
+    case 'santa':
+      at(0, y + 0.02, 0, 0.9, 0.12, 0.86, WHITE, 'cyl');
+      at(0, y + 0.2, 0, 0.7, 0.28, 0.66, C('#e63946'), 'cyl');
+      at(0.12, y + 0.4, -0.05, 0.4, 0.22, 0.4, C('#e63946'), 'cyl', 0, 0, -0.5);
+      at(0.3, y + 0.46, -0.08, 0.16, 0.16, 0.16, WHITE, 'sphere');
+      break;
+    case 'grad':
+      at(0, y + 0.08, 0, 0.6, 0.18, 0.6, C('#1d2340'), 'cyl');
+      at(0, y + 0.2, 0, 0.9, 0.04, 0.9, C('#1d2340'), 'cube', Math.PI / 4);
+      at(0.3, y + 0.08, 0.3, 0.03, 0.24, 0.03, C('#ffd23f'));
+      break;
+    case 'astronaut':
+      at(0, y - 0.36, 0, 1.18, 1.1, 1.14, C('#bfe6ff'), 'sphere', 0, 0, 0, { alpha: 0.3 });
+      at(0, y - 0.8, 0, 0.98, 0.1, 0.92, C('#f4f4f4'), 'cyl');
       break;
     case 'unicorn':
       [[0.2, 0.1], [0.15, 0.24], [0.1, 0.38], [0.05, 0.5]].forEach(([r, h], i) => at(0, y + h, 0.18, r, 0.14, r, C(i % 2 ? '#ffd23f' : '#ffffff'), 'cyl', 0, 0, 0, { glow: 0.3 }));
@@ -197,17 +264,21 @@ export const TRAIL3D = {
   sparkle: ['#ffffff', '#ffd23f'], bubbles: ['#bfefff', '#7cc8ff'], hearts: ['#ff5d8f', '#ff8fb1'], notes: ['#1d2340', '#3d405b'],
   fire: ['#ff5a1f', '#ffb02e', '#ffd23f'], rainbow: ['#ff5d8f', '#ff9f1c', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], stars: ['#ffd23f', '#fff6c9'], lightning: ['#7cc8ff', '#ffffff', '#ffe66d'],
   confetti: ['#ff5d8f', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], snow: ['#ffffff', '#dff4ff'], galaxy: ['#5a3fd6', '#b06cff', '#ffffff', '#7cc8ff'],
+  leaves: ['#44c06a', '#2a8a45', '#a7e163'], mint: ['#2ec4b6', '#bff5ee'], lava: ['#ff5a1f', '#b5121b', '#ffb02e'], ice: ['#bfe6ff', '#ffffff', '#7cc8ff'],
+  candy: ['#ff5d8f', '#ffffff', '#7cc8ff'], ocean: ['#0077b6', '#48cae4', '#caf0f8'], toxic: ['#39ff14', '#9dff7a', '#1d2340'], sakura: ['#ffb7c5', '#ff8fb1', '#fff0f5'],
+  shadow: ['#1d2340', '#3d405b'], sunset: ['#ff9f1c', '#ff5d8f', '#b06cff'], goldtrail: ['#ffd23f', '#e0b12a', '#fff6c9'], void: ['#14161f', '#5a3fd6', '#b06cff'],
 };
 
 // A pet at (x, y, z) facing yaw. hop: 0..1 how high it's hopping. Built from boxes like Pip.
 export function petParts(id, x, y, z, yaw, t, hop, out = []) {
   if (!id || id === 'none') return out;
+  const [base0, c1, c2] = variant(id); id = base0; // recolored pets
   const base = M4.trs(x, y + hop * 0.25, z, yaw);
   const at = (px, py, pz, sx, sy, sz, color, prim = 'cube', ry = 0, rx = 0, rz = 0, extra) => out.push({ prim, color: typeof color === 'string' ? hexRGB(color) : color, m: M4.mul(base, M4.trs(px, py, pz, ry, rx, rz, sx, sy, sz)), ...extra });
   const eyes = (py, pz, gap = 0.08) => { for (const s of [-1, 1]) at(s * gap, py, pz, 0.06, 0.08, 0.02, INK); };
   if (id === 'slime') {
     const sq = 1 + Math.sin(t * 6) * 0.08;
-    at(0, 0.2 / sq, 0, 0.5 * sq, 0.4 / sq, 0.5 * sq, '#7be07b', 'cube', 0, 0, 0, { alpha: 0.85 });
+    at(0, 0.2 / sq + (c1 === '#f4f4f4' ? 0.3 + Math.sin(t * 2) * 0.1 : 0), 0, 0.5 * sq, 0.4 / sq, 0.5 * sq, c1 || '#7be07b', 'cube', 0, 0, 0, { alpha: c1 === '#f4f4f4' ? 0.6 : 0.85, glow: c1 === '#ffd23f' ? 0.4 : 0 });
     eyes(0.24, 0.26);
   } else if (id === 'chick') {
     at(0, 0.22, 0, 0.4, 0.4, 0.4, '#ffd23f', 'sphere');
@@ -215,7 +286,7 @@ export function petParts(id, x, y, z, yaw, t, hop, out = []) {
     for (const s of [-1, 1]) at(s * 0.2, 0.2, -0.02, 0.06, 0.16, 0.2, '#f0b800', 'cube', 0, 0, s * Math.sin(t * 12) * 0.4);
     eyes(0.3, 0.19, 0.08);
   } else if (id === 'pup' || id === 'kitty') {
-    const c = id === 'pup' ? '#c98b4f' : '#a3abc2', d = id === 'pup' ? '#8d5a2b' : '#6b7391';
+    const c = c1 || (id === 'pup' ? '#c98b4f' : '#a3abc2'), d = c2 || (id === 'pup' ? '#8d5a2b' : '#6b7391');
     at(0, 0.22, -0.05, 0.34, 0.26, 0.5, c);
     at(0, 0.4, 0.25, 0.32, 0.3, 0.3, c);
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) at(sx * 0.11, 0.06, -0.05 + sz * 0.16, 0.09, 0.14, 0.09, d);

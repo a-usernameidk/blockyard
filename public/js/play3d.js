@@ -455,7 +455,8 @@ export function startWorld(root, opts) {
   const toXYZ = (a, spread) => ({ x: a[0] + (spread ? (Math.random() - 0.5) * spread : 0), y: a[1], z: a[2] + (spread ? (Math.random() - 0.5) * spread : 0) });
   // gear works in hangouts, Tag and Paintball. Never in obbies (timed and checked) or the other minigames (fair play).
   function applyGear() {
-    const ok = !opts.test && world.mode === 'hangout' && (!inRound || rs.mode === 'tag' || rs.mode === 'paint');
+    // hangouts (and Test in the builder) unless the maker turned gear off; in minigames only Tag and Paintball
+    const ok = world.mode === 'hangout' && world.gear !== 'off' && (!inRound || rs.mode === 'tag' || rs.mode === 'paint');
     S.mods = ok ? GEAR_MODS[look.gear] || null : null;
   }
   /* ----- paintball ----- */

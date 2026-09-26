@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { findItem, valueOf } from '../cosmetics.js';
 import { ACHIEVEMENTS } from '../progress.js';
 import { itemPreview } from './closet.js';
-import { publishedCard } from './play.js';
+import { publishedCard, diffFace } from './play.js';
 import { playerWorldCard } from './worlds.js';
 import { manageUser } from './admin.js';
 import { friendsNow, checkFriends, openFriends } from './account.js';
@@ -32,6 +32,17 @@ function friendButton(name) {
   return b;
 }
 
+// difficulty faces they've beaten: verified (Blockyard's and admin-rated levels) and unverified (not rated yet)
+const FACE_STARS = { easy: 1, normal: 3, hard: 5, harder: 7, insane: 9, demon: 10 };
+function facesBox(f) {
+  if (!f) return null;
+  const row = (label, o) => {
+    const keys = [...Object.keys(FACE_STARS), 'unrated'].filter((k) => o[k]);
+    return el('div', { class: 'faces-row' }, el('b', {}, label), ...(keys.length ? keys.map((k) => el('span', { class: 'face-count', title: k }, k === 'unrated' ? el('span', { class: 'unrated' }, '?') : diffFace(FACE_STARS[k], 34), `×${o[k]}`)) : [el('span', { class: 'small' }, 'None yet')]));
+  };
+  return el('div', { class: 'faces-box' }, el('h2', {}, 'Difficulty faces beaten'), row('Verified', f.verified || {}), row('Unverified', f.unverified || {}),
+    el('p', { class: 'small' }, "Verified: Blockyard's levels and player levels the admin rated. Unverified: player levels that aren't rated yet (by what players voted)."));
+}
 async function showProfile(name) {
   show('profile', '');
   const page = $('#profile-page');
@@ -59,6 +70,7 @@ async function showProfile(name) {
           el('button', { class: 'btn', type: 'button', onclick: () => openGift(u.name) }, 'Send coins')) : null,
         session.user && session.user.admin ? el('div', { class: 'admin-strip row' }, el('b', {}, 'Admin'),
           el('button', { class: 'btn btn-sun', type: 'button', onclick: () => manageUser(u.name) }, me ? 'Give myself coins or items' : 'Coins, items, kick, ban…')) : null)),
+    facesBox(u.faces),
     badges.length ? el('h2', {}, 'Badges') : null,
     badges.length ? el('div', { class: 'chips' }, ...badges.sort((a, b) => (b.chosen ? 2 : b.hard ? 1 : 0) - (a.chosen ? 2 : a.hard ? 1 : 0)).map((b) => el('span', { class: 'chip' + (b.hard ? ' chip-hard' : '') + (b.chosen ? ' chip-chosen' : ''), title: b.text }, b.name))) : null,
     el('h2', {}, 'Closet'),

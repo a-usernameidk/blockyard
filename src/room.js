@@ -484,7 +484,7 @@ export class Room {
     if (row.kind === '3d') {
       let grid;
       try { grid = decodeBlocks(String(data.b || '')); } catch (e) { grid = new Grid(); }
-      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '' }, grid };
+      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on' }, grid };
     } else {
       const lv = { n: row.name, style: 'adventure', theme: 'meadow', form: 'hopper', speed: '~', w: 48, h: 12, d: '', ...data };
       this.doc = { id: row.id, kind: '2d', meta: { n: cleanText(lv.n, LIMITS.name) || row.name, style: lv.style === 'rush' ? 'rush' : 'adventure', theme: THEMES.includes(lv.theme) ? lv.theme : 'meadow', form: FORMS.includes(lv.form) ? lv.form : 'hopper', speed: Object.hasOwn(SPEED_NAMES, lv.speed) ? lv.speed : '~' }, w: lv.w | 0, h: lv.h | 0, a: String(lv.d || '').split('') };
@@ -494,7 +494,7 @@ export class Room {
   docOut() {
     const d = this.doc;
     if (!d) return null;
-    if (d.kind === '3d') { const { game, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), b: encodeBlocks(d.grid) }; }
+    if (d.kind === '3d') { const { game, gear, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), b: encodeBlocks(d.grid) }; }
     return { kind: '2d', ...d.meta, w: d.w, h: d.h, d: d.a.join('') };
   }
   // Checks one change, applies it, and returns the version to send to everyone (or null).
@@ -508,6 +508,7 @@ export class Room {
         if (op.f.mode === 'obby' || op.f.mode === 'hangout') f.mode = op.f.mode;
         if (Object.hasOwn(SKIES, op.f.sky)) f.sky = op.f.sky;
         if (op.f.game === '' || GAME_TYPES.includes(op.f.game)) f.game = op.f.game;
+        if (op.f.gear === 'on' || op.f.gear === 'off') f.gear = op.f.gear;
       } else {
         if (op.f.style === 'rush' || op.f.style === 'adventure') f.style = op.f.style;
         if (THEMES.includes(op.f.theme)) f.theme = op.f.theme;

@@ -9,7 +9,7 @@ import { setWallet, friendsNow, checkFriends, openFriends, refreshWallet } from 
 import { manageUser } from './admin.js';
 import { levelOf } from '../cosmetics.js';
 import { gameConfig, GAMES, BOTS, BOT_SKILL } from '../games.js';
-import { openReport, diffTag, diffFace } from './play.js';
+import { openReport, diffTag, diffFace, voteBox } from './play.js';
 import { starsFor } from '../stars.js';
 import { shopPanel } from './closet.js';
 import { gfx } from '../settings.js';
@@ -65,7 +65,7 @@ export function builtinCards(only) {
     return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, stars: starsFor('w:' + w.id) });
   });
 }
-export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, reward: g.reward, thumb: g.thumb, plays: g.plays, likes: g.likes, stars: g.stars });
+export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, thumb: g.thumb, plays: g.plays, likes: g.likes, stars: g.stars, reward: g.pays || g.reward });
 
 /* ---------------- the worlds page ---------------- */
 const wl = { sort: 'top', page: 0, busy: false };
@@ -127,7 +127,7 @@ async function loadWorld(id) {
   if (b) return { id, builtin: true, name: b.name, mode: b.mode, sky: b.sky, blurb: b.blurb, reward: b.reward, world: b.get().world, by: null, stars: starsFor('w:' + id) };
   const { game: g } = await api.get(id);
   if (g.kind !== '3d') { go('#/p/' + id); throw new Error('2d'); }
-  return { id, builtin: false, name: g.name, mode: g.style, sky: g.theme, blurb: g.descr, reward: g.reward, world: g.world, by: g.creator, plays: g.plays, likes: g.likes, visibility: g.visibility, stars: g.stars || 0 };
+  return { id, builtin: false, name: g.name, mode: g.style, sky: g.theme, blurb: g.descr, reward: g.reward, world: g.world, by: g.creator, plays: g.plays, likes: g.likes, visibility: g.visibility, stars: g.stars || 0, reward: g.pays || g.reward, myVote: g.myVote || 0 };
 }
 async function showWorld(id) {
   show('world', 'worlds');
@@ -243,7 +243,8 @@ async function enterWorld(id, code) {
       const coins = (res.earned ? `+${res.earned} coins${res.bonus ? ' (replay bonus)' : ''}! ` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '') + (res.rated ? `+${res.rated}★ difficulty stars! ` : '');
       const b = res.board;
       const rank = b && b.me ? (b.newBest ? `New best: you're #${b.me.rank} on the leaderboard!` : `Your best is #${b.me.rank} (${b.me.time.toFixed(2)}s).`) : '';
-      return { text: coins + rank, extra: b ? boardList(b, true) : null };
+      const vb = !w.builtin && !w.stars && w.by !== session.user.name ? voteBox(id, w.myVote) : null;
+      return { text: coins + rank, extra: el('div', {}, b ? boardList(b, true) : null, vb) };
     },
   });
   if (w.builtin) progress.visit(id);

@@ -7,9 +7,9 @@ export const MOD = { hideAfter: 10, banAt: 3, goodReportsPerWarning: 3, popularL
 export const PAY = { builder: [0, 10, 25], builderpro: [0, 10, 25, 50, 100] };
 export const ROLES = ['', 'builder', 'builderpro'];
 export const ROLE_NAME = { builder: 'Builder', builderpro: 'Builder Pro' };
-const ADMIN_NOTIFY = { bpPay: true, farm: true, review: true };
+const ADMIN_NOTIFY = { bpPay: true, farm: true, review: true, rate: true };
 
-const mailQ = (db, uid, kind, title, text) => db.prepare('INSERT INTO mail (user_id, kind, title, body, at) VALUES (?, ?, ?, ?, ?)').bind(uid, kind, String(title).slice(0, 90), String(text).slice(0, 600), Date.now());
+const mailQ = (db, uid, kind, title, text, data = null) => db.prepare('INSERT INTO mail (user_id, kind, title, body, data, at) VALUES (?, ?, ?, ?, ?, ?)').bind(uid, kind, String(title).slice(0, 90), String(text).slice(0, 600), data ? JSON.stringify(data) : null, Date.now());
 
 /* ---------------- warnings ---------------- */
 export async function addWarning(ctx, uid, why, n = 1) {
@@ -54,7 +54,7 @@ export async function setAdminNotify(db, input) {
   await db.prepare("INSERT INTO settings (key, value) VALUES ('admin_notify', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(cur)).run();
   return cur;
 }
-export async function mailAdmin(ctx, kind, title, text) {
+export async function mailAdmin(ctx, kind, title, text, data = null) {
   const { db, env } = ctx;
   if (!env.ADMIN_USERNAME) return;
   const prefs = await adminNotify(db);
@@ -62,7 +62,7 @@ export async function mailAdmin(ctx, kind, title, text) {
   const names = String(env.ADMIN_USERNAME).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   for (const n of names) {
     const a = await db.prepare('SELECT id FROM users WHERE name_lower = ?').bind(n).first();
-    if (a) await mailQ(db, a.id, 'admin', title, text).run();
+    if (a) await mailQ(db, a.id, 'admin', title, text, data).run();
   }
 }
 

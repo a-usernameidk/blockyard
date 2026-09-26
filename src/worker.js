@@ -16,6 +16,8 @@ import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
 import { findItem } from '../public/js/cosmetics.js';
 import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
+import { MARKET_SCHEMA, marketRoute } from './market.js';
+import { COMMUNITY_SCHEMA, vote, voteSummary, facesBeaten, dailyPick, setDailyPick, dailyPicks } from './community.js';
 import { MOD, ROLES, ROLE_NAME, addWarning, creditReporters, checkPopular, adminNotify, setAdminNotify, mailAdmin, setPay } from './mod.js';
 import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool, ECON_COLUMNS, questBumps } from './econ.js';
 export { Room } from './room.js';
@@ -23,6 +25,7 @@ export { Room } from './room.js';
 const PAGE = 24;
 const SESSION_DAYS = 90;
 const LIMITS_PER = { publishHour: 5, publishDay: 20, reportsDay: 20, loginFails: 10, signupsDay: 5, projects: 60, collaborators: 8, privateServers: 5 };
+const RATED_PAY = 5; // a level the admin rated pays 5 coins per difficulty star the first time you beat it (when it doesn't pay more already)
 const HIDE_AFTER_REPORTS = MOD.hideAfter; // reports from different players before a level is hidden for review
 const ROOM_SIZE = 16;
 const VIS = ['public', 'unlisted', 'private'];
@@ -80,6 +83,8 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS friends_b ON friends (b, status)',
   ...ECON_SCHEMA,
   ...SOCIAL_SCHEMA,
+  ...COMMUNITY_SCHEMA,
+  ...MARKET_SCHEMA,
 ];
 // columns added after the first version
 const COLUMNS = [
@@ -99,6 +104,7 @@ const COLUMNS = [
   'ALTER TABLE users ADD COLUMN seen INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE servers ADD COLUMN bots INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE servers ADD COLUMN bot_skill TEXT NOT NULL DEFAULT 'normal'",
+  'ALTER TABLE games ADD COLUMN suggested INTEGER NOT NULL DEFAULT 0',
 ];
 
 // Tables are created automatically the first time the Worker runs.
@@ -174,6 +180,8 @@ async function handle(request, env, url) {
   if (e) return e;
   const so = await socialRoute(ctx, path, method);
   if (so) return so;
+  const mk = await marketRoute(ctx, path, method);
+  if (mk) return mk;
 
   // players
   if (path === '/users' && method === 'GET') return findUsers(ctx);
@@ -188,6 +196,7 @@ async function handle(request, env, url) {
     if (method === 'DELETE') return deleteGame(ctx, m[1]);
   }
   if ((m = path.match(/^\/games\/([A-Za-z0-9]{8})\/(play|like|report)$/)) && method === 'POST') return gameAction(ctx, m[1], m[2]);
+  if ((m = path.match(/^\/games\/([A-Za-z0-9]{8})\/vote$/)) && method === 'POST') return vote(ctx, m[1], await body(request));
 
   // projects (building, alone or together)
   if (path === '/projects' && method === 'GET') return listProjects(ctx);
@@ -557,7 +566,7 @@ async function profile(ctx, name) {
   let saved = {};
   try { saved = JSON.parse(u.progress || '{}').ach || {}; } catch (e) { /* none */ }
   const badges = { ...Object.fromEntries(Object.keys(saved).slice(0, 200).map((k) => [String(k).slice(0, 30), true])), ...items.badges };
-  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), ...items, badges, games: games.results.map(row), playing });
+  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), ...items, badges, faces: await facesBeaten(db, u.id), games: games.results.map(row), playing });
 }
 const worldName = (id) => { const b = builtinWorld(id); return b ? b.name : null; };
 
@@ -589,7 +598,7 @@ async function checkFields(ctx, input) {
 function row(g) {
   return {
     id: g.id, kind: g.kind || '2d', name: g.name, creator: g.creator, descr: g.descr, style: g.style, theme: g.theme, plays: g.plays, likes: g.likes,
-    created_at: g.created_at, visibility: g.visibility || 'public', reward: g.reward || 0, stars: g.stars || 0, level: (g.kind || '2d') === '2d' ? JSON.parse(g.data) : undefined,
+    created_at: g.created_at, visibility: g.visibility || 'public', reward: g.reward || 0, stars: g.stars || 0, pays: g.reward || (g.stars ? g.stars * RATED_PAY : 0), level: (g.kind || '2d') === '2d' ? JSON.parse(g.data) : undefined,
     world: g.kind === '3d' && g.withWorld ? JSON.parse(g.data) : undefined, blocks: g.kind === '3d' ? g.w : undefined,
     coins: g.kind === '3d' ? g.h : undefined, thumb: g.kind === '3d' ? g.thumb || '' : undefined,
   };
@@ -631,7 +640,9 @@ async function canSeeGame(ctx, g) {
 async function getGame(ctx, id) {
   const g = await ctx.db.prepare('SELECT * FROM games WHERE id = ? AND hidden = 0').bind(id).first();
   if (!g || !(await canSeeGame(ctx, g))) fail(404, 'That game was not found. It may have been removed, or it is private.');
-  return json({ game: row({ ...g, withWorld: true }) });
+  const sum = await voteSummary(ctx.db, id);
+  const mine = ctx.user ? await ctx.db.prepare('SELECT stars FROM diff_votes WHERE game_id = ? AND user_id = ?').bind(id, ctx.user.id).first() : null;
+  return json({ game: { ...row({ ...g, withWorld: true }), votes: sum.votes, voteStars: sum.stars || 0, myVote: mine ? mine.stars : 0 } });
 }
 async function publish(ctx, input) {
   const user = needUser(ctx);
@@ -955,14 +966,17 @@ async function getDaily(ctx) {
     }
   }
   const total = await db.prepare('SELECT COUNT(*) AS n FROM daily WHERE date = ?').bind(date).first();
-  return json({ date, top, me: mine, players: total.n });
+  // today's course: a picked or top player level, or Blockyard's own
+  const pick = validDate(date) ? await dailyPick(db, date) : null;
+  return json({ date, top, me: mine, players: total.n, level: pick && pick.game ? toWire(pick.level) : undefined, source: pick ? { how: pick.how, game: pick.game } : undefined });
 }
 async function postDaily(ctx, input) {
   const user = needUser(ctx);
   const { db, env } = ctx;
   const date = validDate(String(input.date || ''));
   if (!date) fail(400, "That daily challenge isn't open anymore.");
-  const run = await verify(env, { type: '2d', raw: true, level: dailyCourse(date), replay: String(input.replay || ''), opts: { maxSteps: maxSteps(env), stopOnDeath: true } });
+  const pick = await dailyPick(db, date);
+  const run = await verify(env, { type: '2d', raw: true, level: pick.level, replay: String(input.replay || ''), opts: { maxSteps: maxSteps(env), stopOnDeath: true } });
   const progress = run.won ? 1 : Math.round(run.progress * 1000) / 1000;
   const before = await db.prepare('SELECT won FROM daily WHERE date = ? AND user_id = ?').bind(date, user.id).first();
   const stmts = [db.prepare(`INSERT INTO daily (date, user_id, progress, won, at) VALUES (?, ?, ?, ?, ?)
@@ -996,7 +1010,9 @@ async function admin(ctx, path, method) {
     const reasons = await db.prepare('SELECT game_id, reason, COUNT(*) AS n FROM reports GROUP BY game_id, reason').all();
     const byGame = {};
     for (const r of reasons.results) (byGame[r.game_id] ||= {})[r.reason] = r.n;
-    return json({ games: results.map((g) => ({ ...row(g), reports: g.reports, hidden: !!g.hidden, reasons: byGame[g.id] || {} })) });
+    const votes = await db.prepare('SELECT game_id, COUNT(*) AS n, AVG(stars) AS avg FROM diff_votes GROUP BY game_id').all();
+    const vmap = Object.fromEntries(votes.results.map((v) => [v.game_id, v]));
+    return json({ games: results.map((g) => ({ ...row(g), reports: g.reports, hidden: !!g.hidden, reasons: byGame[g.id] || {}, suggested: g.suggested || 0, votes: vmap[g.id] ? vmap[g.id].n : 0, voteAvg: vmap[g.id] ? Math.round(vmap[g.id].avg * 10) / 10 : 0 })) });
   }
   if (path === '/users' && method === 'GET') {
     const q = (ctx.url.searchParams.get('q') || '').toLowerCase().slice(0, 16);
@@ -1056,6 +1072,8 @@ async function admin(ctx, path, method) {
     } else fail(400, 'Unknown action.');
     return json({ ok: true });
   }
+  if (path === '/daily' && method === 'GET') return dailyPicks(db);
+  if (path === '/daily' && method === 'POST') { const input = await body(ctx.request); return setDailyPick(db, String(input.date || ''), String(input.game || '').replace(/.*#\/p\//, '').trim()); }
   if (path === '/notify' && method === 'GET') return json(await adminNotify(db));
   if (path === '/notify' && method === 'POST') return json(await setAdminNotify(db, await body(ctx.request)));
   if (path === '/log' && method === 'GET') {
@@ -1100,6 +1118,9 @@ async function admin(ctx, path, method) {
     if (!f || !f.item.stock) fail(400, "That isn't a limited item.");
     const left = Math.floor(Number(input.left));
     if (!(left >= 0 && left <= 100000)) fail(400, 'Pick a number from 0 to 100000.');
+    // limited items never come back: you can take stock away, but not add more
+    const now = await db.prepare('SELECT left FROM stock WHERE item = ?').bind(f.key).first();
+    if (now && left > now.left) fail(400, `Limited items never come back once they're gone, so you can't restock them (${now.left} left).`);
     await db.prepare('INSERT INTO stock (item, left) VALUES (?, ?) ON CONFLICT (item) DO UPDATE SET left = excluded.left').bind(f.key, left).run();
     return json({ ok: true });
   }

@@ -27,7 +27,7 @@ export function el(tag, props = {}, ...kids) {
 }
 
 /* ---------------- pages ---------------- */
-const VIEWS = ['home', 'levels', 'discover', 'play', 'edit', 'worlds', 'world', 'w3', 'build', 'create', 'closet', 'profile', 'daily', 'admin', 'settings', 'builder'];
+const VIEWS = ['home', 'levels', 'discover', 'play', 'edit', 'worlds', 'world', 'w3', 'build', 'create', 'closet', 'profile', 'daily', 'admin', 'settings', 'builder', 'top'];
 let current = '';
 const leaving = new Map(); // view -> functions to call when leaving it
 export const currentView = () => current;

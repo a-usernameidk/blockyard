@@ -68,7 +68,7 @@ async function loadGames() {
       rate.value = String(g.stars || 0);
       rate.addEventListener('change', async () => { try { await api.admin('POST', '/games/' + g.id, { action: 'stars', amount: Number(rate.value) }); toast(Number(rate.value) ? `"${g.name}" is rated ${rate.value}★ ${diffName(Number(rate.value))}.` : `"${g.name}" is unrated now.`); } catch (e) { toast(e.message); } });
       box.append(el('div', { class: 'admin-row' + (g.hidden ? ' hidden-game' : '') }, pic,
-        el('div', {}, el('h3', {}, g.name), el('p', { class: 'small' }, `${g.kind === '3d' ? '3D world' : '2D level'} by ${g.creator}. ${plural(g.plays, 'play')}, ${plural(g.likes, 'like')}. ${g.visibility !== 'public' ? g.visibility + '. ' : ''}${g.hidden ? 'Hidden.' : 'Visible.'}`), el('p', { class: 'small' }, g.reports ? `Reports: ${reasons}` : 'No reports.'), el('div', { class: 'row' }, reward, rate)),
+        el('div', {}, el('h3', {}, g.name), el('p', { class: 'small' }, `${g.kind === '3d' ? '3D world' : '2D level'} by ${g.creator}. ${plural(g.plays, 'play')}, ${plural(g.likes, 'like')}. ${g.visibility !== 'public' ? g.visibility + '. ' : ''}${g.hidden ? 'Hidden.' : 'Visible.'}`), el('p', { class: 'small' }, g.reports ? `Reports: ${reasons}` : 'No reports.'), g.votes ? el('p', { class: 'small' }, `Players vote ${g.voteAvg}★ (${g.votes} vote${g.votes === 1 ? '' : 's'})${g.suggested && !g.stars ? `. Suggested: ${g.suggested}★ ${diffName(g.suggested)}, waiting for you` : ''}`) : null, el('div', { class: 'row' }, reward, rate)),
         el('div', { class: 'row' }, el('a', { class: 'btn', href: g.kind === '3d' ? '#/w/' + g.id : '#/p/' + g.id }, 'Play'), g.hidden ? act(g.reports ? 'Looks fine: show it' : 'Show', 'btn-grass', g.reports ? 'clear' : 'show') : act('Hide', '', 'hide'), g.reports && !g.hidden ? act('Clear reports', '', 'clear') : null, act('Take down + warn maker', 'btn-danger', 'warn'), act('Delete', 'btn-danger', 'delete'),
           el('button', { class: 'btn btn-danger', type: 'button', onclick: () => adminUser(g.creator, 'ban') }, 'Ban creator'))));
     }
@@ -166,7 +166,21 @@ async function findUsers() {
 $('#admin-user-find').addEventListener('click', findUsers);
 
 /* ---------------- announcement and limited stock ---------------- */
+async function loadDaily() {
+  const box = $('#daily-picks');
+  try {
+    const r = await api.admin('GET', '/daily');
+    if (!$('#daily-pick-date').value) $('#daily-pick-date').value = r.today;
+    box.replaceChildren(...(r.picks.length ? r.picks.map((p) => el('div', { class: 'stock-row' }, el('b', {}, p.date), el('span', { class: 'small' }, p.id ? `${p.name} by ${p.creator} (${p.how === 'admin' ? 'you picked it' : 'top level'})` : "Blockyard's own course"),
+      p.how === 'admin' ? el('button', { class: 'btn', type: 'button', onclick: async () => { try { await api.admin('POST', '/daily', { date: p.date, game: '' }); loadDaily(); } catch (e) { toast(e.message); } } }, 'Clear') : null))
+      : [el('p', { class: 'small' }, 'Nothing picked yet.')]));
+  } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); }
+}
+$('#daily-pick-go').addEventListener('click', async () => {
+  try { await api.admin('POST', '/daily', { date: $('#daily-pick-date').value, game: $('#daily-pick-game').value.trim() }); toast('Picked!'); $('#daily-pick-game').value = ''; loadDaily(); } catch (e) { toast(e.message); }
+});
 async function loadSite() {
+  loadDaily();
   const box = $('#admin-stock');
   box.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
   try {

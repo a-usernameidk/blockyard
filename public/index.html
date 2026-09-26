@@ -20,6 +20,7 @@
     <button class="btn nav-btn" data-go="#/worlds" data-nav="worlds">Worlds <span class="live-dot" id="nav-online" hidden></span></button>
     <button class="btn nav-btn" data-go="#/create" data-nav="create">Create</button>
     <button class="btn nav-btn" data-go="#/closet" data-nav="closet">Closet</button>
+    <button class="btn nav-btn" data-go="#/top" data-nav="top">Top</button>
   </nav>
   <div class="me">
     <button class="btn icon-btn" id="mute" aria-pressed="false" aria-label="Sound effects"></button>
@@ -273,6 +274,8 @@
   <div class="tabs page-tabs" id="closet-tabs" role="tablist" aria-label="Closet">
     <button class="tab" role="tab" data-ctab="shop">Shop</button>
     <button class="tab" role="tab" data-ctab="mine">My stuff</button>
+    <button class="tab" role="tab" data-ctab="market">Reseller shop</button>
+    <button class="tab" role="tab" data-ctab="chests">Chests</button>
     <button class="tab" role="tab" data-ctab="trades">Trades <span class="count" id="trade-count" hidden></span></button>
     <button class="tab" role="tab" data-ctab="badges">Badges</button>
   </div>
@@ -281,6 +284,8 @@
     <div class="closet-body" id="closet-body"></div>
   </div>
   <div id="closet-trades" hidden></div>
+  <div id="closet-market" hidden></div>
+  <div id="closet-chests" hidden></div>
   <div id="closet-badges" hidden>
     <div class="section-head"><h2>Badges</h2><span class="small" id="ach-count"></span></div>
     <div class="achs" id="ach-list"></div>
@@ -290,6 +295,13 @@
 </section>
 
 <!-- ============ PROFILE ============ -->
+<section id="view-top" class="view" hidden>
+  <div class="page-head"><div><h1>Leaderboards</h1><p class="lede">The top players in all of Blockyard, and the whole game's numbers.</p></div></div>
+  <div class="stats" id="top-totals"></div>
+  <div class="chips" role="group" aria-label="Leaderboard" id="top-tabs"></div>
+  <ol class="board-list big-board" id="top-list"></ol>
+</section>
+
 <section id="view-settings" class="view" hidden>
   <div class="page-head"><div><h1>Settings</h1><p class="lede">These are saved on this computer.</p></div></div>
   <div id="settings-body" class="settings"></div>
@@ -358,6 +370,12 @@
       <p class="small">Shows across the top of the site for everyone, and pops up in every 3D server running right now. Leave it empty and post to remove it.</p>
       <textarea id="admin-announce" maxlength="200" rows="2" placeholder="Like: Double coins weekend! Or: New obby just dropped."></textarea>
       <div class="row"><button class="btn btn-sun" id="admin-announce-go" type="button">Post it</button><button class="btn" id="admin-announce-clear" type="button">Remove it</button></div>
+    </div>
+    <div class="admin-box">
+      <h2>Daily challenge</h2>
+      <p class="small">Pick a player's 2D level for a day. Days you don't pick get a top-liked (or most played) player level that was never the daily before, or Blockyard's own course if there are none.</p>
+      <div class="row"><input type="date" id="daily-pick-date" aria-label="Day"><input id="daily-pick-game" placeholder="Level link or ID" aria-label="Level link or ID"><button class="btn btn-sun" id="daily-pick-go" type="button">Pick it</button></div>
+      <div class="admin-list" id="daily-picks"></div>
     </div>
     <div class="admin-box">
       <h2>Limited items</h2>

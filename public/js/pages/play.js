@@ -29,6 +29,22 @@ export function bestText(key, lv) {
 }
 // the difficulty rating: "4★ Normal" (nothing when unrated)
 export function diffTag(n) { return n ? el('span', { class: 'tag tag-diff ' + diffClass(n), title: `Beat it to earn ${n} difficulty stars` }, diffFace(n, 20), `${n}★ ${diffName(n)}`) : null; }
+// After beating a player's level: "How hard was it?" Pick a face, then its stars. After 10 votes the admin verifies it.
+const VOTE_FACES = [[1, 2], [3, 4], [5, 6], [7, 8], [9], [10]];
+export function voteBox(gameId, mine = 0) {
+  const msg = el('p', { class: 'small' }, mine ? `You voted ${mine}★. You can change it.` : 'Players vote, then the admin verifies it. Verified levels give difficulty stars and coins.');
+  const box = el('div', { class: 'vote-box' }, el('b', {}, 'How hard was it?'));
+  const row = el('div', { class: 'vote-faces' });
+  for (const nums of VOTE_FACES) {
+    row.append(el('div', { class: 'vote-face' }, diffFace(nums[0], 34), el('span', { class: 'small' }, diffName(nums[0])),
+      el('div', { class: 'row' }, ...nums.map((n) => el('button', { class: 'btn' + (n === mine ? ' on' : ''), type: 'button', onclick: async (e) => {
+        try { const r = await api.vote(gameId, n); box.querySelectorAll('.vote-faces .btn').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); msg.textContent = `Thanks! ${r.votes} vote${r.votes === 1 ? '' : 's'} so far${r.votes >= 10 ? `. Players say ${r.stars}★ ${diffName(r.stars)}` : ''}.`; }
+        catch (err) { msg.textContent = err.message; }
+      } }, `${n}★`)))));
+  }
+  box.append(row, msg);
+  return box;
+}
 // the difficulty face picture (Easy, Normal, Hard, Harder, Insane, Demon)
 export function diffFace(n, size = 48) { return n ? el('img', { class: 'diff-face', src: `img/faces/${diffName(n).toLowerCase()}.png`, alt: diffName(n), width: String(size), height: String(size), draggable: 'false' }) : null; }
 export function card(lv, { meta = [], text, by, actions, reward, stars }) {
@@ -242,7 +258,12 @@ async function playPublished(id) {
       onWin: (r) => {
         const res = progress.finish('p:' + id, r, { stars: game.stars || 0 });
         // checked by the server even when it doesn't pay: it counts for quests
-        if (session.user) setTimeout(() => rewardLine(api.finish({ kind: 'game', id, replay: r.replay }), 0), 0);
+        if (session.user) setTimeout(() => {
+          const p = api.finish({ kind: 'game', id, replay: r.replay });
+          rewardLine(p, 0);
+          // then: vote how hard it was (not on your own level)
+          p.then(() => { if (!game.stars && game.creator !== session.user.name) { for (const old of document.querySelectorAll('#win .vote-box')) old.remove(); $('#win-reward').after(voteBox(id, game.myVote)); } }).catch(() => {});
+        }, 0);
         else if (game.reward) setTimeout(() => { $('#win-reward').textContent = `Log in to earn ${game.reward} coins from this level.`; }, 0);
         return res;
       },
@@ -278,7 +299,7 @@ export function publishedCard(g) {
   try { lv = normalizeLevel(g.level); } catch (e) { return null; }
   const by = el('p', { class: 'by-line' }, 'by ', el('a', { class: 'linkish', href: '#/u/' + encodeURIComponent(g.creator) }, g.creator));
   return card(lv, {
-    by, text: g.descr || null, reward: g.reward, stars: g.stars,
+    by, text: g.descr || null, reward: g.pays || g.reward, stars: g.stars,
     meta: [plural(g.plays, 'play'), plural(g.likes, 'like'), bestText('p:' + g.id, lv)],
     actions: [['Play', 'btn-grass', () => go('#/p/' + g.id)], ['Remix', '', () => editLevel(remixOf(lv))]],
   });
@@ -326,7 +347,7 @@ $('#import-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $
 async function showDaily() {
   show('daily', 'play');
   const date = todayUTC();
-  const lv = dailyCourse(date);
+  let lv = dailyLevel && dailyLevel.date === date ? dailyLevel.lv : dailyCourse(date);
   $('#daily-title').textContent = `Daily challenge: ${date}`;
   const msLeft = Date.parse(date + 'T00:00:00Z') + 86400e3 - Date.now();
   $('#daily-reset').textContent = `New course in ${Math.floor(msLeft / 3600e3)} h ${Math.floor(msLeft / 60e3) % 60} min`;
@@ -334,24 +355,37 @@ async function showDaily() {
   const d = progress.data.daily[date];
   $('#daily-mine').textContent = d ? (d.won ? `You cleared it in ${plural(d.attempts, 'attempt')}.` : `Your best: ${Math.floor(d.best * 100)}% after ${plural(d.attempts, 'attempt')}.`) : 'Same course for everyone today. One life per attempt, as many attempts as you want. Clear it for 30 coins.';
   $('#daily-note').textContent = session.user ? 'Your best run goes on the board automatically.' : 'Playing as a guest. Log in to get on the board and earn coins.';
-  $('#daily-play').onclick = () => playDaily(date);
+  $('#daily-play').onclick = () => playDaily(date, lv, dailyLevel && dailyLevel.date === date ? dailyLevel.by : 'Blockyard');
   const board = $('#daily-board'), bmsg = $('#daily-board-msg');
   board.innerHTML = ''; bmsg.textContent = 'Loading…';
-  if (!(await isOnline())) { bmsg.textContent = 'The board needs the online version of Blockyard.'; return; }
+  $('#daily-play').disabled = true; // wait to hear which course it is today
+  if (!(await isOnline())) { $('#daily-play').disabled = false; bmsg.textContent = 'The board needs the online version of Blockyard.'; return; }
   try {
     const r = await api.daily(date);
+    // today's course might be a player's level (picked by the admin, or a top level)
+    if (r.level) {
+      try {
+        lv = normalizeLevel(r.level);
+        dailyLevel = { date, lv, by: r.source.game.creator };
+        $('#daily-title').textContent = `Daily challenge: "${r.source.game.name}" by ${r.source.game.creator}`;
+        drawThumb($('#daily-thumb'), thumbWindow(lv, 60), 5);
+        $('#daily-play').onclick = () => playDaily(date, lv, r.source.game.creator);
+      } catch (e) { /* Blockyard's own course then */ }
+    }
     for (const row of r.top) {
       board.append(el('li', { class: session.user && row.name === session.user.name ? 'me' : '' },
         el('span', { class: 'rank' }, String(row.rank)), pipCanvas(34, { color: row.color, hat: row.hat }), el('a', { class: 'who linkish', href: '#/u/' + row.name }, row.name),
         el('span', { class: 'pct' }, row.won ? 'Cleared' : `${Math.floor(row.progress * 100)}%`)));
     }
+    $('#daily-play').disabled = false;
     bmsg.textContent = !r.top.length ? 'Nobody is on the board yet. Be the first!' : r.me ? `You are #${r.me.rank} of ${r.players}.` : `${plural(r.players, 'player')} today.`;
-  } catch (e) { bmsg.textContent = e.message; }
+  } catch (e) { bmsg.textContent = e.message; $('#daily-play').disabled = false; }
 }
-function playDaily(date) {
+let dailyLevel = null;
+function playDaily(date, lv = dailyCourse(date), by = 'Blockyard') {
   const d = progress.data.daily[date];
-  playLevel(dailyCourse(date), {
-    key: 'daily:' + date, mode: 'daily', by: 'Blockyard', back: '#/daily', dailyBest: d ? d.best : 0,
+  playLevel(lv, {
+    key: 'daily:' + date, mode: 'daily', by, back: '#/daily', dailyBest: d ? d.best : 0,
     onAttempt: (r) => {
       const res = progress.daily(date, r.progress, r.won);
       if ((res.newBest || r.won) && session.user && session.online) {

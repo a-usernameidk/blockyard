@@ -163,6 +163,7 @@ export function normalizeWorld(w, { needGoal } = {}) {
   const name = cleanText(w.n, 40) || 'My world';
   const world = { v: 1, n: name, mode, sky: SKIES[w.sky] ? w.sky : 'day', b: encodeBlocks(grid) };
   if (game) world.game = game;
+  if (w.gear === 'off') world.gear = 'off'; // the maker turned gear off for this world
   return { world, grid, info };
 }
 export function worldNameOk(n) { return !isRude(n); }

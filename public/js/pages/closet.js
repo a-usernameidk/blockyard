@@ -11,7 +11,8 @@ const KIND_LABEL = { hat: 'Hats', color: 'Colors', trail: 'Trails', pet: 'Pets',
 onLeave('closet', () => cancelAnimationFrame(raf));
 
 /* ---------------- drawing items ---------------- */
-const TRAIL_SAMPLE = { confetti: '#ff5d8f', snow: '#8fd3ff', galaxy: '#b06cff', sparkle: '#ffd23f', bubbles: '#7cc8ff', hearts: '#ff5d8f', notes: '#1d2340', fire: '#ff5a1f', rainbow: null, stars: '#ffd23f', lightning: '#7cc8ff' };
+const TRAIL_SAMPLE = { confetti: '#ff5d8f', snow: '#8fd3ff', galaxy: '#b06cff', sparkle: '#ffd23f', bubbles: '#7cc8ff', hearts: '#ff5d8f', notes: '#1d2340', fire: '#ff5a1f', rainbow: null, stars: '#ffd23f', lightning: '#7cc8ff',
+  leaves: '#44c06a', mint: '#2ec4b6', lava: '#ff5a1f', ice: '#7cc8ff', candy: '#ff5d8f', ocean: '#0077b6', toxic: '#39ff14', sakura: '#ffb7c5', shadow: '#3d405b', sunset: '#ff9f1c', goldtrail: '#e0b12a', void: '#5a3fd6' };
 function drawTrailSample(c, k, x, y, t) {
   if (k === 'rainbow') {
     ['#ff5d8f', '#ff9f1c', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'].forEach((col, i) => {
@@ -88,16 +89,21 @@ async function showCloset(t = 'shop', tradeWith) {
   show('closet');
   tab = t;
   $$('[data-ctab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.ctab === tab)));
-  $('#closet-main').hidden = tab === 'trades' || tab === 'badges';
+  $('#closet-main').hidden = !['shop', 'mine'].includes(tab);
   $('#closet-trades').hidden = tab !== 'trades';
+  $('#closet-market').hidden = tab !== 'market';
+  $('#closet-chests').hidden = tab !== 'chests';
   $('#closet-badges').hidden = tab !== 'badges';
   renderWallet();
+  loadStats();
   if (tab === 'shop' || tab === 'mine') {
     pick = null;
     closetLoop();
     if (!shopInfo && (await isOnline())) { try { shopInfo = await api.shop(); } catch (e) { /* no deals then */ } }
     render();
   } else if (tab === 'trades') renderTrades(tradeWith);
+  else if (tab === 'market') renderMarket();
+  else if (tab === 'chests') renderChests();
   else renderBadges();
 }
 $$('[data-ctab]').forEach((b) => b.addEventListener('click', () => go(b.dataset.ctab === 'shop' ? '#/closet' : '#/closet/' + b.dataset.ctab)));
@@ -136,12 +142,16 @@ function render() {
   if (tab === 'shop') {
     const chips = el('div', { class: 'chips' }, ...KINDS.map((k) => el('button', { class: 'chip', type: 'button', 'aria-pressed': String(k === kind), onclick: () => { kind = k; pick = null; render(); } }, KIND_LABEL[k])));
     const deals = shopInfo ? shopInfo.featured.items.map(findItem).filter(Boolean) : [];
-    const limited = KINDS.flatMap((k) => SHOP[k].filter((i) => i.stock).map((i) => ({ kind: k, item: i })));
+    const gone = (k, i) => i.stock && shopInfo && shopInfo.stock[itemKey(k, i.id)] === 0 && !progress.owns(k, i.id);
+    const limitedAll = KINDS.flatMap((k) => SHOP[k].filter((i) => i.stock).map((i) => ({ kind: k, item: i })));
+    const limited = limitedAll.filter((f) => !gone(f.kind, f.item)), soldOut = limitedAll.length - limited.length;
     body.replaceChildren(
       shopInfo && shopInfo.featured.sale && shopInfo.featured.sale.until > Date.now() ? el('p', { class: 'sale-banner' }, `SALE! Everything is ${shopInfo.featured.sale.off}% off (except limited items) until ${new Date(shopInfo.featured.sale.until).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`) : null,
       deals.length ? el('div', { class: 'shelf' }, el('h3', {}, `Today's deals: ${shopInfo.featured.off}% off`), el('div', { class: 'items' }, ...deals.map((f) => itemButton(f.kind, f.item, { status: statusOf(f.kind, f.item), onclick: choose(f.kind, f.item) })))) : null,
-      el('div', { class: 'shelf' }, el('h3', {}, 'Limited'), el('div', { class: 'items' }, ...limited.map((f) => itemButton(f.kind, f.item, { status: statusOf(f.kind, f.item), onclick: choose(f.kind, f.item) })))),
-      el('div', { class: 'shelf' }, el('div', { class: 'shelf-head' }, el('h3', {}, 'Everything'), chips), el('div', { class: 'items' }, ...SHOP[kind].map((item) => itemButton(kind, item, { status: statusOf(kind, item), onclick: choose(kind, item) })))));
+      el('div', { class: 'shelf' }, el('h3', {}, 'Limited'),
+        soldOut ? el('p', { class: 'small' }, `${soldOut} limited ${soldOut === 1 ? 'item has' : 'items have'} sold out and will never come back. Find them on the `, el('a', { href: '#/closet/market' }, 'Reseller shop'), ' or trade for them.') : null,
+        el('div', { class: 'items' }, ...limited.map((f) => itemButton(f.kind, f.item, { status: statusOf(f.kind, f.item), onclick: choose(f.kind, f.item) })))),
+      el('div', { class: 'shelf' }, el('div', { class: 'shelf-head' }, el('h3', {}, 'Everything'), chips), el('div', { class: 'items' }, ...SHOP[kind].filter((item) => !gone(kind, item)).map((item) => itemButton(kind, item, { status: statusOf(kind, item), onclick: choose(kind, item) })))));
   } else {
     const groups = KINDS.map((k) => {
       const owned = SHOP[k].filter((i) => progress.owns(k, i.id));
@@ -164,19 +174,22 @@ function renderCaption() {
   const w = progress.wallet;
   const buttons = [];
   if (owned) buttons.push(el('button', { class: 'btn btn-grass', type: 'button', disabled: wearing, onclick: () => wear(k, id) }, wearing ? 'Wearing it' : 'Wear it'));
-  if (owned && w && canTrade(item) && (w.items[key] || 0) > 0) buttons.push(el('button', { class: 'btn btn-danger', type: 'button', onclick: () => sell(key, item) }, `Sell for ${sellPrice(item)}`));
+  if (owned && w && canTrade(item) && (w.items[key] || 0) > 0) {
+    if (!item.stock) buttons.push(el('button', { class: 'btn btn-danger', type: 'button', onclick: () => sell(key, item) }, `Sell for ${sellPrice(item)}`));
+    buttons.push(el('button', { class: 'btn', type: 'button', onclick: () => resell(key, item) }, 'Sell on Reseller shop'));
+  }
   if (!owned) {
     if (!w) buttons.push(el('button', { class: 'btn btn-sun', type: 'button', onclick: () => openAccount() }, 'Log in to buy'));
     else if (item.need) buttons.push(progress.canUnlock(item) ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item) }, 'Unlock it') : el('button', { class: 'btn', type: 'button', disabled: true }, 'Locked'));
     else {
       const price = dealPrice(key, item), left = item.stock && shopInfo ? shopInfo.stock[key] : null;
       const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item) }, `Buy for ${price} coins`);
-      if (left === 0) { b.disabled = true; b.textContent = 'Sold out. Try trading for it'; }
+      if (left === 0) { b.disabled = true; b.textContent = 'Sold out forever. Try the Reseller shop'; }
       else if (w.coins < price) { b.disabled = true; b.textContent = `Need ${price - w.coins} more coins`; }
       buttons.push(b);
     }
   }
-  cap.append(el('b', {}, item.name), item.need && !owned ? el('span', { class: 'small' }, ` ${item.hint}.`) : null, el('div', { class: 'row' }, ...buttons));
+  cap.append(el('b', {}, item.name), item.need && !owned ? el('span', { class: 'small' }, ` ${item.hint}.`) : null, statsLine(key, item), el('div', { class: 'row' }, ...buttons));
 }
 async function wear(k, id) {
   if (progress.wallet) {
@@ -199,9 +212,9 @@ async function buy(key, item) {
   } catch (e) { toast(e.message); }
 }
 async function sell(key, item) {
-  const ok = await ask(`Sell ${item.name}?`, `You get ${sellPrice(item)} coins back.${item.stock ? ' It goes back into the shop, so someone else can buy it.' : ''}`, [{ label: `Sell for ${sellPrice(item)}`, value: true, cls: 'btn-danger' }]);
+  const ok = await ask(`Sell ${item.name}?`, `You get ${sellPrice(item)} coins back. For more, try the Reseller shop, where players set the price.`, [{ label: `Sell for ${sellPrice(item)}`, value: true, cls: 'btn-danger' }]);
   if (!ok) return;
-  try { const r = await api.sell(key); setWallet(r.wallet); toast(`Sold for ${r.got} coins.`); if (item.stock) shopInfo = await api.shop().catch(() => shopInfo); pick = null; render(); renderWallet(); }
+  try { const r = await api.sell(key); setWallet(r.wallet); toast(`Sold for ${r.got} coins.`); pick = null; render(); renderWallet(); }
   catch (e) { toast(e.message); }
 }
 
@@ -212,7 +225,7 @@ function chipsOf(keys, coins) {
   if (!out.length) out.push(el('span', { class: 'small' }, 'nothing'));
   return el('div', { class: 'trade-items' }, ...out);
 }
-const valueOfKeys = (keys, coins) => keys.reduce((n, k) => { const f = findItem(k); return n + (f ? valueOf(f.item) : 0); }, 0) + (coins || 0);
+const valueOfKeys = (keys, coins) => keys.reduce((n, k) => { const f = findItem(k); return n + (f ? worthOf(k, f.item) : 0); }, 0) + (coins || 0);
 async function renderTrades(withName) {
   const box = $('#closet-trades');
   if (!session.user) { box.replaceChildren(el('div', { class: 'panel-note' }, el('h3', {}, 'Trading needs an account'), el('p', {}, 'Log in to swap items and coins with other players.'), el('button', { class: 'btn btn-sun', type: 'button', onclick: () => openAccount() }, 'Log in or sign up'))); return; }
@@ -319,7 +332,7 @@ function pipBadge(on) {
 
 addRoute(/^#\/closet$/, () => showCloset('shop'));
 addRoute(/^#\/shop$/, () => showCloset('shop'));
-addRoute(/^#\/closet\/(mine|trades|badges)$/, (m) => showCloset(m[1]));
+addRoute(/^#\/closet\/(mine|trades|badges|market|chests)$/, (m) => showCloset(m[1]));
 addRoute(/^#\/closet\/trade\/([A-Za-z0-9_]{0,16})$/, (m) => showCloset('trades', m[1] || ''));
 
 /* ---------------- the shop keeper in 3D worlds ---------------- */
@@ -361,4 +374,198 @@ export async function shopPanel(host, { close, looked }) {
     cap.append(el('b', {}, item.name), el('div', { class: 'row' }, ...btns));
   };
   draw();
+}
+
+/* ---------------- item stats: rarity, store worth and real worth ---------------- */
+let stats = null, statsAt = 0;
+async function loadStats(force) {
+  if (!force && stats && Date.now() - statsAt < 60e3) return;
+  if (!(await isOnline())) return;
+  try { stats = (await api.itemStats()).stats; statsAt = Date.now(); } catch (e) { return; }
+  if (pick && ['shop', 'mine'].includes(tab)) renderCaption();
+}
+// What something really sells for: the average of its last 10 Reseller sales, or the shop price if nobody sold one yet.
+function worthOf(key, item) { const s = stats && stats[key]; return s && s.rap ? s.rap : valueOf(item); }
+const RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic'];
+function rarityOf(key, item) {
+  const s = stats && stats[key], n = s ? s.exist : null;
+  let r;
+  if (item.stock) r = item.stock <= 15 ? 4 : item.stock <= 60 ? 3 : 2;
+  else r = item.price >= 2500 ? 3 : item.price >= 700 ? 2 : item.price >= 200 ? 1 : 0;
+  if (item.stock && n != null && n <= 5 && s.left === 0) r = 5; // almost none left in the whole game
+  return RARITY[r];
+}
+function statsLine(key, item) {
+  if (!canTrade(item)) return null;
+  const s = stats && stats[key];
+  const real = s && s.rap, r = rarityOf(key, item);
+  const bits = [el('span', { class: 'rarity r-' + r.toLowerCase() }, r), el('span', {}, `Store worth ${valueOf(item)}`),
+    el('span', { class: real && real > valueOf(item) ? 'up' : real && real < valueOf(item) ? 'down' : '' }, real ? `Real worth ${real}` : 'Real worth: no sales yet')];
+  if (s) bits.push(el('span', {}, `${s.exist} exist`), el('span', {}, `${s.owners} ${s.owners === 1 ? 'owner' : 'owners'}`));
+  if (item.stock && s && s.left != null) bits.push(el('span', {}, s.left ? `${s.left} left in shop` : 'Sold out forever'));
+  if (s && s.forSale) bits.push(el('a', { href: '#/closet/market', onclick: (e) => { e.preventDefault(); marketFocus = key; if (tab === 'market') showListings(key); else go('#/closet/market'); } }, `${s.forSale} for sale from ${s.low}`));
+  return el('div', { class: 'item-stats' }, ...bits);
+}
+
+/* ---------------- the Reseller shop ---------------- */
+async function resell(key, item) {
+  if (!session.user) { needLogin('Selling needs an account.'); return; }
+  const guess = Math.max(1, worthOf(key, item));
+  const input = el('input', { type: 'number', min: '1', max: '1000000', value: String(guess), 'aria-label': 'Price in coins' });
+  const note = el('p', { class: 'small' });
+  const upd = () => { const p = Math.floor(+input.value || 0); note.textContent = p > 0 ? `If it sells you get ${p - Math.floor(p * 0.1)} coins (the Reseller shop keeps 10%). It leaves your closet until it sells, and you can take it down any time.` : 'Pick a price.'; };
+  input.addEventListener('input', upd); upd();
+  const ok = await ask(`Sell ${item.name} on the Reseller shop`, `Other players can buy it for the price you pick. Real worth right now: ${worthOf(key, item)} coins.`, [{ label: 'Put it up for sale', value: true, cls: 'btn-sun' }], el('div', {}, el('label', { class: 'label' }, 'Price ', input), note));
+  if (!ok) return;
+  try {
+    const r = await api.marketSell(key, Math.floor(+input.value || 0));
+    setWallet(r.wallet); renderWallet(); toast(`${item.name} is for sale!`); loadStats(true);
+    pick = null;
+    if (tab === 'market') renderMarket(); else render();
+  } catch (e) { toast(e.message); }
+}
+let marketFocus = '';
+async function renderMarket() {
+  const box = $('#closet-market');
+  if (marketFocus) { const k = marketFocus; marketFocus = ''; showListings(k); return; }
+  if (!(await isOnline())) { box.replaceChildren(el('p', { class: 'msg' }, 'The Reseller shop needs the online server.')); return; }
+  box.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
+  let m;
+  try { m = await api.market(); } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); return; }
+  await loadStats();
+  const w = progress.wallet;
+  const forSale = m.items.map((x) => ({ ...x, f: findItem(x.item) })).filter((x) => x.f);
+  const tile = (f, status, onclick) => el('button', { class: 'item' + (f.item.stock ? ' limited' : ''), type: 'button', onclick }, itemPreview(f.kind, f.item), el('span', { class: 'item-name' }, f.item.name), status);
+  const mineRows = m.mine.map((l) => { const f = findItem(l.item); return f ? el('div', { class: 'market-row' }, itemPreview(f.kind, f.item, 40), el('b', {}, f.item.name), el('span', { class: 'small' }, `${l.price} coins, ${timeAgo(l.at)}`),
+    el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { try { const r = await api.marketCancel(l.id); setWallet(r.wallet); renderWallet(); toast('Taken down. It is back in your closet.'); loadStats(true); renderMarket(); } catch (e) { toast(e.message); } } }, 'Take it down')) : null; });
+  const sellable = w ? Object.keys(w.items).filter((k) => (w.items[k] || 0) > 0).map(findItem).filter((f) => f && canTrade(f.item)) : [];
+  box.replaceChildren(
+    el('p', { class: 'lede' }, `Buy and sell with other players. This is the only place to get limited items after they sell out. Sellers pick the price and get it minus ${Math.round(m.fee * 100)}%.`),
+    el('h2', {}, 'For sale'),
+    forSale.length ? el('div', { class: 'items' }, ...forSale.map((x) => tile(x.f, el('span', { class: 'item-price' }, `from ${x.low} coins`, el('span', { class: 'stock' }, ` ${x.n} for sale`)), () => showListings(x.item)))) : el('p', { class: 'small' }, 'Nothing for sale yet. Be the first!'),
+    session.user ? el('h2', {}, 'Your things for sale') : null,
+    session.user ? (mineRows.length ? el('div', { class: 'market-rows' }, ...mineRows) : el('p', { class: 'small' }, 'You are not selling anything.')) : null,
+    session.user ? el('h2', {}, 'Sell something') : el('div', { class: 'panel-note' }, el('p', {}, 'Log in to buy and sell.'), el('button', { class: 'btn btn-sun', type: 'button', onclick: () => openAccount() }, 'Log in or sign up')),
+    session.user ? (sellable.length ? el('div', { class: 'items small-items' }, ...sellable.map((f) => tile(f, el('span', { class: 'item-price' }, `Worth ${worthOf(f.key, f.item)}`), () => resell(f.key, f.item)))) : el('p', { class: 'small' }, "You don't have anything to sell yet.")) : null);
+}
+async function showListings(key) {
+  const box = $('#closet-market'), f = findItem(key);
+  if (!f) return;
+  box.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
+  let d;
+  try { d = await api.marketItem(key); } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); return; }
+  await loadStats();
+  const w = progress.wallet, me = session.user && session.user.name;
+  const rows = d.listings.map((l) => {
+    const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => {
+      const ok = await ask(`Buy ${f.item.name}?`, `From ${l.name} for ${l.price} coins.`, [{ label: `Buy for ${l.price}`, value: true, cls: 'btn-sun' }]);
+      if (!ok) return;
+      try {
+        const r = await api.marketBuy(l.id); setWallet(r.wallet); renderWallet();
+        import('../audio.js').then((a) => a.sfx('buy')).catch(() => {});
+        progress.stat('bought'); progress.flush();
+        toast(`You got ${f.item.name}!`); loadStats(true); showListings(key);
+      } catch (e) { toast(e.message); showListings(key); }
+    } }, `Buy for ${l.price}`);
+    if (!w) { b.disabled = true; b.textContent = 'Log in to buy'; }
+    else if (l.name === me) { b.disabled = true; b.textContent = 'Yours'; }
+    else if (w.coins < l.price) { b.disabled = true; b.textContent = `Need ${l.price - w.coins} more`; }
+    return el('div', { class: 'market-row' }, el('b', {}, `${l.price} coins`), el('span', { class: 'small' }, `${l.name}, ${timeAgo(l.at)}`), b);
+  });
+  box.replaceChildren(
+    el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', onclick: () => renderMarket() }, 'Back to the Reseller shop')),
+    el('div', { class: 'market-detail' }, itemPreview(f.kind, f.item, 96), el('div', {}, el('h2', {}, f.item.name), statsLine(key, f.item))),
+    el('h3', {}, 'For sale (cheapest first)'),
+    rows.length ? el('div', { class: 'market-rows' }, ...rows) : el('p', { class: 'small' }, 'None for sale right now.'),
+    el('h3', {}, 'Last sales'),
+    d.sales.length ? el('div', { class: 'market-rows' }, ...d.sales.map((s) => el('div', { class: 'market-row' }, el('b', {}, `${s.price} coins`), el('span', { class: 'small' }, timeAgo(s.sold_at))))) : el('p', { class: 'small' }, 'Nobody has sold one here yet.'));
+}
+
+/* ---------------- chests ---------------- */
+function drawChest(c, color, open, shake, t) {
+  c.save();
+  c.translate(48 + (shake ? Math.sin(t * 60) * 3 * shake : 0), 60);
+  const dark = 'rgba(0,0,0,.25)';
+  c.fillStyle = 'rgba(29,35,64,.18)'; c.beginPath(); c.ellipse(0, 26, 34, 6, 0, 0, Math.PI * 2); c.fill();
+  // glow when open
+  if (open > 0) { const g = c.createRadialGradient(0, -8, 2, 0, -8, 50); g.addColorStop(0, `rgba(255,240,150,${0.9 * open})`); g.addColorStop(1, 'rgba(255,240,150,0)'); c.fillStyle = g; c.fillRect(-50, -60, 100, 80); }
+  c.fillStyle = color; c.fillRect(-30, -8, 60, 32);
+  c.fillStyle = dark; c.fillRect(-30, 4, 60, 4); c.fillRect(-24, -8, 5, 32); c.fillRect(19, -8, 5, 32);
+  c.strokeStyle = '#1d2340'; c.lineWidth = 2.5; c.strokeRect(-30, -8, 60, 32);
+  // lid swings back as it opens
+  c.save(); c.translate(0, -8); c.scale(1, 1 - open * 1.6);
+  c.fillStyle = color; c.beginPath(); c.moveTo(-30, 0); c.lineTo(-30, -12); c.quadraticCurveTo(0, -26, 30, -12); c.lineTo(30, 0); c.closePath(); c.fill();
+  c.fillStyle = dark; c.fillRect(-24, -18, 5, 18); c.fillRect(19, -18, 5, 18);
+  c.stroke(); c.restore();
+  if (open < 0.3) { c.fillStyle = '#ffd23f'; c.fillRect(-6, -12, 12, 12); c.strokeRect(-6, -12, 12, 12); c.fillStyle = '#1d2340'; c.fillRect(-1.5, -8, 3, 5); }
+  c.restore();
+}
+function chestCanvas(color, size = 96) {
+  const dpr = Math.min(2, devicePixelRatio || 1), cv = document.createElement('canvas');
+  cv.width = cv.height = size * dpr; cv.style.width = cv.style.height = size + 'px';
+  const c = cv.getContext('2d'); c.scale(dpr * size / 96, dpr * size / 96);
+  drawChest(c, color, 0, 0, 0);
+  cv.setAttribute('aria-hidden', 'true');
+  return cv;
+}
+async function renderChests() {
+  const box = $('#closet-chests');
+  if (!(await isOnline())) { box.replaceChildren(el('p', { class: 'msg' }, 'Chests need the online server.')); return; }
+  let list;
+  try { list = (await api.chests()).chests; } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); return; }
+  const w = progress.wallet;
+  const oddsText = (o) => o.kind === 'coins' ? `${o.lo}–${o.hi} coins` : `an item worth ${o.lo}–${o.hi}`;
+  box.replaceChildren(
+    el('p', { class: 'lede' }, 'Spend coins on a chest and get a surprise: coins or an item (something new if it can). The odds are written on each chest. Limited items never come out of chests.'),
+    el('div', { class: 'chests' }, ...list.map((ch) => {
+      const b = el('button', { class: 'btn btn-sun btn-big', type: 'button', onclick: () => (w ? openIt(ch) : openAccount()) }, w ? `Open for ${ch.price}` : 'Log in to open');
+      if (w && w.coins < ch.price) { b.disabled = true; b.textContent = `Need ${ch.price - w.coins} more coins`; }
+      return el('div', { class: 'chest' }, chestCanvas(ch.color), el('h3', {}, ch.name),
+        el('ul', { class: 'odds' }, ...ch.odds.map((o) => el('li', {}, el('b', {}, `${o.pct}%`), ` ${oddsText(o)}`))), b);
+    })),
+    el('div', { id: 'chest-stage' }));
+  async function openIt(ch) {
+    const ok = await ask(`Open the ${ch.name}?`, `It costs ${ch.price} coins.`, [{ label: `Open for ${ch.price}`, value: true, cls: 'btn-sun' }]);
+    if (!ok) return;
+    let r;
+    try { r = await api.openChest(ch.id); } catch (e) { toast(e.message); return; }
+    setWallet(r.wallet); renderWallet();
+    await openChestAnim(ch, r.prize);
+    renderChests();
+  }
+}
+function openChestAnim(ch, prize) {
+  return new Promise((resolve) => {
+    const dpr = Math.min(2, devicePixelRatio || 1), size = 160;
+    const cv = el('canvas', { 'aria-hidden': 'true' }); cv.width = cv.height = size * dpr; cv.style.width = cv.style.height = size + 'px';
+    const c = cv.getContext('2d');
+    const out = el('div', { class: 'chest-prize', 'aria-live': 'polite' });
+    const f = prize.kind === 'item' ? findItem(prize.key) : null;
+    const done = el('button', { class: 'btn btn-sun', type: 'button', hidden: true, onclick: () => { modal.remove(); resolve(); } }, 'Nice!');
+    const wearBtn = f ? el('button', { class: 'btn btn-grass', type: 'button', hidden: true, onclick: async () => { await wear(f.kind, f.id).catch(() => {}); modal.remove(); resolve(); } }, 'Wear it') : null;
+    const modal = el('div', { class: 'chest-stage', role: 'dialog', 'aria-label': 'Opening ' + ch.name }, el('div', { class: 'panel' }, el('h2', {}, ch.name), cv, out, el('div', { class: 'row' }, wearBtn, done)));
+    document.body.append(modal);
+    const audio = import('../audio.js').catch(() => null);
+    const t0 = performance.now();
+    let revealed = false;
+    const tick = (now) => {
+      if (!modal.isConnected) return;
+      const t = (now - t0) / 1000;
+      const shake = t < 1.2 ? Math.min(1, t) : 0, open = t < 1.2 ? 0 : Math.min(1, (t - 1.2) * 3);
+      c.setTransform(dpr * size / 96, 0, 0, dpr * size / 96, 0, 0); c.clearRect(0, 0, 96, 96);
+      drawChest(c, ch.color, open, shake, t);
+      if (open > 0) { for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2 + t, rr = 10 + open * 30; c.fillStyle = ['#ffd23f', '#ff5d8f', '#7cc8ff', '#44c06a'][i % 4]; c.fillRect(48 + Math.cos(a) * rr - 2, 44 + Math.sin(a) * rr * 0.6 - 2, 4, 4); } }
+      if (t > 1.3 && !revealed) {
+        revealed = true;
+        audio.then((a) => a && a.sfx(prize.kind === 'item' ? 'badge' : 'coin'));
+        if (f) out.replaceChildren(itemPreview(f.kind, f.item, 96), el('b', {}, `${f.item.name}!`), el('span', { class: 'small' }, `Worth ${valueOf(f.item)} coins`));
+        else out.replaceChildren(el('span', { class: 'big-coins' }, `+${prize.coins}`), el('span', { class: 'small' }, 'coins'));
+        done.hidden = false; if (wearBtn) wearBtn.hidden = false;
+        done.focus();
+      }
+      if (t < 3) requestAnimationFrame(tick);
+    };
+    audio.then((a) => a && a.sfx('open'));
+    requestAnimationFrame(tick);
+  });
 }

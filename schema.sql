@@ -160,3 +160,13 @@ CREATE TABLE trade_done (id TEXT PRIMARY KEY);
 
 -- Site settings: the admin announcement, and the key live-room tickets are signed with when SALT is missing.
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+-- Difficulty votes from players who beat a level (10 votes send it to the admin to rate). games.suggested marks ones already sent.
+CREATE TABLE IF NOT EXISTS diff_votes (game_id TEXT NOT NULL, user_id TEXT NOT NULL, stars INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (game_id, user_id));
+-- Which level is the daily challenge each day ('admin' picked, 'top' player level, or 'auto' = Blockyard's own course).
+CREATE TABLE IF NOT EXISTS daily_pick (date TEXT PRIMARY KEY, game_id TEXT, how TEXT NOT NULL DEFAULT 'auto');
+-- The Reseller shop: items players are selling (the item is held here until it sells or is taken down).
+CREATE TABLE IF NOT EXISTS listings (id TEXT PRIMARY KEY, seller TEXT NOT NULL, item TEXT NOT NULL, price INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open', buyer TEXT, at INTEGER NOT NULL, sold_at INTEGER);
+CREATE INDEX IF NOT EXISTS listings_item ON listings (item, status, price);
+CREATE INDEX IF NOT EXISTS listings_seller ON listings (seller, status);

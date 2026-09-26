@@ -25,7 +25,7 @@ export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') +
 
 // opts: { world, title, me, look, room (ticket fn or null), canPublish, onChange(world), onPublish(world, proof), onFriends(), onExit(), low }
 export function startBuilder(root, opts) {
-  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '' };
+  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on' };
   const typeOf = (m) => (m.game || m.mode);
   let grid = decodeBlocks(opts.world.b || '');
   let proof = opts.proof || null;
@@ -58,14 +58,15 @@ export function startBuilder(root, opts) {
   const redoBtn = h('button', { class: 'btn', type: 'button', title: 'Redo (Ctrl+Y)', onclick: () => redo() }, 'Redo');
   const modeSel = h('select', { 'aria-label': 'World type' }, ...Object.entries(MODES).map(([v, l]) => h('option', { value: v }, l)));
   const skySel = h('select', { 'aria-label': 'Sky' }, ...Object.entries(SKIES).map(([v, s]) => h('option', { value: v }, s.name)));
-  modeSel.value = typeOf(meta); skySel.value = meta.sky;
+  const gearSel = h('select', { 'aria-label': 'Gear', title: 'Can players use their gear (speed coil, jetpack...) in this world? Gear only ever works in hangouts and minigames.' }, h('option', { value: 'on' }, 'Gear allowed'), h('option', { value: 'off' }, 'No gear'));
+  modeSel.value = typeOf(meta); skySel.value = meta.sky; gearSel.value = meta.gear;
   const palette = h('div', { class: 'b3-blocks' });
   const swatches = h('div', { class: 'swatches b3-colors' });
   const blockTip = h('p', { class: 'small b3-tip' });
   const side = h('div', { class: 'b3-side' },
     h('div', { class: 'b3-tools' }, toolRow, h('div', { class: 'row' }, boxBtn, undoBtn, redoBtn)),
     h('h3', {}, 'Blocks'), palette, h('h3', {}, 'Color'), swatches, blockTip,
-    h('h3', {}, 'World'), h('label', {}, 'Type ', modeSel), h('label', {}, 'Sky ', skySel));
+    h('h3', {}, 'World'), h('label', {}, 'Type ', modeSel), h('label', {}, 'Sky ', skySel), h('label', {}, 'Gear ', gearSel));
   const moveRow = h('div', { class: 'b3-move', 'aria-label': 'Move the camera' },
     ...[['Up', 'up'], ['Forward', 'f'], ['Down', 'down'], ['Left', 'l'], ['Back', 'b'], ['Right', 'r']].map(([l, k]) => h('button', { class: 'tbtn', type: 'button', 'data-mv': k }, l)));
   const hint = h('p', { class: 'hint' }, 'Click to use the tool, drag to look around. W A S D fly, Space up, Shift down, scroll to zoom. Right-click breaks. Keys: 1 Place, 2 Break, 3 Paint, 4 Pick, B box fill, T test, Ctrl+Z undo.');
@@ -267,6 +268,7 @@ export function startBuilder(root, opts) {
   function setMeta(f, send = true) {
     Object.assign(meta, f);
     if (f.sky) { R.setSky(meta.sky); skySel.value = meta.sky; }
+    if (f.gear) gearSel.value = meta.gear;
     if (f.mode || f.game != null) modeSel.value = typeOf(meta);
     if (f.n && document.activeElement !== nameIn) nameIn.value = meta.n;
     if (send && room) room.send({ t: 'op', op: { k: 'meta', f }, n: ++seq });
@@ -274,10 +276,11 @@ export function startBuilder(root, opts) {
   }
   modeSel.addEventListener('change', () => { const v = modeSel.value, g = GAME_TYPES.includes(v); setMeta({ mode: g ? 'hangout' : v, game: g ? v : '' }); });
   skySel.addEventListener('change', () => setMeta({ sky: skySel.value }));
+  gearSel.addEventListener('change', () => setMeta({ gear: gearSel.value }));
   let nameT = 0;
   nameIn.addEventListener('input', () => { meta.n = nameIn.value.trim().slice(0, 40) || 'My world'; clearTimeout(nameT); nameT = setTimeout(() => setMeta({ n: meta.n }), 500); });
 
-  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), b: encodeBlocks(grid) }; }
+  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), b: encodeBlocks(grid) }; }
   let changeT = 0;
   function changed() {
     clearTimeout(changeT);
