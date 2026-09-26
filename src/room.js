@@ -113,6 +113,12 @@ export class Room {
         this.broadcast({ t: 'chat', ...line, uid: undefined });
         break;
       }
+      case 'shout': { // admins only: a big message everyone in this server sees
+        if (!me.admin) return;
+        const m = cleanChat(msg.m);
+        if (m) this.broadcast({ t: 'sys', m: `${me.name} (admin): ${m}`, big: true });
+        break;
+      }
       case 'emote': {
         const e = ['wave', 'dance', 'cheer', 'sit', 'point'].includes(msg.e) ? msg.e : null;
         if (e) this.broadcast({ t: 'emote', id: me.id, e });

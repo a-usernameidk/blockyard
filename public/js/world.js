@@ -32,6 +32,12 @@ export const BLOCKS = [
   { id: 'spawn', name: 'Spawn', pat: 20, color: '#7cc8ff', tip: 'Where players start. One per world.' },
   { id: 'coin', name: 'Coin', entity: true, tip: 'Grab it. Each one counts once.' },
   { id: 'ghost', name: 'Ghost block', pat: 22, tint: true, see: true, ghost: true, tip: 'Decoration you can walk through.' },
+  // conveyors carry you along (one block for each direction, the arrows show which way)
+  { id: 'beltE', name: 'Conveyor →', pat: 32, color: '#4a5378', dir: [1, 0], tip: 'Carries you east (the way the arrows move).' },
+  { id: 'beltW', name: 'Conveyor ←', pat: 33, color: '#4a5378', dir: [-1, 0], tip: 'Carries you west (the way the arrows move).' },
+  { id: 'beltN', name: 'Conveyor ↑', pat: 34, color: '#4a5378', dir: [0, -1], tip: 'Carries you north (the way the arrows move).' },
+  { id: 'beltS', name: 'Conveyor ↓', pat: 35, color: '#4a5378', dir: [0, 1], tip: 'Carries you south (the way the arrows move).' },
+  { id: 'teleport', name: 'Teleporter', pat: 36, tint: true, glow: true, tip: 'Step on it to jump to the next teleporter of the same color. Place at least two!' },
 ];
 export const B = Object.fromEntries(BLOCKS.map((b, i) => [b ? b.id : 'air', i]));
 BLOCKS.forEach((b, i) => { if (b) b.n = i; });
@@ -112,7 +118,7 @@ export function decodeBlocks(str, grid = new Grid()) {
     if (!ty || ty >= BLOCKS.length || x + n > SX) throw new Error('That world data is broken.');
     for (let i = 0; i < n; i++) grid.set(x + i, y, z, ty, co);
     if (y < minY) minY = y;
-    if (ty === B.spawn || ty === B.goal || ty === B.coin) for (let i = 0; i < n; i++) special.push([x + i, y, z, ty]);
+    if (ty === B.spawn || ty === B.goal || ty === B.coin || ty === B.teleport) for (let i = 0; i < n; i++) special.push([x + i, y, z, ty]);
   }
   // remember where the special blocks are so scan() doesn't have to look at every cell
   const seen = new Set();
@@ -123,9 +129,10 @@ export function decodeBlocks(str, grid = new Grid()) {
 
 // Finds the special blocks the game needs.
 export function scan(grid) {
-  const out = { spawn: null, spawns: 0, goals: 0, coins: [], blocks: grid.count };
-  const list = grid.special || [...grid.each()].filter((b) => b[3] === B.spawn || b[3] === B.goal || b[3] === B.coin);
+  const out = { spawn: null, spawns: 0, goals: 0, coins: [], tps: [], blocks: grid.count };
+  const list = grid.special || [...grid.each()].filter((b) => b[3] === B.spawn || b[3] === B.goal || b[3] === B.coin || b[3] === B.teleport);
   for (const [x, y, z, t] of list) {
+    if (t === B.teleport) { out.tps.push([x, y, z, grid.color(x, y, z)]); continue; }
     if (t === B.spawn) { out.spawns++; if (!out.spawn) out.spawn = [x, y, z]; }
     else if (t === B.goal) out.goals++;
     else if (t === B.coin) out.coins.push([x, y, z]);

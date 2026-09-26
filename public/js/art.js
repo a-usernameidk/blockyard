@@ -161,6 +161,25 @@ export function drawHat(ctx, hat, s, t = 0, look = 1, lw = 2) {
         ctx.quadraticCurveTo(d * h * 1.0, top - s * 0.18, d * h * 0.55, top - s * 0.14); ctx.closePath(); fill('#f4f0e0');
       }
       break;
+    case 'bunny':
+      for (const d of [-1, 1]) {
+        ctx.save(); ctx.translate(d * h * 0.35, top - s * 0.2); ctx.rotate(d * (0.15 + Math.sin(t * 2 + d) * 0.06));
+        ctx.beginPath(); ctx.ellipse(0, -s * 0.12, s * 0.1, s * 0.3, 0, 0, Math.PI * 2); fill('#ffffff');
+        ctx.fillStyle = '#ffb3c7'; ctx.beginPath(); ctx.ellipse(0, -s * 0.12, s * 0.045, s * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+      break;
+    case 'cowboy':
+      ctx.beginPath(); ctx.ellipse(0, top + s * 0.03, h * 1.2, s * 0.09, 0, 0, Math.PI * 2); fill('#a0612b');
+      ctx.beginPath(); ctx.moveTo(-h * 0.55, top + s * 0.02); ctx.lineTo(-h * 0.45, top - s * 0.34); ctx.quadraticCurveTo(0, top - s * 0.24, h * 0.45, top - s * 0.34); ctx.lineTo(h * 0.55, top + s * 0.02); ctx.closePath(); fill('#b8733a');
+      ctx.fillStyle = '#5a3418'; ctx.fillRect(-h * 0.53, top - s * 0.08, h * 1.06, s * 0.08);
+      break;
+    case 'unicorn':
+      ctx.beginPath(); ctx.moveTo(-s * 0.1, top + s * 0.02); ctx.lineTo(look * s * 0.05, top - s * 0.55); ctx.lineTo(s * 0.1, top + s * 0.02); ctx.closePath(); fill('#ffffff');
+      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = lw * 1.1; ctx.beginPath(); ctx.moveTo(-s * 0.07, top - s * 0.1); ctx.lineTo(s * 0.07, top - s * 0.16); ctx.moveTo(-s * 0.04, top - s * 0.27); ctx.lineTo(s * 0.05, top - s * 0.32); ctx.stroke();
+      ctx.strokeStyle = INK; ctx.lineWidth = lw;
+      ctx.beginPath(); ctx.arc(-look * h * 0.55, top + s * 0.02, s * 0.1, 0, Math.PI * 2); fill('#b06cff');
+      break;
     case 'chef':
       ctx.beginPath(); ctx.rect(-h * 0.55, top - s * 0.12, h * 1.1, s * 0.2); fill('#ffffff');
       ctx.beginPath(); ctx.arc(-h * 0.35, top - s * 0.24, s * 0.16, 0, Math.PI * 2); ctx.arc(h * 0.35, top - s * 0.24, s * 0.16, 0, Math.PI * 2); fill('#ffffff');

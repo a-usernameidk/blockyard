@@ -80,6 +80,26 @@ export function startWorld(root, opts) {
     h('button', { class: 'btn', type: 'button', onclick: () => opts.onExit && opts.onExit() }, opts.test ? 'Back to building' : 'Leave'),
     h('div', { class: 'bar-title' }, h('h2', {}, opts.title || world.n), h('span', { class: 'by' }, opts.by ? 'by ' + opts.by : obby ? 'Obby' : 'Hangout')),
     obby ? restartBtn : null, resetBtn, inviteBtn, gfxBtn, fullBtn);
+  /* ---------------- admin tools (only for admins) ---------------- */
+  const isAdminMe = !!(opts.me && opts.me.admin);
+  let fly = false, flySpeed = 12, noProof = false;
+  const flyBtn = h('button', { class: 'btn', type: 'button', onclick: () => setFly(!fly) }, 'Fly: off');
+  const speedBtns = [6, 12, 24].map((v) => h('button', { class: 'btn' + (v === flySpeed ? ' on' : ''), type: 'button', onclick: (e) => { flySpeed = v; speedBtns.forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, v === 6 ? 'Slow' : v === 12 ? 'Fast' : 'Zoom'));
+  const shoutIn = h('input', { maxlength: '200', placeholder: 'Big message to this server', 'aria-label': 'Message to everyone in this server' });
+  const adminBox = h('div', { class: 'w3-admin panel', hidden: true },
+    h('h3', {}, 'Admin'),
+    h('div', { class: 'row' }, flyBtn, ...speedBtns),
+    h('p', { class: 'small' }, 'F turns flying on and off. Space goes up, Shift goes down. Runs where you flew don\'t count.'),
+    h('form', { class: 'row', onsubmit: (e) => { e.preventDefault(); const m = shoutIn.value.trim(); if (m && room) { room.send({ t: 'shout', m }); shoutIn.value = ''; } shoutIn.blur(); } }, shoutIn, h('button', { class: 'btn btn-sun', type: 'submit' }, 'Shout')),
+    h('p', { class: 'small' }, 'Click a player in the Players list to go to them, kick them, or manage them.'));
+  function setFly(on) {
+    fly = on; flyBtn.textContent = on ? 'Fly: on' : 'Fly: off'; flyBtn.classList.toggle('on', on);
+    if (on) { noProof = true; S.v.x = S.v.y = S.v.z = 0; toast('Flying!', 1); } else { S.onGround = false; toast('Landing…', 1); }
+  }
+  if (isAdminMe) {
+    bar.append(h('button', { class: 'btn btn-sun', type: 'button', onclick: () => { adminBox.hidden = !adminBox.hidden; } }, 'Admin'));
+    stage.append(adminBox);
+  }
   const hint = h('p', { class: 'hint hint-keys' }, 'W A S D or arrows to move, Space to jump, drag to look around, scroll to zoom, Q and E turn the camera. R respawns. Enter to chat, 1 to 5 for emotes.');
   root.replaceChildren(bar, stage, hint);
 
@@ -125,7 +145,8 @@ export function startWorld(root, opts) {
     if (down && (e.key === 'Enter' || e.key === '/') && room) { e.preventDefault(); chatInput.focus(); return; }
     if (down && e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) { resetPress = true; }
     if (down && /^Digit[1-5]$/.test(e.code)) { emote(EMOTES[Number(e.code.slice(5)) - 1]); return; }
-    const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'j', KeyQ: 'ql', KeyE: 'qr' }[e.code];
+    if (down && e.code === 'KeyF' && isAdminMe && !e.repeat) { setFly(!fly); return; }
+    const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'j', KeyQ: 'ql', KeyE: 'qr', ShiftLeft: 'dn', ShiftRight: 'dn' }[e.code];
     if (!k) return;
     e.preventDefault();
     unlockAudio();
@@ -204,6 +225,7 @@ export function startWorld(root, opts) {
         case 'coin': sfx('coin'); burst(e.x, e.y, e.z, ['#ffd23f', '#fff6c9'], 8, 2.5, 3); break;
         case 'checkpoint': sfx('checkpoint'); burst(e.x, e.y, e.z, ['#44c06a', '#ffffff'], 12, 3, 4); toast('Checkpoint!'); break;
         case 'crumble': sfx('crumble'); break;
+        case 'teleport': sfx('bounce'); burst(e.x, e.y + 0.8, e.z, ['#b06cff', '#ffffff', '#7cc8ff'], 14, 3, 3); burst(S.p.x, S.p.y + 0.8, S.p.z, ['#b06cff', '#ffffff', '#7cc8ff'], 14, 3, 3); toast('Whoosh!', 0.8); break;
         case 'die': sfx('die'); burst(e.x, e.y + 0.6, e.z, [look.color, '#ffffff'], 16, 4, 4); fade.classList.remove('on'); void fade.offsetWidth; fade.classList.add('on'); break;
         case 'win': sfx('win'); won(); break;
       }
@@ -249,6 +271,10 @@ export function startWorld(root, opts) {
         opts.onTrade ? h('button', { class: 'btn btn-sun', type: 'button', onclick: () => opts.onTrade(o.name) }, 'Trade') : null,
         h('button', { class: 'btn', type: 'button', onclick: () => { setMutedPlayer(o.name, !m); renderList(); closeMenu(); toast(m ? `${o.name} unmuted` : `${o.name} muted. You won't see their chat.`, 2); } }, m ? 'Unmute' : 'Mute'),
         h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { reportRow.hidden = false; } }, 'Report')),
+      isAdminMe ? h('div', { class: 'w3-menu-row' },
+        h('button', { class: 'btn', type: 'button', onclick: () => { if (o.pos) { noProof = true; S.p.x = o.pos[0]; S.p.y = o.pos[1] + 0.2; S.p.z = o.pos[2]; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; toast(`Went to ${o.name}`, 1.2); } closeMenu(); } }, 'Go to them'),
+        opts.onKick ? h('button', { class: 'btn btn-danger', type: 'button', onclick: () => { opts.onKick(o.name); closeMenu(); } }, 'Kick') : null,
+        opts.onManage ? h('button', { class: 'btn', type: 'button', onclick: () => { clearKeys(); opts.onManage(o.name); closeMenu(); } }, 'Manage') : null) : null,
       reportRow,
       h('button', { class: 'btn w3-menu-x', type: 'button', onclick: closeMenu, 'aria-label': 'Close' }, 'Close'));
     menu.hidden = false;
@@ -350,15 +376,15 @@ export function startWorld(root, opts) {
     winBox.hidden = false;
     if (opts.onWin) {
       reward.textContent = opts.test ? '' : 'Checking your run…';
-      Promise.resolve(opts.onWin({ replay: encodeReplay(frames), time, deaths: S.deaths, coins: S.coins, totalCoins: S.totalCoins }))
-        .then((r) => { reward.textContent = (r && r.text) || ''; })
+      Promise.resolve(opts.onWin({ replay: encodeReplay(frames), time, deaths: S.deaths, coins: S.coins, totalCoins: S.totalCoins, noProof }))
+        .then((r) => { reward.textContent = (r && r.text) || ''; if (r && r.extra) reward.after(r.extra); })
         .catch((e) => { reward.textContent = e.message; });
     }
   }
   function restart() {
     S = createSim(world, physGrid);
     scatter();
-    frames = []; acc = 0; prevP = { ...S.p }; winShown = false;
+    frames = []; acc = 0; prevP = { ...S.p }; winShown = false; noProof = fly;
     for (const [i, t] of gone) { viewGrid.t[i] = t; const x = i % SX, z = Math.floor(i / SX) % SZ, y = Math.floor(i / (SX * SZ)); R.markDirty(x, y, z); }
     gone.clear();
     startMusic(obby ? 'adventure' : 'chill');
@@ -379,7 +405,19 @@ export function startWorld(root, opts) {
     last = now; clock += dt;
     if (keys.has('ql')) cam.yaw -= dt * 2.2;
     if (keys.has('qr')) cam.yaw += dt * 2.2;
-    if (!winShown) {
+    if (fly) {
+      // admin flying: no physics, just go where you point
+      prevP = { ...S.p };
+      const f = (keys.has('f') ? 1 : 0) - (keys.has('b') ? 1 : 0) - (joyVec && joyVec.y < -0.35 ? -1 : 0) - (joyVec && joyVec.y > 0.35 ? 1 : 0);
+      const sd = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
+      const up = (keys.has('j') || jumpTouch ? 1 : 0) - (keys.has('dn') ? 1 : 0);
+      const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw), sp = flySpeed * dt;
+      S.p.x = Math.max(-20, Math.min(SX + 20, S.p.x + (f * sy + sd * cy) * sp));
+      S.p.z = Math.max(-20, Math.min(SZ + 20, S.p.z + (-f * cy + sd * sy) * sp));
+      S.p.y = Math.max(-5, Math.min(SY + 30, S.p.y + up * sp));
+      S.v.x = (f * sy + sd * cy) * flySpeed; S.v.z = (-f * cy + sd * sy) * flySpeed; S.v.y = 0;
+      acc = 0;
+    } else if (!winShown) {
       acc += dt;
       while (acc >= STEP3) {
         prevP = { ...S.p };

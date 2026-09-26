@@ -25,7 +25,7 @@
     <button class="btn icon-btn" id="mute" aria-pressed="false" aria-label="Sound effects"></button>
     <button class="btn icon-btn" id="music" aria-pressed="false" aria-label="Music"></button>
     <button class="btn coin-chip" id="coin-chip" data-go="#/closet" title="Your coins"><span id="coin-icon"></span><span id="coin-count">0</span></button>
-    <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Log in</span></button>
+    <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Log in</span><span class="count" id="me-count" hidden></span></button>
   </div>
 </header>
 <div class="announce" id="announce" role="status" hidden><span class="announce-tag">News</span><span id="announce-text"></span><button class="announce-x" id="announce-x" type="button" aria-label="Hide this message">&times;</button></div>
@@ -212,6 +212,7 @@
     <div><h1>Worlds</h1><p class="lede">3D places to hang out and obbies to beat. Log in to see other players and chat.</p></div>
     <form class="join-code" id="join-form"><label for="join-code">Got a server code?</label><div class="row"><input id="join-code" placeholder="Server code" maxlength="12" autocomplete="off"><button class="btn btn-sun" type="submit">Join</button></div></form>
   </div>
+  <div id="friends-online" hidden></div>
   <h2>Blockyard worlds</h2>
   <div class="grid" id="worlds-builtin"></div>
   <div class="section-head"><h2>Player worlds</h2>
@@ -307,6 +308,7 @@
     <button class="tab" role="tab" data-atab="games">Games</button>
     <button class="tab" role="tab" data-atab="users">Players</button>
     <button class="tab" role="tab" data-atab="site">News &amp; shop</button>
+    <button class="tab" role="tab" data-atab="log">Log</button>
   </div>
   <p class="msg" id="admin-msg"></p>
   <div id="admin-chat" class="admin-list"></div>
@@ -318,7 +320,17 @@
     </div>
     <div class="admin-list" id="admin-users"></div>
   </div>
+  <div id="admin-log" class="admin-list" hidden></div>
   <div id="admin-site" hidden>
+    <div class="admin-box">
+      <h2>Daily deals</h2>
+      <p class="small">Deals change by themselves every day at midnight (UTC). Change the discount or how many items, pick the items for any day, or run a sale on the whole shop. Limited items are never on sale.</p>
+      <div class="row"><label>Discount <select id="deal-off"></select></label><label>Items per day <select id="deal-count"></select></label><button class="btn" id="deal-save" type="button">Save</button></div>
+      <div id="deal-days" class="deal-days"></div>
+      <h3 style="margin-top:14px">Shop-wide sale</h3>
+      <p class="small" id="sale-now"></p>
+      <div class="row"><label>Off <select id="sale-off"></select></label><label>For <select id="sale-hours"><option value="6">6 hours</option><option value="24" selected>1 day</option><option value="48">2 days</option><option value="72">3 days</option><option value="168">1 week</option></select></label><button class="btn btn-sun" id="sale-go" type="button">Start sale</button><button class="btn" id="sale-stop" type="button">End sale</button></div>
+    </div>
     <div class="admin-box">
       <h2>Announcement</h2>
       <p class="small">Shows across the top of the site for everyone, and pops up in every 3D server running right now. Leave it empty and post to remove it.</p>
@@ -438,15 +450,27 @@
       <p class="acct-who"><canvas id="acct-pip" aria-hidden="true"></canvas><span><b id="acct-user"></b><br><span class="small" id="acct-sum"></span></span></p>
       <div class="row">
         <button class="btn" id="acct-profile">My profile</button>
+        <button class="btn" id="acct-friends" type="button">Friends <span class="count" id="friend-count" hidden></span></button>
         <button class="btn" data-go="#/closet">Closet</button>
         <button class="btn" id="acct-admin" data-go="#/admin" hidden>Admin</button>
         <button class="btn btn-sun" id="acct-logout">Log out</button>
       </div>
       <div class="acct-saved" id="acct-switch"></div>
+      <p class="small">Password: <button class="linkish" id="acct-pw-change" type="button">Change my password</button></p>
       <p class="small">Graphics in 3D: <button class="linkish" id="acct-gfx" type="button"></button></p>
       <p class="small">Want your account gone? <button class="linkish" id="acct-delete" type="button">Delete my account</button></p>
       <p class="msg" id="acct-in-msg"></p>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="friends-list-modal" hidden role="dialog" aria-modal="true" aria-labelledby="fl-h">
+  <div class="panel mail-panel">
+    <h2 id="fl-h">Friends</h2>
+    <form class="row" id="fl-add"><input id="fl-name" maxlength="16" placeholder="Their username" autocomplete="off" aria-label="Friend's username"><button class="btn btn-sun" type="submit">Add friend</button></form>
+    <p class="msg" id="fl-msg"></p>
+    <div id="fl-body" class="mail-list"></div>
+    <div class="row"><button class="btn" type="button" data-close>Close</button></div>
   </div>
 </div>
 

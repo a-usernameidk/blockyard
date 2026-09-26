@@ -9,7 +9,7 @@ export const P3 = {
   gravity: 32, jump: 11, bounce: 18.5, maxFall: 40,
   coyote: 6, boost: 1.6, boostSteps: 90,
   halfW: 0.34, height: 1.5,
-  crumbleDelay: 36, crumbleGone: 180,
+  crumbleDelay: 36, crumbleGone: 180, belt: 4,
 };
 
 // Camera direction is saved as one of 256 angles. The table is rounded so every browser agrees.
@@ -42,7 +42,11 @@ export function createSim(world, grid) {
   const info = scan(grid);
   const sp = info.spawn || [64, 0, 64];
   const spawn = { x: sp[0] + 0.5, y: sp[1] + 1, z: sp[2] + 0.5 };
+  // teleporters, grouped by color, in a fixed order (so every replay goes the same way)
+  const tps = new Map();
+  for (const [x, y, z, c] of [...info.tps].sort((a, b) => idx(a[0], a[1], a[2]) - idx(b[0], b[1], b[2]))) { if (!tps.has(c)) tps.set(c, []); tps.get(c).push([x, y, z]); }
   return {
+    tps, tpLock: false,
     grid, t: grid.t, info, obby: world.mode !== 'hangout',
     spawn, cp: null, cpIdx: -1,
     p: { ...spawn }, v: { x: 0, y: 0, z: 0 },
@@ -114,7 +118,9 @@ function moveY(S, d) {
 
 // What the feet are standing on: the most important special block wins.
 const RANK = new Uint8Array(64);
-RANK[B.bounce] = 6; RANK[B.goal] = 5; RANK[B.checkpoint] = 4; RANK[B.speed] = 3; RANK[B.crumble] = 2; RANK[B.ice] = 1;
+RANK[B.bounce] = 7; RANK[B.goal] = 6; RANK[B.teleport] = 5; RANK[B.checkpoint] = 4; RANK[B.speed] = 3; RANK[B.crumble] = 2; RANK[B.ice] = 1;
+const BELT = new Array(64).fill(null);
+BLOCKS.forEach((b, i) => { if (b && b.dir) { BELT[i] = b.dir; RANK[i] = 1; } });
 let UT = 0, UI = -1, UX = 0, UY = 0, UZ = 0; // what under() found: type, index, x, y, z
 function under(S) {
   const hw = P3.halfW - 0.02, y = Math.floor(S.p.y - 0.05);
@@ -213,12 +219,31 @@ export function step3(S, value) {
   const hitY = S.v.y ? moveY(S, S.v.y * dt) : false;
   const wasGround = S.onGround;
   S.onGround = hitY && fallV < 0;
-  if (S.onGround) S.air = 0; else S.air++;
+  if (S.onGround) S.air = 0; else { S.air++; if (S.air > 20) S.tpLock = false; }
   if (S.onGround && !wasGround && fallV < -12) S.events.push({ t: 'land', v: -fallV, x: S.p.x, y: S.p.y, z: S.p.z });
 
   // what are we standing on?
   if (S.onGround) {
     const gt = under(S), g = { i: UI, x: UX, y: UY, z: UZ };
+    if (gt !== B.teleport) S.tpLock = false;
+    if (BELT[gt]) {
+      const d = BELT[gt];
+      if (d[0]) moveX(S, d[0] * P3.belt * dt);
+      if (d[1]) moveZ(S, d[1] * P3.belt * dt);
+    } else if (gt === B.teleport && !S.tpLock) {
+      // go to the next teleporter of the same color that isn't part of this pad
+      const list = S.tps.get(S.grid.color(g.x, g.y, g.z)) || [];
+      const k = list.findIndex((q) => q[0] === g.x && q[1] === g.y && q[2] === g.z);
+      for (let n = 1; k >= 0 && n < list.length; n++) {
+        const q = list[(k + n) % list.length];
+        if (Math.abs(q[0] - g.x) + Math.abs(q[1] - g.y) + Math.abs(q[2] - g.z) <= 2) continue;
+        S.events.push({ t: 'teleport', x: S.p.x, y: S.p.y, z: S.p.z });
+        S.p.x = q[0] + 0.5; S.p.y = q[1] + 1; S.p.z = q[2] + 0.5;
+        S.v.x = S.v.y = S.v.z = 0;
+        S.tpLock = true;
+        break;
+      }
+    }
     if (gt === B.bounce) {
       S.v.y = P3.bounce; S.onGround = false; S.air = P3.coyote;
       S.events.push({ t: 'bounce', x: S.p.x, y: S.p.y, z: S.p.z });

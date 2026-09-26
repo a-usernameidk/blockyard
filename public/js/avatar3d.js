@@ -130,6 +130,22 @@ function hatParts(hat, y, t, at) {
       at(0, y + 0.18, 0, 0.56, 0.36, 0.56, WHITE, 'cyl');
       at(0, y + 0.42, 0, 0.8, 0.34, 0.8, WHITE, 'sphere');
       break;
+    case 'bunny':
+      for (const d of [-1, 1]) {
+        at(d * 0.2, y + 0.3, 0, 0.18, 0.62, 0.1, WHITE, 'sphere', 0, 0, d * -0.15 + Math.sin(t * 2 + d) * 0.06);
+        at(d * 0.2, y + 0.3, 0.04, 0.09, 0.44, 0.04, C('#ffb3c7'), 'sphere', 0, 0, d * -0.15 + Math.sin(t * 2 + d) * 0.06);
+      }
+      break;
+    case 'cowboy':
+      at(0, y + 0.02, 0, 1.2, 0.05, 1.1, C('#a0612b'), 'cyl');
+      at(0, y + 0.2, 0, 0.6, 0.34, 0.56, C('#b8733a'), 'cyl');
+      at(0, y + 0.1, 0, 0.62, 0.07, 0.58, C('#5a3418'), 'cyl');
+      break;
+    case 'unicorn':
+      [[0.2, 0.1], [0.15, 0.24], [0.1, 0.38], [0.05, 0.5]].forEach(([r, h], i) => at(0, y + h, 0.18, r, 0.14, r, C(i % 2 ? '#ffd23f' : '#ffffff'), 'cyl', 0, 0, 0, { glow: 0.3 }));
+      at(-0.3, y + 0.02, -0.1, 0.16, 0.14, 0.1, C('#b06cff'), 'sphere');
+      at(-0.22, y + 0.06, -0.26, 0.14, 0.12, 0.1, C('#ff5d8f'), 'sphere');
+      break;
   }
 }
 
@@ -137,4 +153,5 @@ function hatParts(hat, y, t, at) {
 export const TRAIL3D = {
   sparkle: ['#ffffff', '#ffd23f'], bubbles: ['#bfefff', '#7cc8ff'], hearts: ['#ff5d8f', '#ff8fb1'], notes: ['#1d2340', '#3d405b'],
   fire: ['#ff5a1f', '#ffb02e', '#ffd23f'], rainbow: ['#ff5d8f', '#ff9f1c', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], stars: ['#ffd23f', '#fff6c9'], lightning: ['#7cc8ff', '#ffffff', '#ffe66d'],
+  confetti: ['#ff5d8f', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], snow: ['#ffffff', '#dff4ff'], galaxy: ['#5a3fd6', '#b06cff', '#ffffff', '#7cc8ff'],
 };

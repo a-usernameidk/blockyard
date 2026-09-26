@@ -15,7 +15,10 @@ export const COLORS = [
   { id: '#8d5a2b', name: 'Cocoa', price: 60 },
   { id: '#3d405b', name: 'Midnight', price: 80 },
   { id: '#7ae582', name: 'Glow', need: { stars: 15 }, hint: 'Earn 15 stars' },
+  { id: '#c8a2ff', name: 'Lavender', price: 70 },
+  { id: '#0077b6', name: 'Ocean', price: 90 },
   { id: '#e0b12a', name: 'Gold', price: 700, stock: 20 },
+  { id: '#9ff0ff', name: 'Diamond', price: 1200, stock: 10 },
 ];
 
 export const HATS = [
@@ -34,6 +37,9 @@ export const HATS = [
   { id: 'wizard', name: 'Wizard hat', need: { ach: 'endless1000' }, hint: 'Reach 1000 m in Endless Rush' },
   { id: 'viking', name: 'Viking helmet', price: 600, stock: 25 },
   { id: 'chef', name: 'Chef hat', price: 500, stock: 25 },
+  { id: 'bunny', name: 'Bunny ears', price: 240 },
+  { id: 'cowboy', name: 'Cowboy hat', price: 280 },
+  { id: 'unicorn', name: 'Unicorn horn', price: 900, stock: 20 },
 ];
 
 export const TRAILS = [
@@ -46,6 +52,9 @@ export const TRAILS = [
   { id: 'rainbow', name: 'Rainbow', price: 450 },
   { id: 'stars', name: 'Stardust', need: { ach: 'daily5' }, hint: 'Finish 5 daily challenges' },
   { id: 'lightning', name: 'Lightning', price: 800, stock: 15 },
+  { id: 'confetti', name: 'Confetti', price: 260 },
+  { id: 'snow', name: 'Snowflakes', price: 260 },
+  { id: 'galaxy', name: 'Galaxy', price: 1000, stock: 12 },
 ];
 
 export const SHOP = { color: COLORS, hat: HATS, trail: TRAILS };

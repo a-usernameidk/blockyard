@@ -29,6 +29,9 @@ export const ECON_SCHEMA = [
   'CREATE INDEX IF NOT EXISTS trades_to ON trades (to_id, status, created_at)',
   'CREATE INDEX IF NOT EXISTS trades_from ON trades (from_id, status, created_at)',
   'CREATE TABLE IF NOT EXISTS trade_done (id TEXT PRIMARY KEY)',
+  // leaderboards: each player's best checked time on each obby
+  'CREATE TABLE IF NOT EXISTS best_times (board TEXT NOT NULL, user_id TEXT NOT NULL, time REAL NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (board, user_id))',
+  'CREATE INDEX IF NOT EXISTS best_times_top ON best_times (board, time)',
 ];
 export const seedStock = (db) => LIMITED.map((l) => db.prepare('INSERT OR IGNORE INTO stock (item, left) VALUES (?, ?)').bind(l.key, l.stock));
 
@@ -185,22 +188,43 @@ async function setLook(ctx, input) {
   return json({ wallet: { ...w, look } });
 }
 
-// Four items are on sale each day (the same for everyone).
-export function featured(date = todayUTC()) {
-  const pool = KINDS.flatMap((k) => SHOP[k].filter((i) => !isFree(i) && !i.need && !i.stock).map((i) => k + ':' + i.id));
+// Daily deals: picked by themselves each day (the same for everyone). The admin can change how many,
+// how big the discount is, pick the items for any day, and run a shop-wide sale.
+export const dealPool = () => KINDS.flatMap((k) => SHOP[k].filter((i) => !isFree(i) && !i.need && !i.stock).map((i) => k + ':' + i.id));
+const num = (v, lo, hi, d) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : d; };
+export function cleanDeals(v) {
+  v = v && typeof v === 'object' ? v : {};
+  const pins = {};
+  const pool = new Set(dealPool()), today = todayUTC();
+  for (const [d, items] of Object.entries(v.pins && typeof v.pins === 'object' ? v.pins : {})) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d >= today && Array.isArray(items)) pins[d] = [...new Set(items.filter((k) => pool.has(k)))].slice(0, 8);
+  }
+  const sale = v.sale && Number(v.sale.until) > Date.now() ? { off: num(v.sale.off, 5, 90, 20), until: Number(v.sale.until) } : null;
+  return { off: num(v.off, 5, 90, 25), count: num(v.count, 1, 8, 4), pins, sale };
+}
+export async function dealSettings(db) {
+  try { const r = await db.prepare("SELECT value FROM settings WHERE key = 'deals'").first(); return cleanDeals(parse(r && r.value)); } catch (e) { return cleanDeals({}); }
+}
+export function featured(date = todayUTC(), cfg = cleanDeals({})) {
+  if (cfg.pins[date] && cfg.pins[date].length) return { date, off: cfg.off, items: cfg.pins[date], pinned: true, sale: cfg.sale };
+  const pool = dealPool();
   let h = 2166136261;
   for (const ch of date) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
   const pick = [];
-  while (pick.length < 4 && pool.length) { h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0; pick.push(pool.splice(h % pool.length, 1)[0]); }
-  return { date, off: 25, items: pick };
+  while (pick.length < cfg.count && pool.length) { h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0; pick.push(pool.splice(h % pool.length, 1)[0]); }
+  return { date, off: cfg.off, items: pick, sale: cfg.sale };
 }
-const priceOf = (f, deal) => (deal.items.includes(f.key) ? Math.floor(f.item.price * (100 - deal.off) / 100) : f.item.price);
+// the biggest discount that applies: today's deal, or a shop-wide sale (limited items are never on sale)
+const priceOf = (f, deal) => {
+  const off = Math.max(deal.items.includes(f.key) ? deal.off : 0, deal.sale && !f.item.stock ? deal.sale.off : 0);
+  return Math.floor(f.item.price * (100 - off) / 100);
+};
 
 async function shop(ctx) {
   const { results } = await ctx.db.prepare('SELECT item, left FROM stock').all();
   const stock = {};
   for (const r of results) stock[r.item] = r.left;
-  return json({ stock, featured: featured() });
+  return json({ stock, featured: featured(todayUTC(), await dealSettings(ctx.db)) });
 }
 
 async function buy(ctx, input) {
@@ -217,7 +241,7 @@ async function buy(ctx, input) {
     await db.prepare('INSERT OR IGNORE INTO inventory (user_id, item, qty) VALUES (?, ?, 1)').bind(user.id, f.key).run();
     return json({ ok: true, price: 0, wallet: await getWallet(db, user.id) });
   }
-  const price = priceOf(f, featured());
+  const price = priceOf(f, featured(todayUTC(), await dealSettings(db)));
   const stmts = [...coinStmts(db, user.id, -price, 'buy ' + f.key), giveItem(db, user.id, f.key)];
   if (f.item.stock) stmts.push(db.prepare('UPDATE stock SET left = left - 1 WHERE item = ?').bind(f.key));
   try { await db.batch(stmts); } catch (e) {
@@ -263,6 +287,22 @@ async function payOnce(db, stmts) {
   try { await db.batch(stmts); return true; } catch (e) { if (isConstraint(e)) return false; throw e; }
 }
 
+/* ---------------- leaderboards ---------------- */
+export async function boardInfo(db, board, uid, n = 10) {
+  const [top, mine] = await Promise.all([
+    db.prepare('SELECT u.name, b.time FROM best_times b JOIN users u ON u.id = b.user_id WHERE b.board = ? AND u.banned = 0 ORDER BY b.time ASC, b.at ASC LIMIT ?').bind(board, n).all(),
+    uid ? db.prepare(`SELECT b.time, (SELECT COUNT(*) FROM best_times c JOIN users u ON u.id = c.user_id WHERE c.board = b.board AND u.banned = 0 AND c.time < b.time) + 1 AS rank
+      FROM best_times b WHERE b.board = ? AND b.user_id = ?`).bind(board, uid).first() : null,
+  ]);
+  return { top: top.results, me: mine ? { time: mine.time, rank: mine.rank } : null };
+}
+async function saveTime(db, uid, board, time) {
+  const t = Math.round(time * 100) / 100, before = await db.prepare('SELECT time FROM best_times WHERE board = ? AND user_id = ?').bind(board, uid).first();
+  await db.prepare(`INSERT INTO best_times (board, user_id, time, at) VALUES (?, ?, ?, ?)
+    ON CONFLICT (board, user_id) DO UPDATE SET time = excluded.time, at = excluded.at WHERE excluded.time < best_times.time`).bind(board, uid, t, Date.now()).run();
+  return { ...(await boardInfo(db, board, uid, 5)), newBest: !before || t < before.time };
+}
+
 async function progressRow(db, uid, level) {
   return (await db.prepare('SELECT stars, coins, best FROM level_progress WHERE user_id = ? AND level = ?').bind(uid, level).first()) || { stars: 0, coins: 0, best: null };
 }
@@ -302,37 +342,40 @@ async function finishWorld(ctx, user, id, replay) {
   const run = await verify(env, { type: '3d', builtin: id, replay, opts: { maxSteps: maxSteps3d(env) } });
   if (!run.won) fail(400, "That run didn't reach the goal.");
   const key = 'w:' + id;
+  const board = await saveTime(db, user.id, key, run.time);
   const bits = 1 | (run.deaths === 0 ? 2 : 0);
   const old = await progressRow(db, user.id, key);
   const fresh = bits & ~old.stars;
   const earned = (fresh & 1 ? w.reward : 0) + (fresh & 2 ? REWARD.obbyNoFall : 0) + Math.max(0, run.coins - old.coins) * REWARD.coin3d;
   const stmts = [progressStmt(db, user.id, key, bits, run.coins, Math.round(run.time * 10) / 10)];
   if (earned) stmts.push(claimStmt(db, user.id, `r:${key}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run world ' + id));
-  if (!(await payOnce(db, stmts))) return json({ ok: true, earned: 0, first: false, noFall: !!(bits & 2), time: run.time, wallet: await getWallet(db, user.id) });
-  return json({ ok: true, earned, first: !!(fresh & 1), noFall: !!(bits & 2), time: run.time, wallet: await getWallet(db, user.id) });
+  if (!(await payOnce(db, stmts))) return json({ ok: true, earned: 0, first: false, noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
+  return json({ ok: true, earned, first: !!(fresh & 1), noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
 }
 
 async function finishGame(ctx, user, id, replay) {
   const { db, env } = ctx;
   const g = await db.prepare('SELECT id, kind, data, reward, user_id, hidden, project_id FROM games WHERE id = ?').bind(id).first();
   if (!g || g.hidden) fail(404, 'That game was not found.');
-  if (!g.reward) return json({ ok: true, earned: 0 });
-  if (g.user_id === user.id) return json({ ok: true, earned: 0, note: "You made this one, so it doesn't pay you." });
-  if (g.project_id) {
-    const builder = await db.prepare('SELECT 1 FROM projects WHERE id = ? AND owner_id = ? UNION SELECT 1 FROM collabs WHERE project_id = ? AND user_id = ?').bind(g.project_id, user.id, g.project_id, user.id).first();
-    if (builder) return json({ ok: true, earned: 0, note: "You helped build this one, so it doesn't pay you." });
-  }
-  const done = await db.prepare('SELECT 1 FROM claims WHERE user_id = ? AND what = ?').bind(user.id, 'g:' + id).first();
-  if (done) return json({ ok: true, earned: 0, note: 'You already got the reward for this one.' });
+  // every checked win goes on the leaderboard, even when the game doesn't pay
   const data = JSON.parse(g.data);
   const run = g.kind === '3d'
     ? await verify(env, { type: '3d', world: data, replay, opts: { maxSteps: maxSteps3d(env) } })
     : await verify(env, { type: '2d', level: data, replay, opts: { maxSteps: maxSteps(env) } });
   if (!run.won) fail(400, "That run didn't reach the goal.");
+  const board = await saveTime(db, user.id, 'g:' + id, run.time);
+  if (!g.reward) return json({ ok: true, earned: 0, board });
+  if (g.user_id === user.id) return json({ ok: true, earned: 0, board, note: "You made this one, so it doesn't pay you." });
+  if (g.project_id) {
+    const builder = await db.prepare('SELECT 1 FROM projects WHERE id = ? AND owner_id = ? UNION SELECT 1 FROM collabs WHERE project_id = ? AND user_id = ?').bind(g.project_id, user.id, g.project_id, user.id).first();
+    if (builder) return json({ ok: true, earned: 0, board, note: "You helped build this one, so it doesn't pay you." });
+  }
+  const done = await db.prepare('SELECT 1 FROM claims WHERE user_id = ? AND what = ?').bind(user.id, 'g:' + id).first();
+  if (done) return json({ ok: true, earned: 0, board, note: 'You already got the reward for this one.' });
   try {
     await db.batch([db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(user.id, 'g:' + id, Date.now()), ...coinStmts(db, user.id, g.reward, 'run game ' + id)]);
-  } catch (e) { if (isConstraint(e)) return json({ ok: true, earned: 0 }); throw e; }
-  return json({ ok: true, earned: g.reward, wallet: await getWallet(db, user.id) });
+  } catch (e) { if (isConstraint(e)) return json({ ok: true, earned: 0, board }); throw e; }
+  return json({ ok: true, earned: g.reward, board, wallet: await getWallet(db, user.id) });
 }
 
 async function finishEndless(ctx, user, seedIn, replay) {

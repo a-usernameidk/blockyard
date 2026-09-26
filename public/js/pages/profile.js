@@ -7,6 +7,29 @@ import { itemPreview } from './closet.js';
 import { publishedCard } from './play.js';
 import { playerWorldCard } from './worlds.js';
 import { manageUser } from './admin.js';
+import { friendsNow, checkFriends, openFriends } from './account.js';
+import { toast } from '../app.js';
+
+// "Add friend" / "Friends" / "Request sent" for someone's profile
+function friendButton(name) {
+  const b = el('button', { class: 'btn', type: 'button' });
+  const lower = name.toLowerCase();
+  const paint = () => {
+    const d = friendsNow();
+    const has = (list) => d && list.some((f) => f.name.toLowerCase() === lower);
+    const state = !d ? 'none' : has(d.friends) ? 'friends' : has(d.incoming) ? 'incoming' : has(d.outgoing) ? 'sent' : 'none';
+    b.textContent = { friends: 'Friends ✓', incoming: 'Accept friend request', sent: 'Friend request sent', none: 'Add friend' }[state];
+    b.className = 'btn' + (state === 'none' || state === 'incoming' ? ' btn-grass' : '');
+    b.onclick = async () => {
+      if (!session.user) { needLogin('Friends need an account.'); return; }
+      if (state === 'friends' || state === 'sent') { openFriends(); return; }
+      try { const r = await api.friend(name, 'add'); toast(r.status === 'friends' ? `You and ${name} are friends now!` : `Friend request sent to ${name}.`); await checkFriends(); paint(); } catch (e) { toast(e.message); }
+    };
+  };
+  paint();
+  if (session.user && !friendsNow()) checkFriends().then(paint);
+  return b;
+}
 
 async function showProfile(name) {
   show('profile', '');
@@ -27,6 +50,7 @@ async function showProfile(name) {
         u.playing ? el('p', { class: 'playing' }, el('span', { class: 'live-dot' }), `Playing ${u.playing.name || 'a player world'} right now`) : null,
         el('div', { class: 'row' },
           !me ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => (session.user ? go('#/closet/trade/' + u.name) : needLogin('Trading needs an account.')) }, 'Trade with them') : el('button', { class: 'btn', type: 'button', 'data-go': '#/closet' }, 'Change my look'),
+          !me ? friendButton(u.name) : el('button', { class: 'btn', type: 'button', onclick: openFriends }, 'My friends'),
           u.playing && u.playing.code && !me ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + u.playing.code) }, 'Join them') : null),
         session.user && session.user.admin ? el('div', { class: 'admin-strip row' }, el('b', {}, 'Admin'),
           el('button', { class: 'btn btn-sun', type: 'button', onclick: () => manageUser(u.name) }, me ? 'Give myself coins or items' : 'Coins, items, kick, ban…')) : null)),

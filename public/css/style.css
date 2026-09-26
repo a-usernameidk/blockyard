@@ -540,3 +540,33 @@ body[data-view="w3"] .announce, body[data-view="build"] .announce, body[data-vie
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .manage-panel .plus { color: var(--grass); } :root:not([data-theme="light"]) .manage-panel .minus { color: var(--pink); } }
 :root[data-theme="dark"] .manage-panel .plus { color: var(--grass); } :root[data-theme="dark"] .manage-panel .minus { color: var(--pink); }
 .admin-strip { margin-top: 14px; padding: 10px 12px; border: 3px dashed var(--pink); border-radius: 12px; }
+
+/* ---------- friends, leaderboards, deals, admin in 3D ---------- */
+.me-btn { position: relative; }
+.me-btn .count, #acct-friends .count { display: inline-block; min-width: 20px; font-size: 12px; line-height: 20px; border-radius: 999px; background: var(--pink); color: #fff; text-align: center; font-weight: 800; padding: 0 4px; }
+.me-btn .count { position: absolute; top: -8px; right: -8px; border: 2px solid var(--line); }
+.mail-panel { max-width: 540px; width: 100%; }
+.mail-list { display: grid; gap: 8px; margin: 8px 0 14px; max-height: 60vh; overflow: auto; }
+.mail-list h3 { font-size: 17px; margin-top: 6px; }
+.friend-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 10px; border: 3px solid var(--line); border-radius: 12px; background: var(--card); flex-wrap: wrap; }
+.friend-row .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+.friend-row .who { flex: 1; min-width: 120px; }
+.friend-row .who .small { display: block; margin: 0; }
+.friend-row .btn { padding: 4px 12px; font-size: 14px; }
+.board { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-width: 420px; }
+.board li { display: grid; grid-template-columns: 34px 1fr auto; gap: 8px; align-items: center; background: var(--card); border: 3px solid var(--line); border-radius: 10px; padding: 4px 10px; font-weight: 800; }
+.board li.me { background: var(--sun); color: var(--ink); }
+.board .rank { font-family: "Lilita One", system-ui, sans-serif; font-size: 18px; }
+.win-board { margin: 8px auto 0; text-align: left; font-size: 14px; }
+.deal-days { display: grid; gap: 6px; margin-top: 10px; }
+.deal-day { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 14px; }
+.deal-day b { min-width: 92px; }
+.deal-day select { font-size: 13px; padding: 3px 6px; }
+.sale-banner { background: var(--pink); color: #fff; border: 3px solid var(--line); border-radius: 12px; padding: 6px 12px; font-weight: 800; margin: 0 0 10px; }
+.w3-admin { position: absolute; top: 52px; left: 10px; width: 250px; max-width: calc(100% - 20px); padding: 10px 12px; z-index: 6; font-size: 14px; }
+.w3-admin h3 { font-size: 17px; margin-bottom: 6px; }
+.w3-admin .row { gap: 6px; margin-top: 6px; }
+.w3-admin .btn { padding: 4px 10px; font-size: 13px; }
+.w3-admin input { font-size: 14px; padding: 4px 8px; width: 100%; }
+.w3-admin .on { background: var(--grass); }
+.stack { display: grid; gap: 8px; }

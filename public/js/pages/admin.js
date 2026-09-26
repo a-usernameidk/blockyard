@@ -12,15 +12,15 @@ import { drawWorldThumb } from '../thumb3d.js';
 let tab = 'chat';
 async function showAdmin() {
   show('admin', '');
-  if (!session.user || !session.user.admin) { $('#admin-msg').textContent = 'Log in with your admin account to see this page.'; ['#admin-chat', '#admin-games', '#admin-users', '#admin-stock'].forEach((s) => { $(s).innerHTML = ''; }); $('#admin-site').hidden = true; return; }
+  if (!session.user || !session.user.admin) { $('#admin-msg').textContent = 'Log in with your admin account to see this page.'; ['#admin-chat', '#admin-games', '#admin-users', '#admin-stock'].forEach((s) => { $(s).innerHTML = ''; }); $('#admin-site').hidden = true; $('#admin-log').hidden = true; return; }
   setTab(tab);
 }
 function setTab(t) {
   tab = t;
   $$('[data-atab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.atab === t)));
-  $('#admin-chat').hidden = t !== 'chat'; $('#admin-games-wrap').hidden = t !== 'games'; $('#admin-users-wrap').hidden = t !== 'users'; $('#admin-site').hidden = t !== 'site';
+  $('#admin-chat').hidden = t !== 'chat'; $('#admin-games-wrap').hidden = t !== 'games'; $('#admin-users-wrap').hidden = t !== 'users'; $('#admin-site').hidden = t !== 'site'; $('#admin-log').hidden = t !== 'log';
   $('#admin-msg').textContent = '';
-  if (t === 'chat') loadChat(); else if (t === 'games') loadGames(); else if (t === 'site') loadSite(); else findUsers();
+  if (t === 'chat') loadChat(); else if (t === 'games') loadGames(); else if (t === 'site') { loadSite(); loadDeals(); } else if (t === 'log') loadLog(); else findUsers();
 }
 $$('[data-atab]').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.atab)));
 $('#admin-refresh').addEventListener('click', () => setTab(tab));
@@ -169,3 +169,56 @@ $('#admin-announce-go').addEventListener('click', () => postAnnounce($('#admin-a
 $('#admin-announce-clear').addEventListener('click', () => postAnnounce(''));
 $('#admin-user-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') findUsers(); });
 addRoute(/^#\/admin$/, () => showAdmin());
+
+/* ---------------- admin log ---------------- */
+function describe(l) {
+  const d = l.detail || {}, p = l.path;
+  const who = (p.match(/^\/users\/(.+)$/) || [])[1];
+  const item = d.item ? ((findItem(d.item) || { item: { name: d.item } }).item.name) : '';
+  if (who) return ({
+    grant: d.amount >= 0 ? `gave ${who} ${d.amount} coins` : `took ${-d.amount} coins from ${who}`,
+    setcoins: `set ${who}'s coins to ${d.amount}`, give: `gave ${who} a ${item}`, take: `took a ${item} from ${who}`,
+    password: `set a new password for ${who}`, kick: `kicked ${who}`, ban: `banned ${who}`, unban: `unbanned ${who}`,
+  })[d.action] || `${d.action} ${who}`;
+  if (p === '/announce') return d.text ? `announced "${d.text}"` : 'removed the announcement';
+  if (p === '/stock') return `set ${item} stock to ${d.left}`;
+  if (p === '/deals') return d.sale === null ? 'ended the sale' : d.sale ? `started a ${d.sale.off}% sale for ${d.sale.hours} hours` : d.pin ? (d.pin.items && d.pin.items.length ? `picked deals for ${d.pin.date}` : `let ${d.pin.date} pick its own deals`) : `changed deals (${d.off}% off, ${d.count} a day)`;
+  if (p.startsWith('/games/')) return d.action === 'reward' ? `made game ${p.slice(7)} pay ${d.amount} coins` : `${d.action} game ${p.slice(7)}`;
+  if (p.startsWith('/chat/')) return `${d.action} chat report`;
+  return `${p} ${JSON.stringify(d)}`;
+}
+async function loadLog() {
+  const box = $('#admin-log');
+  box.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
+  try {
+    const { log } = await api.adminLog();
+    box.replaceChildren(...(log.length ? [el('ul', { class: 'ledger admin-box', style: 'list-style:none;max-height:none' }, ...log.map((l) => el('li', { style: 'padding:4px 0;border-bottom:1px solid rgba(74,83,120,.25)' }, el('b', {}, l.admin), ' ', describe(l), el('span', { class: 'small' }, ` · ${timeAgo(l.at)}`))))] : [el('p', { class: 'small' }, 'Nothing yet. Everything you do as admin shows up here.')]));
+  } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); }
+}
+
+/* ---------------- daily deals ---------------- */
+const pctOpts = (sel, list, v) => { sel.replaceChildren(...list.map((n) => el('option', { value: String(n) }, `${n}%`))); sel.value = String(v); };
+async function loadDeals() {
+  const box = $('#deal-days');
+  box.replaceChildren(el('p', { class: 'small' }, 'Loading…'));
+  let d;
+  try { d = await api.deals(); } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); return; }
+  pctOpts($('#deal-off'), [10, 15, 20, 25, 30, 40, 50, 60, 75], d.cfg.off);
+  $('#deal-count').replaceChildren(...[1, 2, 3, 4, 5, 6, 8].map((n) => el('option', { value: String(n) }, String(n)))); $('#deal-count').value = String(d.cfg.count);
+  pctOpts($('#sale-off'), [10, 15, 20, 25, 30, 40, 50], d.cfg.sale ? d.cfg.sale.off : 20);
+  $('#sale-now').textContent = d.cfg.sale ? `A ${d.cfg.sale.off}% sale is on until ${new Date(d.cfg.sale.until).toLocaleString()}.` : 'No sale right now.';
+  const names = (k) => (findItem(k) || { item: { name: k } }).item.name;
+  box.replaceChildren(...d.days.map((day, i) => {
+    const sels = Array.from({ length: Math.max(day.items.length, d.cfg.count) }, (_, j) => {
+      const sel = el('select', { 'aria-label': `Deal ${j + 1} on ${day.date}` }, el('option', { value: '' }, '(none)'), ...d.pool.map((k) => el('option', { value: k }, names(k))));
+      sel.value = day.items[j] || '';
+      return sel;
+    });
+    const save = el('button', { class: 'btn', type: 'button', onclick: async () => { try { await api.setDeals({ pin: { date: day.date, items: sels.map((x) => x.value).filter(Boolean) } }); toast(`Deals for ${day.date} saved.`); loadDeals(); } catch (e) { toast(e.message); } } }, 'Save day');
+    const auto = day.pinned ? el('button', { class: 'btn', type: 'button', onclick: async () => { try { await api.setDeals({ pin: { date: day.date, items: [] } }); loadDeals(); } catch (e) { toast(e.message); } } }, 'Back to automatic') : null;
+    return el('div', { class: 'deal-day' }, el('b', {}, i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : day.date), ...sels, save, auto, day.pinned ? el('span', { class: 'small' }, '(you picked)') : null);
+  }));
+}
+$('#deal-save').addEventListener('click', async () => { try { await api.setDeals({ off: Number($('#deal-off').value), count: Number($('#deal-count').value) }); toast('Deals updated.'); loadDeals(); } catch (e) { toast(e.message); } });
+$('#sale-go').addEventListener('click', async () => { try { await api.setDeals({ sale: { off: Number($('#sale-off').value), hours: Number($('#sale-hours').value) } }); toast('Sale is on!'); loadDeals(); } catch (e) { toast(e.message); } });
+$('#sale-stop').addEventListener('click', async () => { try { await api.setDeals({ sale: null }); toast('Sale ended.'); loadDeals(); } catch (e) { toast(e.message); } });

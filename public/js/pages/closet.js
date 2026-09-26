@@ -11,7 +11,7 @@ const KIND_LABEL = { hat: 'Hats', color: 'Colors', trail: 'Trails' };
 onLeave('closet', () => cancelAnimationFrame(raf));
 
 /* ---------------- drawing items ---------------- */
-const TRAIL_SAMPLE = { sparkle: '#ffd23f', bubbles: '#7cc8ff', hearts: '#ff5d8f', notes: '#1d2340', fire: '#ff5a1f', rainbow: null, stars: '#ffd23f', lightning: '#7cc8ff' };
+const TRAIL_SAMPLE = { confetti: '#ff5d8f', snow: '#8fd3ff', galaxy: '#b06cff', sparkle: '#ffd23f', bubbles: '#7cc8ff', hearts: '#ff5d8f', notes: '#1d2340', fire: '#ff5a1f', rainbow: null, stars: '#ffd23f', lightning: '#7cc8ff' };
 function drawTrailSample(c, k, x, y, t) {
   if (k === 'rainbow') {
     ['#ff5d8f', '#ff9f1c', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'].forEach((col, i) => {
@@ -28,6 +28,7 @@ function drawTrailSample(c, k, x, y, t) {
     if (k === 'bubbles') { c.lineWidth = 2; c.arc(px, py, s, 0, Math.PI * 2); c.stroke(); }
     else if (k === 'hearts') { c.moveTo(px, py + s); c.bezierCurveTo(px - s * 1.6, py - s * 0.4, px - s * 0.5, py - s * 1.5, px, py - s * 0.4); c.bezierCurveTo(px + s * 0.5, py - s * 1.5, px + s * 1.6, py - s * 0.4, px, py + s); c.fill(); }
     else if (k === 'notes') { c.ellipse(px, py + s, s * 0.7, s * 0.5, -0.4, 0, Math.PI * 2); c.fill(); c.fillRect(px + s * 0.4, py - s * 1.2, 2, s * 2.2); }
+    else if (k === 'confetti' || k === 'galaxy') { c.fillStyle = (k === 'confetti' ? ['#ff5d8f', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'] : ['#5a3fd6', '#b06cff', '#7cc8ff'])[n % (k === 'confetti' ? 5 : 3)]; c.fillRect(px - s / 2, py - s / 2, s, s * 0.7); }
     else if (k === 'fire') { c.fillStyle = ['#ff5a1f', '#ffb02e', '#ffd23f'][n % 3]; c.fillRect(px - s / 2, py - s / 2, s, s); }
     else if (k === 'lightning') { c.fillStyle = n % 2 ? '#ffe66d' : '#7cc8ff'; c.moveTo(px - s * 0.3, py - s * 1.4); c.lineTo(px + s * 0.5, py - s * 0.2); c.lineTo(px, py - s * 0.1); c.lineTo(px + s * 0.3, py + s * 1.4); c.lineTo(px - s * 0.5, py + s * 0.1); c.lineTo(px, py); c.closePath(); c.fill(); }
     else { const m = k === 'stars' ? 5 : 4; for (let i = 0; i < m * 2; i++) { const r = i % 2 ? s * 0.4 : s * 1.2, a = i * Math.PI / m + t; c.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r); } c.closePath(); c.fill(); }
@@ -99,7 +100,12 @@ function renderWallet() {
   $('#shop-wallet').textContent = w ? `${w.coins} coins` : 'Guest';
   $('#closet-lede').textContent = w ? 'Everything is worth coins. Limited items run out, then the only way to get one is a trade.' : 'Log in to buy, sell and trade. Coins come from built-in levels, 3D obbies, Endless, the daily challenge and levels that pay coins.';
 }
-const dealPrice = (key, item) => (shopInfo && shopInfo.featured.items.includes(key) ? Math.floor(item.price * (100 - shopInfo.featured.off) / 100) : item.price);
+// same rule as the server: the bigger of today's deal and a shop-wide sale (limited items are never on sale)
+const dealPrice = (key, item) => {
+  if (!shopInfo) return item.price;
+  const f = shopInfo.featured, sale = f.sale && f.sale.until > Date.now() && !item.stock ? f.sale.off : 0;
+  return Math.floor(item.price * (100 - Math.max(f.items.includes(key) ? f.off : 0, sale)) / 100);
+};
 function priceTag(key, item) {
   if (item.need) return el('span', { class: 'item-price' }, item.hint);
   const p = dealPrice(key, item);
@@ -126,6 +132,7 @@ function render() {
     const deals = shopInfo ? shopInfo.featured.items.map(findItem).filter(Boolean) : [];
     const limited = KINDS.flatMap((k) => SHOP[k].filter((i) => i.stock).map((i) => ({ kind: k, item: i })));
     body.replaceChildren(
+      shopInfo && shopInfo.featured.sale && shopInfo.featured.sale.until > Date.now() ? el('p', { class: 'sale-banner' }, `SALE! Everything is ${shopInfo.featured.sale.off}% off (except limited items) until ${new Date(shopInfo.featured.sale.until).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`) : null,
       deals.length ? el('div', { class: 'shelf' }, el('h3', {}, `Today's deals: ${shopInfo.featured.off}% off`), el('div', { class: 'items' }, ...deals.map((f) => itemButton(f.kind, f.item, { status: statusOf(f.kind, f.item), onclick: choose(f.kind, f.item) })))) : null,
       el('div', { class: 'shelf' }, el('h3', {}, 'Limited'), el('div', { class: 'items' }, ...limited.map((f) => itemButton(f.kind, f.item, { status: statusOf(f.kind, f.item), onclick: choose(f.kind, f.item) })))),
       el('div', { class: 'shelf' }, el('div', { class: 'shelf-head' }, el('h3', {}, 'Everything'), chips), el('div', { class: 'items' }, ...SHOP[kind].map((item) => itemButton(kind, item, { status: statusOf(kind, item), onclick: choose(kind, item) })))));

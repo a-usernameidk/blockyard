@@ -14,7 +14,7 @@ import { builtinWorld } from '../public/js/worlds3d.js';
 import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
 import { findItem } from '../public/js/cosmetics.js';
-import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts } from './econ.js';
+import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool } from './econ.js';
 export { Room } from './room.js';
 
 const PAGE = 24;
@@ -65,6 +65,11 @@ const SCHEMA = [
     status TEXT NOT NULL DEFAULT 'open', at INTEGER NOT NULL)`,
   'CREATE INDEX IF NOT EXISTS chat_reports_open ON chat_reports (status, at)',
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+  // everything admins do, so you can look back
+  'CREATE TABLE IF NOT EXISTS admin_log (id INTEGER PRIMARY KEY AUTOINCREMENT, admin TEXT NOT NULL, path TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL)',
+  // friends: a asked b. status 'pending' until b says yes, then 'ok'
+  'CREATE TABLE IF NOT EXISTS friends (a TEXT NOT NULL, b TEXT NOT NULL, status TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (a, b))',
+  'CREATE INDEX IF NOT EXISTS friends_b ON friends (b, status)',
   ...ECON_SCHEMA,
 ];
 // columns added after the first version
@@ -184,7 +189,17 @@ async function handle(request, env, url) {
   if (path === '/daily' && method === 'GET') return getDaily(ctx);
   if (path === '/daily' && method === 'POST') return postDaily(ctx, await body(request));
 
-  if (path.startsWith('/admin/')) return admin(ctx, path.slice(6), method);
+  if (path.startsWith('/admin/')) {
+    const copy = method === 'POST' ? request.clone() : null;
+    const res = await admin(ctx, path.slice(6), method);
+    // it worked: write it in the admin log (never the password itself)
+    if (copy) { try { const b = await copy.json(); delete b.password; await db.prepare('INSERT INTO admin_log (admin, path, detail, at) VALUES (?, ?, ?, ?)').bind(ctx.user.name, path.slice(6), JSON.stringify(b).slice(0, 600), Date.now()).run(); } catch (e) { /* logging never blocks */ } }
+    return res;
+  }
+  if ((m = path.match(/^\/boards\/([gw]:[A-Za-z0-9_-]{1,40})$/)) && method === 'GET') return json(await boardInfo(db, m[1], ctx.user && ctx.user.id, 10));
+  if (path === '/friends' && method === 'GET') return friendsList(ctx);
+  if (path === '/friends' && method === 'POST') return friendAction(ctx, await body(request));
+  if (path === '/me/password' && method === 'POST') return changePassword(ctx, await body(request));
   fail(404, 'Unknown address.');
 }
 
@@ -354,7 +369,8 @@ async function deleteMe(ctx) {
     db.prepare('DELETE FROM games WHERE user_id = ?').bind(user.id),
     db.prepare('DELETE FROM collabs WHERE project_id IN (SELECT id FROM projects WHERE owner_id = ?)').bind(user.id),
     db.prepare('DELETE FROM projects WHERE owner_id = ?').bind(user.id),
-    ...['sessions', 'daily', 'wallets', 'inventory', 'level_progress', 'claims', 'collabs', 'presence'].map((t) => db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(user.id)),
+    ...['sessions', 'daily', 'wallets', 'inventory', 'level_progress', 'claims', 'collabs', 'presence', 'best_times'].map((t) => db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(user.id)),
+    db.prepare('DELETE FROM friends WHERE a = ? OR b = ?').bind(user.id, user.id),
     db.prepare("UPDATE trades SET status = 'cancelled' WHERE status = 'open' AND (from_id = ? OR to_id = ?)").bind(user.id, user.id),
     db.prepare('DELETE FROM users WHERE id = ?').bind(user.id),
   ]);
@@ -369,6 +385,74 @@ async function findUsers(ctx) {
   const { results } = await ctx.db.prepare('SELECT name, look FROM users WHERE name_lower LIKE ? AND banned = 0 ORDER BY name_lower LIMIT 10').bind(q + '%').all();
   return json({ users: results.map((u) => ({ name: u.name, look: lookOf(u.look) })) });
 }
+/* ---------------- change my password ---------------- */
+async function changePassword(ctx, input) {
+  const user = needUser(ctx);
+  const { db, env } = ctx;
+  await tooManyFails(ctx);
+  checkPassword(input.password);
+  const u = await db.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
+  if (!(await passwordMatches(db, env, u, String(input.old || '')))) { await addEvent(db, 'fail', ctx.ip); fail(401, "Your old password isn't right."); }
+  const salt = randomId(16), hash = await sha256(user.token);
+  await db.batch([
+    db.prepare('UPDATE users SET pw_hash = ?, pw_salt = ? WHERE id = ?').bind(await hashPassword(input.password, salt, env), salt, u.id),
+    // log out every other computer, but not this one
+    db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').bind(u.id, hash),
+  ]);
+  return json({ ok: true });
+}
+
+/* ---------------- friends ---------------- */
+const MAX_FRIENDS = 100;
+async function friendsList(ctx) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  const { results } = await db.prepare(`SELECT f.a, f.b, f.status, u.id, u.name, u.look, p.world, p.code, p.at AS seen
+    FROM friends f JOIN users u ON u.id = CASE WHEN f.a = ? THEN f.b ELSE f.a END
+    LEFT JOIN presence p ON p.user_id = u.id
+    WHERE (f.a = ? OR f.b = ?) AND u.banned = 0 ORDER BY u.name_lower LIMIT 300`).bind(user.id, user.id, user.id).all();
+  const out = { friends: [], incoming: [], outgoing: [] };
+  const games = [...new Set(results.filter((r) => r.status === 'ok' && r.world && !builtinWorld(r.world)).map((r) => r.world))];
+  const names = {};
+  if (games.length) {
+    const g = await db.prepare(`SELECT id, name FROM games WHERE id IN (${games.map(() => '?').join(',')})`).bind(...games).all();
+    for (const x of g.results) names[x.id] = x.name;
+  }
+  for (const r of results) {
+    if (r.status === 'ok') {
+      const on = r.world && r.seen > Date.now() - FRESH;
+      out.friends.push({ name: r.name, look: lookOf(r.look), online: on ? { world: r.world, code: r.code, name: worldName(r.world) || names[r.world] || 'a player world' } : null });
+    } else if (r.b === user.id) out.incoming.push({ name: r.name, look: lookOf(r.look) });
+    else out.outgoing.push({ name: r.name, look: lookOf(r.look) });
+  }
+  out.friends.sort((x, y) => (y.online ? 1 : 0) - (x.online ? 1 : 0));
+  return json(out);
+}
+async function friendAction(ctx, input) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  const them = await db.prepare('SELECT id, name, banned FROM users WHERE name_lower = ?').bind(String(input.name || '').toLowerCase().slice(0, 16)).first();
+  if (!them || them.banned) fail(404, 'No player with that name.');
+  if (them.id === user.id) fail(400, "You can't be friends with yourself (well, you can, but not here).");
+  const now = Date.now();
+  if (input.action === 'add' || input.action === 'accept') {
+    const theirAsk = await db.prepare("SELECT 1 FROM friends WHERE a = ? AND b = ? AND status = 'pending'").bind(them.id, user.id).first();
+    if (theirAsk) { await db.prepare("UPDATE friends SET status = 'ok', at = ? WHERE a = ? AND b = ?").bind(now, them.id, user.id).run(); return json({ ok: true, status: 'friends' }); }
+    if (input.action === 'accept') fail(404, 'That friend request is gone.');
+    const any = await db.prepare('SELECT status FROM friends WHERE (a = ? AND b = ?) OR (a = ? AND b = ?)').bind(user.id, them.id, them.id, user.id).first();
+    if (any) return json({ ok: true, status: any.status === 'ok' ? 'friends' : 'sent' });
+    const n = await db.prepare('SELECT COUNT(*) AS n FROM friends WHERE a = ? OR b = ?').bind(user.id, user.id).first();
+    if (n.n >= MAX_FRIENDS) fail(429, `You can have up to ${MAX_FRIENDS} friends and requests.`);
+    await db.prepare("INSERT INTO friends (a, b, status, at) VALUES (?, ?, 'pending', ?)").bind(user.id, them.id, now).run();
+    return json({ ok: true, status: 'sent' });
+  }
+  if (input.action === 'remove') {
+    await db.prepare('DELETE FROM friends WHERE (a = ? AND b = ?) OR (a = ? AND b = ?)').bind(user.id, them.id, them.id, user.id).run();
+    return json({ ok: true, status: 'none' });
+  }
+  fail(400, 'Unknown action.');
+}
+
 async function profile(ctx, name) {
   const { db } = ctx;
   const u = await db.prepare('SELECT id, name, created_at, banned FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
@@ -836,6 +920,32 @@ async function admin(ctx, path, method) {
       await db.prepare('UPDATE games SET reward = ? WHERE id = ?').bind(amount, m[1]).run();
     } else fail(400, 'Unknown action.');
     return json({ ok: true });
+  }
+  if (path === '/log' && method === 'GET') {
+    const { results } = await db.prepare('SELECT admin, path, detail, at FROM admin_log ORDER BY id DESC LIMIT 200').all();
+    return json({ log: results.map((x) => ({ ...x, detail: JSON.parse(x.detail || '{}') })) });
+  }
+  if (path === '/deals' && method === 'GET') {
+    const cfg = await dealSettings(db);
+    const days = Array.from({ length: 7 }, (_, i) => featured(new Date(Date.now() + i * DAY).toISOString().slice(0, 10), cfg));
+    return json({ cfg, days, pool: dealPool() });
+  }
+  if (path === '/deals' && method === 'POST') {
+    const input = await body(ctx.request);
+    const cfg = await dealSettings(db);
+    if (input.off != null) cfg.off = input.off;
+    if (input.count != null) cfg.count = input.count;
+    if (input.pin && typeof input.pin === 'object') {
+      if (Array.isArray(input.pin.items) && input.pin.items.length) cfg.pins[String(input.pin.date)] = input.pin.items; else delete cfg.pins[String(input.pin.date)];
+    }
+    if (input.sale === null) cfg.sale = null;
+    else if (input.sale && typeof input.sale === 'object') {
+      const hours = Math.max(1, Math.min(24 * 14, Math.floor(Number(input.sale.hours) || 24)));
+      cfg.sale = { off: input.sale.off, until: Date.now() + hours * 3600e3 };
+    }
+    const clean = cleanDeals(cfg);
+    await db.prepare("INSERT INTO settings (key, value) VALUES ('deals', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(clean)).run();
+    return json({ ok: true, cfg: clean });
   }
   if (path === '/announce' && method === 'POST') {
     // a message across the top of the site, and in every 3D server that's running right now

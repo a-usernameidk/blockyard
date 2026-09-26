@@ -127,6 +127,13 @@ export const api = {
   admin: (method, path, body) => request(method, '/admin' + path, body),
   adminUser: (name) => request('GET', `/admin/users/${enc(name)}`),
   adminAct: (name, action, extra = {}) => request('POST', `/admin/users/${enc(name)}`, { action, ...extra }),
+  adminLog: () => request('GET', '/admin/log'),
+  deals: () => request('GET', '/admin/deals'),
+  setDeals: (body) => request('POST', '/admin/deals', body),
+  changePassword: (old, password) => request('POST', '/me/password', { old, password }),
+  friends: () => request('GET', '/friends'),
+  friend: (name, action) => request('POST', '/friends', { name, action }),
+  board: (board) => request('GET', `/boards/${board.replace(/[^A-Za-z0-9:_-]/g, '')}`),
   announce: (text) => request('POST', '/admin/announce', { text }),
   setStock: (item, left) => request('POST', '/admin/stock', { item, left }),
   // coins, closet, trades

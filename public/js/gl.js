@@ -130,6 +130,13 @@ void main() {
   else if (p == 21.0) { if (uv.y > 0.8 - 0.08 * hash(vec2(px.x, seed))) col = vec3(0.37, 0.78, 0.42); else m *= 0.88 + 0.2 * n; }
   else if (p == 30.0) { vec2 q = fract(uv * 2.0) - 0.5; float r = length(q); m *= 0.96 + 0.05 * n; if (r < 0.26) m *= (q.y + q.x < 0.0 ? 1.1 : 0.88); }
   else if (p == 22.0) { a = 0.42; m = 1.05; }
+  else if (p >= 32.0 && p <= 35.0) {
+    vec2 d = p == 32.0 ? vec2(1.0, 0.0) : p == 33.0 ? vec2(-1.0, 0.0) : p == 34.0 ? vec2(0.0, 1.0) : vec2(0.0, -1.0);
+    vec2 q = uv - 0.5;
+    float s = fract(dot(q, d) * 3.0 - abs(dot(q, vec2(-d.y, d.x))) * 2.0 - u_time * 1.3);
+    m *= s < 0.35 ? 1.35 : 0.8;
+  }
+  else if (p == 36.0) { vec2 q = uv - 0.5; float r = length(q); float w = sin(r * 22.0 - u_time * 5.0 + atan(q.y, q.x) * 2.0); col = mix(col, vec3(1.0), 0.25 + 0.25 * w); m = 1.0 + 0.2 * (1.0 - smoothstep(0.0, 0.5, r)); }
   else if (p == 31.0) { m *= fract(uv.x * 4.0) < 0.5 ? 1.05 : 0.85; }
   vec3 c = col * m * (v_glow > 0.99 ? 1.0 : v_glow);
   gl_FragColor = vec4(mix(c, u_fog, v_fog), a);
@@ -203,6 +210,8 @@ function faceLook(t, color, f) {
   if (t === B.speed) return [f === 2 ? 16 : 31, tint];
   if (t === B.checkpoint) return [f === 2 ? 18 : 10, tint];
   if (t === B.spawn) return [f === 2 ? 20 : 10, tint];
+  if (b.dir) return [f === 2 ? b.pat : 12, tint];
+  if (t === B.teleport) return [f === 2 ? 36 : 11, tint];
   return [b.pat || 10, tint];
 }
 

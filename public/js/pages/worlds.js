@@ -5,7 +5,8 @@ import { progress, OBBIES } from '../progress.js';
 import { WORLDS3D, builtinWorld } from '../worlds3d.js';
 import { SKIES } from '../world.js';
 import { drawWorldThumb, thumbOfWorld } from '../thumb3d.js';
-import { setWallet } from './account.js';
+import { setWallet, friendsNow, checkFriends, openFriends } from './account.js';
+import { manageUser } from './admin.js';
 import { openReport } from './play.js';
 
 let game = null;
@@ -65,6 +66,25 @@ async function showWorlds() {
   await loadOnline(true);
   $('#worlds-builtin').replaceChildren(...builtinCards());
   loadWorlds(true);
+  renderFriendsOnline();
+  if (session.user) checkFriends().then(renderFriendsOnline);
+}
+// "Friends playing now" with a Join button
+function renderFriendsOnline() {
+  const d = friendsNow(), box = $('#friends-online');
+  const on = d ? d.friends.filter((f) => f.online) : [];
+  box.hidden = !on.length;
+  box.replaceChildren(el('h2', {}, 'Friends playing now'), el('div', { class: 'mail-list', style: 'max-width:560px' }, ...on.map((f) => el('div', { class: 'friend-row' },
+    el('span', { class: 'dot', style: `background:${f.look.color}` }), el('span', { class: 'who' }, el('b', {}, f.name), el('span', { class: 'small' }, `in ${f.online.name}`)),
+    f.online.code ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + f.online.code) }, 'Join') : null))),
+  el('button', { class: 'linkish', type: 'button', onclick: openFriends }, 'All my friends'));
+}
+// the top 10 fastest checked times on an obby
+function boardList(b, compact) {
+  if (!b.top.length) return el('p', { class: 'small' }, 'No times yet. Beat it to be first!');
+  const me = session.user && session.user.name;
+  return el('ol', { class: 'board' + (compact ? ' win-board' : '') }, ...b.top.map((t, i) => el('li', { class: t.name === me ? 'me' : '' }, el('span', { class: 'rank' }, `#${i + 1}`), el('span', {}, t.name), el('span', {}, `${t.time.toFixed(2)}s`))),
+    b.me && b.me.rank > b.top.length ? el('li', { class: 'me' }, el('span', { class: 'rank' }, `#${b.me.rank}`), el('span', {}, me), el('span', {}, `${b.me.time.toFixed(2)}s`)) : null);
 }
 async function loadWorlds(reset) {
   if (wl.busy) return;
@@ -108,6 +128,8 @@ async function showWorld(id) {
   const cv = el('canvas', { class: 'thumb3d big', 'aria-hidden': 'true' });
   const serversBox = el('div', { class: 'servers' });
   const privBox = el('div', { class: 'servers' });
+  const boardBox = el('div', {}, el('p', { class: 'small' }, 'Loading…'));
+  if (w.mode !== 'hangout') api.board((w.builtin ? 'w:' : 'g:') + id).then((b) => boardBox.replaceChildren(boardList(b))).catch(() => boardBox.replaceChildren(el('p', { class: 'small' }, 'Leaderboards need the online version.')));
   const done = progress.level('w:' + id);
   page.replaceChildren(
     el('div', { class: 'world-hero' }, cv, el('div', { class: 'world-info' },
@@ -125,6 +147,7 @@ async function showWorld(id) {
         session.user ? null : el('button', { class: 'btn btn-sun', type: 'button', onclick: () => needLogin('Playing with others and chat need an account.') }, 'Log in to play with others'),
         w.builtin ? null : el('button', { class: 'btn', type: 'button', onclick: async (e) => { if (!session.user) { needLogin('Likes need an account.'); return; } try { await api.like(id); e.target.textContent = 'Liked'; e.target.disabled = true; } catch (err) { toast(err.message); } } }, 'Like'),
         w.builtin ? null : el('button', { class: 'btn btn-ghost', type: 'button', onclick: () => (session.user ? openReport(id) : needLogin('Reporting needs an account.')) }, 'Report')))),
+    w.mode === 'hangout' ? null : el('div', {}, el('h2', {}, 'Fastest times'), boardBox),
     el('div', { class: 'two-col' },
       el('div', {}, el('h2', {}, 'Public servers'), serversBox),
       el('div', {}, el('h2', {}, 'Private servers'), el('p', { class: 'small' }, 'Only people with the link can join. Great for playing with just your friends.'), privBox)));
@@ -168,7 +191,9 @@ async function enterWorld(id, code) {
   let joined = code || null;
   const low = store.get('gfx-low', false);
   game = startWorld(root, {
-    world: w.world, title: w.name, by: w.by, look: progress.data.equip, me: session.user ? { name: session.user.name } : { name: 'You' }, low,
+    world: w.world, title: w.name, by: w.by, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin } : { name: 'You' }, low,
+    onManage: (name) => manageUser(name),
+    onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },
     room: multi ? async () => { if (first) { const f = first; first = null; return f; } return api.joinRoom(joined ? { code: joined } : { world: id }); } : null,
     soloNote: !session.user ? 'You are playing solo. Log in to see other players and chat.' : !session.rooms ? 'Multiplayer is off on this server, so you are playing solo.' : null,
     onJoined: (info) => { if (info && info.code) { joined = info.code; replaceRoute('#/join/' + info.code); } },
@@ -178,11 +203,14 @@ async function enterWorld(id, code) {
     onGraphics: () => enterWorld(id, code),
     onWin: async (r) => {
       progress.finishWorld(id, r);
-      if (!w.reward) return { text: '' };
-      if (!session.user) return { text: `Log in to earn coins from ${w.builtin ? 'Blockyard obbies' : 'this obby'}.` };
+      if (!session.user) return { text: w.reward ? `Log in to earn coins from ${w.builtin ? 'Blockyard obbies' : 'this obby'} and get on the leaderboard.` : 'Log in to get on the leaderboard.' };
+      if (r.noProof) return { text: 'Admin flying was on, so this run does not count.' };
       const res = await api.finish(w.builtin ? { kind: 'world', id, replay: r.replay } : { kind: 'game', id, replay: r.replay });
       if (res.wallet) setWallet(res.wallet);
-      return { text: res.earned ? `+${res.earned} coins` : res.note || 'You already got the coins for this one.' };
+      const coins = res.earned ? `+${res.earned} coins! ` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '';
+      const b = res.board;
+      const rank = b && b.me ? (b.newBest ? `New best: you're #${b.me.rank} on the leaderboard!` : `Your best is #${b.me.rank} (${b.me.time.toFixed(2)}s).`) : '';
+      return { text: coins + rank, extra: b ? boardList(b, true) : null };
     },
   });
   if (!w.builtin) { const seen = 'played:' + id; try { if (!sessionStorage.getItem(seen)) { sessionStorage.setItem(seen, '1'); api.play(id).catch(() => {}); } } catch (e) { /* ok */ } }

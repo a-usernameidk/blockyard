@@ -44,7 +44,7 @@ renderMute();
 /* ---------------- session ---------------- */
 const signedInFns = new Set();
 export function onSession(fn) { signedInFns.add(fn); }
-const changed = () => { renderMe(); for (const fn of signedInFns) fn(session.user); };
+const changed = () => { renderMe(); checkFriends(); for (const fn of signedInFns) fn(session.user); };
 
 export async function startSession() {
   const on = await isOnline();
@@ -244,6 +244,61 @@ $('#acct-logout').addEventListener('click', async () => {
   signedOut();
   toast(accounts.list().length ? 'Logged out. Click "Log in" to pick another saved account.' : 'Logged out. You are playing as a guest now.');
 });
+/* ---------------- change my password ---------------- */
+$('#acct-pw-change').addEventListener('click', async () => {
+  closeModal($('#account-modal'));
+  const old = el('input', { type: 'password', maxlength: '72', autocomplete: 'current-password', placeholder: 'Old password', 'aria-label': 'Old password' });
+  const pw = el('input', { type: 'password', maxlength: '72', autocomplete: 'new-password', placeholder: 'New password (6 or more letters)', 'aria-label': 'New password' });
+  const ok = await ask('Change my password', 'Type your old password, then the new one. Other computers get logged out, this one stays in.', [{ label: 'Change it', value: true, cls: 'btn-sun' }], el('div', { class: 'stack' }, old, pw));
+  if (!ok) return;
+  try { await api.changePassword(old.value, pw.value); toast('Password changed!'); } catch (e) { toast(e.message); }
+});
+
+/* ---------------- friends ---------------- */
+let friendData = null;
+export async function checkFriends() {
+  if (!session.user) { setFriendCount(0); return; }
+  try { friendData = await api.friends(); setFriendCount(friendData.incoming.length); } catch (e) { /* later */ }
+}
+function setFriendCount(n) {
+  for (const id of ['#me-count', '#friend-count']) { const c = $(id); c.hidden = !n; c.textContent = String(n); }
+  $('#me-count').title = n ? `${n} friend request${n > 1 ? 's' : ''}` : '';
+}
+export function friendsNow() { return friendData; }
+const friendDot = (f) => el('span', { class: 'dot', style: `background:${f.look.color}` });
+function renderFriends() {
+  const d = friendData, body = $('#fl-body');
+  if (!d) { body.replaceChildren(el('p', { class: 'small' }, 'Loading…')); return; }
+  const act = (name, action, done) => async () => { try { await api.friend(name, action); if (done) toast(done); await checkFriends(); renderFriends(); } catch (e) { $('#fl-msg').textContent = e.message; } };
+  body.replaceChildren(
+    d.incoming.length ? el('h3', {}, 'Friend requests') : null,
+    ...d.incoming.map((f) => el('div', { class: 'friend-row' }, friendDot(f), el('span', { class: 'who' }, el('b', {}, f.name)),
+      el('button', { class: 'btn btn-grass', type: 'button', onclick: act(f.name, 'accept', `You and ${f.name} are friends now!`) }, 'Accept'),
+      el('button', { class: 'btn', type: 'button', onclick: act(f.name, 'remove') }, 'No thanks'))),
+    el('h3', {}, d.friends.length ? `Friends (${d.friends.filter((f) => f.online).length} online)` : 'No friends yet'),
+    d.friends.length ? null : el('p', { class: 'small' }, 'Type a username above, or press "Add friend" on someone\'s profile. They have to say yes.'),
+    ...d.friends.map((f) => el('div', { class: 'friend-row' }, friendDot(f),
+      el('span', { class: 'who' }, el('a', { class: 'linkish', href: '#/u/' + f.name, 'data-go': '#/u/' + f.name }, f.name), el('span', { class: 'small' }, f.online ? `Playing ${f.online.name}` : 'Offline')),
+      f.online && f.online.code ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#friends-list-modal')); go('#/join/' + f.online.code); } }, 'Join') : null,
+      el('button', { class: 'btn', type: 'button', title: `Unfriend ${f.name}`, onclick: act(f.name, 'remove', `Removed ${f.name}.`) }, 'Remove'))),
+    d.outgoing.length ? el('h3', {}, 'Waiting for them to say yes') : null,
+    ...d.outgoing.map((f) => el('div', { class: 'friend-row' }, friendDot(f), el('span', { class: 'who' }, f.name), el('button', { class: 'btn', type: 'button', onclick: act(f.name, 'remove') }, 'Cancel'))));
+}
+export async function openFriends() {
+  if (!session.user) { openAccount(); return; }
+  $('#fl-msg').textContent = '';
+  renderFriends(); openModal('#friends-list-modal');
+  await checkFriends(); renderFriends();
+}
+$('#acct-friends').addEventListener('click', () => { closeModal($('#account-modal')); openFriends(); });
+$('#fl-add').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#fl-name').value.trim();
+  if (!name) return;
+  try { const r = await api.friend(name, 'add'); $('#fl-msg').textContent = r.status === 'friends' ? `You and ${name} are friends now!` : `Request sent to ${name}.`; $('#fl-name').value = ''; await checkFriends(); renderFriends(); }
+  catch (err) { $('#fl-msg').textContent = err.message; }
+});
+
 $('#acct-delete').addEventListener('click', async () => {
   closeModal($('#account-modal'));
   const ok = await ask('Delete your account?', 'This removes your account, your coins and items, your projects, and every game you published. It cannot be undone.', [{ label: 'Delete everything', value: true, cls: 'btn-danger' }]);
