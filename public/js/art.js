@@ -351,3 +351,48 @@ export function iconCanvas(name, size = 28, color) {
   drawIcon(c, name, 0, 0, size, color);
   return cv;
 }
+
+// Pets, drawn around (0, 0) = the middle of their feet. s = size.
+export function drawPet(ctx, id, s, t = 0) {
+  const k = s / 40;
+  ctx.save(); ctx.scale(k, k);
+  ctx.lineWidth = 2.2; ctx.strokeStyle = INK; ctx.lineJoin = 'round';
+  const fill = (c) => { ctx.fillStyle = c; ctx.fill(); ctx.stroke(); };
+  const eyes = (x, y, gap = 7, r = 2.6) => { ctx.fillStyle = INK; for (const d of [-1, 1]) { ctx.beginPath(); ctx.arc(x + d * gap, y, r, 0, Math.PI * 2); ctx.fill(); } ctx.fillStyle = '#fff'; for (const d of [-1, 1]) { ctx.beginPath(); ctx.arc(x + d * gap + 0.8, y - 0.9, 0.9, 0, Math.PI * 2); ctx.fill(); } };
+  if (id === 'slime') {
+    const sq = 1 + Math.sin(t * 6) * 0.06;
+    ctx.beginPath(); ctx.moveTo(-16 * sq, 0); ctx.quadraticCurveTo(-16 * sq, -26 / sq, 0, -26 / sq); ctx.quadraticCurveTo(16 * sq, -26 / sq, 16 * sq, 0); ctx.closePath(); fill('#7be07b');
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.ellipse(-7, -17, 3, 5, -0.4, 0, Math.PI * 2); ctx.fill();
+    eyes(1, -11, 5.5);
+  } else if (id === 'chick') {
+    ctx.beginPath(); ctx.arc(0, -13, 13, 0, Math.PI * 2); fill('#ffd23f');
+    ctx.beginPath(); ctx.moveTo(10, -14); ctx.lineTo(18, -11); ctx.lineTo(10, -8); ctx.closePath(); fill('#ff9f1c');
+    ctx.beginPath(); ctx.ellipse(-4, -10, 6, 4, 0.5 + Math.sin(t * 12) * 0.3, 0, Math.PI * 2); fill('#f0b800');
+    eyes(4, -17, 4, 2.2);
+  } else if (id === 'pup' || id === 'kitty') {
+    const body = id === 'pup' ? '#c98b4f' : '#a3abc2', dark = id === 'pup' ? '#8d5a2b' : '#6b7391';
+    ctx.beginPath(); ctx.ellipse(-4, -9, 14, 8, 0, 0, Math.PI * 2); fill(body);
+    ctx.beginPath(); ctx.moveTo(-17, -12); ctx.quadraticCurveTo(-24, -20 + Math.sin(t * 10) * 4, -20, -24); ctx.stroke();
+    ctx.beginPath(); ctx.arc(9, -17, 10, 0, Math.PI * 2); fill(body);
+    if (id === 'pup') { ctx.beginPath(); ctx.ellipse(1, -18, 4, 8, 0.3, 0, Math.PI * 2); fill(dark); ctx.beginPath(); ctx.ellipse(17, -18, 4, 8, -0.3, 0, Math.PI * 2); fill(dark); }
+    else for (const d of [-1, 1]) { ctx.beginPath(); ctx.moveTo(9 + d * 3, -25); ctx.lineTo(9 + d * 9, -32); ctx.lineTo(9 + d * 9, -22); ctx.closePath(); fill(body); }
+    eyes(9, -18, 4.2, 2.2);
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(12, -13, 1.8, 0, Math.PI * 2); ctx.fill();
+  } else if (id === 'bee') {
+    const wing = Math.sin(t * 30) * 0.4;
+    ctx.fillStyle = 'rgba(220,240,255,.9)'; for (const d of [-1, 1]) { ctx.beginPath(); ctx.ellipse(d * 5, -26, 5, 9, d * (0.5 + wing), 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    ctx.beginPath(); ctx.ellipse(0, -15, 13, 10, 0, 0, Math.PI * 2); fill('#ffd23f');
+    ctx.fillStyle = INK; ctx.fillRect(-4, -24, 4, 18); ctx.fillRect(4, -23, 3, 16);
+    eyes(7, -17, 3, 1.8);
+  } else if (id === 'dragon') {
+    const wing = Math.sin(t * 8) * 0.5;
+    for (const d of [-1, 1]) { ctx.save(); ctx.translate(-2, -20); ctx.rotate(d * (0.6 + wing)); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(d * 16, -10); ctx.lineTo(d * 12, 2); ctx.closePath(); fill('#ff5d8f'); ctx.restore(); }
+    ctx.beginPath(); ctx.ellipse(-3, -11, 12, 9, 0, 0, Math.PI * 2); fill('#8a5cf6');
+    ctx.beginPath(); ctx.moveTo(-14, -9); ctx.quadraticCurveTo(-24, -6, -22, -16); ctx.stroke();
+    ctx.beginPath(); ctx.arc(10, -19, 9, 0, Math.PI * 2); fill('#8a5cf6');
+    ctx.beginPath(); ctx.moveTo(6, -27); ctx.lineTo(8, -33); ctx.lineTo(11, -27); ctx.closePath(); fill('#ffd23f');
+    eyes(11, -20, 3.6, 2);
+    if (Math.sin(t * 2) > 0.85) { ctx.fillStyle = '#ffb02e'; ctx.beginPath(); ctx.arc(22, -16, 3, 0, Math.PI * 2); ctx.fill(); }
+  }
+  ctx.restore();
+}

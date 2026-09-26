@@ -7,6 +7,7 @@ import { SKIES } from '../world.js';
 import { drawWorldThumb, thumbOfWorld } from '../thumb3d.js';
 import { setWallet, friendsNow, checkFriends, openFriends } from './account.js';
 import { manageUser } from './admin.js';
+import { levelOf } from '../cosmetics.js';
 import { openReport } from './play.js';
 
 let game = null;
@@ -191,7 +192,7 @@ async function enterWorld(id, code) {
   let joined = code || null;
   const low = store.get('gfx-low', false);
   game = startWorld(root, {
-    world: w.world, title: w.name, by: w.by, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin } : { name: 'You' }, low,
+    world: w.world, title: w.name, by: w.by, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0 } : { name: 'You' }, low,
     onManage: (name) => manageUser(name),
     onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },
     room: multi ? async () => { if (first) { const f = first; first = null; return f; } return api.joinRoom(joined ? { code: joined } : { world: id }); } : null,

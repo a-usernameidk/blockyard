@@ -232,7 +232,8 @@ async function playPublished(id) {
       by: game.creator, key: 'p:' + id, pubId: id, online: true, back: '#/discover',
       onWin: (r) => {
         const res = progress.finish('p:' + id, r, {});
-        if (game.reward && session.user) setTimeout(() => rewardLine(api.finish({ kind: 'game', id, replay: r.replay }), 0), 0);
+        // checked by the server even when it doesn't pay: it counts for quests
+        if (session.user) setTimeout(() => rewardLine(api.finish({ kind: 'game', id, replay: r.replay }), 0), 0);
         else if (game.reward) setTimeout(() => { $('#win-reward').textContent = `Log in to earn ${game.reward} coins from this level.`; }, 0);
         return res;
       },

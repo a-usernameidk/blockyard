@@ -7,6 +7,49 @@ import { drawPip } from '../art.js';
 import { todayUTC } from '../endless.js';
 import { MAP, nextLevelIndex, publishedCard } from './play.js';
 import { loadOnline, builtinCards, playerWorldCard } from './worlds.js';
+import { onSession, setWallet } from './account.js';
+import { ask, toast } from '../app.js';
+import { store } from '../api.js';
+
+/* ---------------- today: log-in streak and daily quests ---------------- */
+async function renderToday() {
+  const box = $('#home-today');
+  if (!session.user || !session.online) { box.hidden = true; return null; }
+  let s;
+  try { s = await api.quests(); } catch (e) { box.hidden = true; return null; }
+  const st = s.streak, cur = st.today ? (st.count - 1) % 7 : st.count % 7;
+  const claimBonus = async () => { try { const r = await api.bonus(); setWallet(r.wallet); toast(`Day ${r.day} bonus: +${r.earned} coins!`, 'toast-ach'); renderToday(); } catch (e) { toast(e.message); } };
+  const claim = (id) => async () => { try { const r = await api.claimQuest(id); setWallet(r.wallet); toast(`Quest done: +${r.earned} coins!`, 'toast-ach'); renderToday(); } catch (e) { toast(e.message); } };
+  const allDone = s.quests.every((q) => q.claimed);
+  box.hidden = false;
+  box.replaceChildren(
+    el('div', { class: 'today-card' },
+      el('h2', {}, st.count ? `${st.count}-day streak` + (st.count >= 3 ? ' 🔥' : '') : 'Daily bonus'),
+      el('p', { class: 'small' }, st.today ? 'Come back tomorrow to keep your streak going. Day 7 pays 150!' : 'Log in every day for bigger rewards. Miss a day and it starts over.'),
+      el('div', { class: 'streak' }, ...st.rewards.map((c, i) => el('span', { class: 'day' + (i < cur || (i === cur && st.today) ? ' done' : '') + (i === cur && !st.today ? ' now' : '') }, el('b', {}, `Day ${i + 1}`), `${c}`))),
+      st.today ? el('p', { class: 'msg' }, `You got today's ${st.rewards[cur]} coins.`) : el('button', { class: 'btn btn-big btn-sun', type: 'button', onclick: claimBonus }, `Claim ${st.next} coins`)),
+    el('div', { class: 'today-card' },
+      el('h2', {}, "Today's quests"),
+      el('p', { class: 'small' }, `New ones every day. +${s.quests[0].reward} coins each, +${s.all.reward} more for all three.`),
+      ...s.quests.map((q) => el('div', { class: 'quest' + (q.claimed ? ' done' : '') },
+        el('span', { class: 'q-text' }, q.text, el('span', { class: 'q-bar' }, el('span', { style: `width:${Math.round(q.n / q.goal * 100)}%` })), el('span', { class: 'small' }, `${q.n} / ${q.goal}`)),
+        q.claimed ? el('span', { class: 'q-ok' }, 'Done ✓') : q.n >= q.goal ? el('button', { class: 'btn btn-grass', type: 'button', onclick: claim(q.id) }, `+${q.reward}`) : el('span', { class: 'small' }, `+${q.reward}`))),
+      allDone && !s.all.claimed ? el('button', { class: 'btn btn-sun', type: 'button', onclick: claim('all') }, `All three done! Claim +${s.all.reward}`) : s.all.claimed ? el('p', { class: 'msg' }, 'All done for today. Nice!') : null));
+  return s;
+}
+// Once a day, the bonus pops up by itself.
+onSession(async (user) => {
+  if (!user) { $('#home-today').hidden = true; return; }
+  const s = await renderToday();
+  if (!s || s.streak.today || store.get('bonus-asked', '') === s.date + user.id) return;
+  // wait until no other pop-up is open (like the recovery code after signing up)
+  for (let i = 0; i < 120 && document.querySelector('.modal:not([hidden])'); i++) await new Promise((r) => setTimeout(r, 1000));
+  if (document.querySelector('.modal:not([hidden])') || !session.user || session.user.id !== user.id) return;
+  store.set('bonus-asked', s.date + user.id);
+  const ok = await ask('Daily bonus!', `Day ${s.streak.count + 1} of your streak: ${s.streak.next} coins. Come back every day, day 7 pays 150!`, [{ label: `Claim ${s.streak.next} coins`, value: true, cls: 'btn-sun' }]);
+  if (!ok) return;
+  try { const r = await api.bonus(); setWallet(r.wallet); toast(`+${r.earned} coins! See you tomorrow.`, 'toast-ach'); renderToday(); } catch (e) { toast(e.message); }
+});
 
 let titleRaf = 0;
 onLeave('home', () => cancelAnimationFrame(titleRaf));
@@ -15,6 +58,7 @@ async function showHome() {
   show('home');
   startTitle();
   renderTiles();
+  renderToday();
   $('#home-worlds').replaceChildren(...builtinCards());
   if (!(await isOnline()) || currentView() !== 'home') return;
   await loadOnline(true);

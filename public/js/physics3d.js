@@ -10,7 +10,13 @@ export const P3 = {
   coyote: 6, boost: 1.6, boostSteps: 90,
   halfW: 0.34, height: 1.5,
   crumbleDelay: 36, crumbleGone: 180, belt: 4,
+  moveRange: 4, movePeriod: 240,
 };
+// How far moving platforms are from home at a step (the same for every platform, so they move in step).
+export function moverOffset(steps) {
+  const h = P3.movePeriod / 2, ph = ((steps % P3.movePeriod) + P3.movePeriod) % P3.movePeriod;
+  return (ph < h ? ph / h : 2 - ph / h) * P3.moveRange;
+}
 
 // Camera direction is saved as one of 256 angles. The table is rounded so every browser agrees.
 export const YAWS = 256;
@@ -29,7 +35,7 @@ const KIND = new Uint8Array(64); // 1 solid, 2 kill, 4 goal, 8 coin, 16 crumble
 BLOCKS.forEach((b, i) => {
   if (!b) return;
   let k = 0;
-  if (!b.entity && !b.ghost) k |= 1;
+  if (!b.entity && !b.ghost && b.mover == null) k |= 1; // movers are solid, but handled separately
   if (b.kill) k |= 2;
   if (i === B.goal) k |= 4;
   if (i === B.coin) k |= 8;
@@ -45,8 +51,10 @@ export function createSim(world, grid) {
   // teleporters, grouped by color, in a fixed order (so every replay goes the same way)
   const tps = new Map();
   for (const [x, y, z, c] of [...info.tps].sort((a, b) => idx(a[0], a[1], a[2]) - idx(b[0], b[1], b[2]))) { if (!tps.has(c)) tps.set(c, []); tps.get(c).push([x, y, z]); }
+  // moving platforms: [x, y, z, axis] (axis 0 = x, 1 = y, 2 = z), sorted so every run is the same
+  const movers = [...info.movers].sort((a, b) => idx(a[0], a[1], a[2]) - idx(b[0], b[1], b[2])).map(([x, y, z, t]) => [x, y, z, BLOCKS[t].mover]);
   return {
-    tps, tpLock: false,
+    tps, tpLock: false, movers, mOff: 0,
     grid, t: grid.t, info, obby: world.mode !== 'hangout',
     spawn, cp: null, cpIdx: -1,
     p: { ...spawn }, v: { x: 0, y: 0, z: 0 },
@@ -87,7 +95,26 @@ function solidAt(S, px, py, pz) {
       }
     }
   }
+  return S.movers.length ? moverAt(S, px, py, pz) : false;
+}
+// Does the player's box overlap a moving platform? (It's left in HX, HY, HZ, which can be fractional.)
+function moverAt(S, px, py, pz) {
+  const hw = P3.halfW, o = S.mOff;
+  for (const m of S.movers) {
+    const mx = m[0] + (m[3] === 0 ? o : 0), my = m[1] + (m[3] === 1 ? o : 0), mz = m[2] + (m[3] === 2 ? o : 0);
+    if (px + hw > mx + 1e-7 && px - hw < mx + 1 - 1e-7 && py + P3.height > my + 1e-7 && py < my + 1 - 1e-7 && pz + hw > mz + 1e-7 && pz - hw < mz + 1 - 1e-7) { HX = mx; HY = my; HZ = mz; return true; }
+  }
   return false;
+}
+// The moving platform right under the player's feet, or -1.
+function standingMover(S) {
+  const hw = P3.halfW - 0.02, o = S.mOff;
+  for (let i = 0; i < S.movers.length; i++) {
+    const m = S.movers[i];
+    const mx = m[0] + (m[3] === 0 ? o : 0), my = m[1] + (m[3] === 1 ? o : 0), mz = m[2] + (m[3] === 2 ? o : 0);
+    if (Math.abs(S.p.y - (my + 1)) < 0.06 && S.p.x + hw > mx && S.p.x - hw < mx + 1 && S.p.z + hw > mz && S.p.z - hw < mz + 1) return i;
+  }
+  return -1;
 }
 
 function moveX(S, d) {
@@ -171,6 +198,26 @@ export function step3(S, value) {
   if (S.won) return;
   const bits = value >> 8, yaw = value & 255, dt = STEP3;
   S.steps++; S.runSteps++;
+  // moving platforms move first, carrying whoever stands on them
+  if (S.movers.length) {
+    const ride = S.onGround ? standingMover(S) : -1;
+    const before = S.mOff;
+    S.mOff = moverOffset(S.steps);
+    const d = S.mOff - before;
+    if (ride >= 0 && d) {
+      const ax = S.movers[ride][3];
+      const saved = S.mOff; S.mOff = before; // move the player against the old platform position, then put it back
+      if (ax === 0) { S.mOff = saved; S.p.x += d; if (solidAt(S, S.p.x, S.p.y, S.p.z)) S.p.x -= d; }
+      else if (ax === 2) { S.mOff = saved; S.p.z += d; if (solidAt(S, S.p.x, S.p.y, S.p.z)) S.p.z -= d; }
+      else { S.mOff = saved; S.p.y += d; if (d > 0 && solidAt(S, S.p.x, S.p.y, S.p.z)) S.p.y -= d; }
+      S.mOff = saved;
+    } else if (d && moverAt(S, S.p.x, S.p.y, S.p.z)) {
+      // a platform bumped into the player: push them along with it
+      const m = S.movers.find((q) => { const o = S.mOff; const mx = q[0] + (q[3] === 0 ? o : 0), my = q[1] + (q[3] === 1 ? o : 0), mz = q[2] + (q[3] === 2 ? o : 0); return mx === HX && my === HY && mz === HZ; });
+      const ax = m ? m[3] : 1;
+      if (ax === 0) S.p.x += d; else if (ax === 2) S.p.z += d; else if (d > 0) S.p.y = HY + 1;
+    }
+  }
   const reset = (bits & 32) ? 1 : 0;
   if (reset && !S.lastReset) { S.lastReset = 1; die(S); return; }
   S.lastReset = reset;

@@ -155,3 +155,47 @@ export const TRAIL3D = {
   fire: ['#ff5a1f', '#ffb02e', '#ffd23f'], rainbow: ['#ff5d8f', '#ff9f1c', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], stars: ['#ffd23f', '#fff6c9'], lightning: ['#7cc8ff', '#ffffff', '#ffe66d'],
   confetti: ['#ff5d8f', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], snow: ['#ffffff', '#dff4ff'], galaxy: ['#5a3fd6', '#b06cff', '#ffffff', '#7cc8ff'],
 };
+
+// A pet at (x, y, z) facing yaw. hop: 0..1 how high it's hopping. Built from boxes like Pip.
+export function petParts(id, x, y, z, yaw, t, hop, out = []) {
+  if (!id || id === 'none') return out;
+  const base = M4.trs(x, y + hop * 0.25, z, yaw);
+  const at = (px, py, pz, sx, sy, sz, color, prim = 'cube', ry = 0, rx = 0, rz = 0, extra) => out.push({ prim, color: typeof color === 'string' ? hexRGB(color) : color, m: M4.mul(base, M4.trs(px, py, pz, ry, rx, rz, sx, sy, sz)), ...extra });
+  const eyes = (py, pz, gap = 0.08) => { for (const s of [-1, 1]) at(s * gap, py, pz, 0.06, 0.08, 0.02, INK); };
+  if (id === 'slime') {
+    const sq = 1 + Math.sin(t * 6) * 0.08;
+    at(0, 0.2 / sq, 0, 0.5 * sq, 0.4 / sq, 0.5 * sq, '#7be07b', 'cube', 0, 0, 0, { alpha: 0.85 });
+    eyes(0.24, 0.26);
+  } else if (id === 'chick') {
+    at(0, 0.22, 0, 0.4, 0.4, 0.4, '#ffd23f', 'sphere');
+    at(0, 0.24, 0.22, 0.1, 0.06, 0.12, '#ff9f1c');
+    for (const s of [-1, 1]) at(s * 0.2, 0.2, -0.02, 0.06, 0.16, 0.2, '#f0b800', 'cube', 0, 0, s * Math.sin(t * 12) * 0.4);
+    eyes(0.3, 0.19, 0.08);
+  } else if (id === 'pup' || id === 'kitty') {
+    const c = id === 'pup' ? '#c98b4f' : '#a3abc2', d = id === 'pup' ? '#8d5a2b' : '#6b7391';
+    at(0, 0.22, -0.05, 0.34, 0.26, 0.5, c);
+    at(0, 0.4, 0.25, 0.32, 0.3, 0.3, c);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) at(sx * 0.11, 0.06, -0.05 + sz * 0.16, 0.09, 0.14, 0.09, d);
+    if (id === 'pup') for (const s of [-1, 1]) at(s * 0.18, 0.38, 0.22, 0.06, 0.2, 0.12, d);
+    else for (const s of [-1, 1]) at(s * 0.1, 0.6, 0.23, 0.08, 0.12, 0.05, c, 'cube', 0, 0, s * 0.3);
+    at(0, 0.34 + Math.sin(t * 9) * 0.04, -0.34, 0.06, 0.06, 0.22, c, 'cube', Math.sin(t * 9) * 0.5, 0.5);
+    eyes(0.44, 0.405, 0.08);
+    at(0, 0.36, 0.41, 0.06, 0.05, 0.02, INK);
+  } else if (id === 'bee') {
+    const fy = 0.5 + Math.sin(t * 4) * 0.08;
+    at(0, fy, 0, 0.36, 0.3, 0.4, '#ffd23f', 'sphere');
+    at(0, fy, -0.02, 0.37, 0.31, 0.08, INK); at(0, fy, -0.14, 0.33, 0.27, 0.06, INK);
+    for (const s of [-1, 1]) at(s * 0.14, fy + 0.2, -0.04, 0.2, 0.03, 0.14, [0.9, 0.95, 1], 'cube', 0, 0, s * (0.5 + Math.sin(t * 30) * 0.4), { alpha: 0.8 });
+    eyes(fy + 0.04, 0.19, 0.07);
+  } else if (id === 'dragon') {
+    const c = '#8a5cf6';
+    at(0, 0.28, -0.05, 0.34, 0.3, 0.48, c);
+    at(0, 0.5, 0.24, 0.3, 0.28, 0.3, c);
+    at(0, 0.7, 0.2, 0.06, 0.12, 0.06, '#ffd23f');
+    for (const s of [-1, 1]) at(s * 0.3, 0.46, -0.08, 0.34, 0.03, 0.24, '#ff5d8f', 'cube', 0, 0, s * (0.4 + Math.sin(t * 8) * 0.5));
+    at(0, 0.24, -0.38, 0.08, 0.08, 0.3, c, 'cube', Math.sin(t * 5) * 0.4, 0.3);
+    eyes(0.54, 0.395, 0.08);
+    if (Math.sin(t * 2) > 0.9) at(0, 0.48, 0.55, 0.12, 0.12, 0.12, '#ffb02e', 'cube', t * 5, t * 3, 0, { glow: 1 });
+  }
+  return out;
+}

@@ -25,7 +25,7 @@
     <button class="btn icon-btn" id="mute" aria-pressed="false" aria-label="Sound effects"></button>
     <button class="btn icon-btn" id="music" aria-pressed="false" aria-label="Music"></button>
     <button class="btn coin-chip" id="coin-chip" data-go="#/closet" title="Your coins"><span id="coin-icon"></span><span id="coin-count">0</span></button>
-    <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Log in</span><span class="count" id="me-count" hidden></span></button>
+    <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span class="lvl-chip" id="me-lvl" hidden></span><span id="me-name">Log in</span><span class="count" id="me-count" hidden></span></button>
   </div>
 </header>
 <div class="announce" id="announce" role="status" hidden><span class="announce-tag">News</span><span id="announce-text"></span><button class="announce-x" id="announce-x" type="button" aria-label="Hide this message">&times;</button></div>
@@ -46,6 +46,7 @@
     </div>
   </div>
   <div class="tiles" id="home-tiles"></div>
+  <div id="home-today" class="today" hidden></div>
   <div class="section-head"><h2>Popular worlds</h2><button class="btn" data-go="#/worlds">All worlds</button></div>
   <div class="grid" id="home-worlds"></div>
   <div id="home-online" hidden>
@@ -448,6 +449,7 @@
     </div>
     <div id="acct-in" hidden>
       <p class="acct-who"><canvas id="acct-pip" aria-hidden="true"></canvas><span><b id="acct-user"></b><br><span class="small" id="acct-sum"></span></span></p>
+      <div class="xp" id="acct-xp"><span class="xp-bar"><span id="acct-xp-fill"></span></span><span class="small" id="acct-xp-text"></span></div>
       <div class="row">
         <button class="btn" id="acct-profile">My profile</button>
         <button class="btn" id="acct-friends" type="button">Friends <span class="count" id="friend-count" hidden></span></button>

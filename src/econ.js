@@ -1,7 +1,7 @@
 // Coins and items. The server is the only one who can change them:
 // coins come from checked runs (built-in levels, built-in obbies, daily, Endless, and player levels
 // an admin marked as rewarding), and items come from the shop or from trades.
-import { SHOP, FREE, KINDS, findItem, isFree, canTrade, valueOf, sellPrice, LIMITED } from '../public/js/cosmetics.js';
+import { SHOP, FREE, KINDS, findItem, isFree, canTrade, valueOf, sellPrice, LIMITED, levelOf } from '../public/js/cosmetics.js';
 import { BUILTIN } from '../public/js/levels.js';
 import { normalizeLevel } from '../public/js/format.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
@@ -13,7 +13,7 @@ import { json, fail, body, needUser, DAY, randomId, isConstraint, startOfDay } f
 
 export const REWARD = { star: 10, dailyWin: 30, endlessCap: 200, obbyNoFall: 25, coin3d: 2, migrateCap: 2000, finishPerHour: 120 };
 const TRADE = { maxItems: 8, maxCoins: 100000, days: 3, openPerUser: 10 };
-export const DEFAULT_LOOK = { color: '#ff6b35', hat: 'none', trail: 'none' };
+export const DEFAULT_LOOK = { color: '#ff6b35', hat: 'none', trail: 'none', pet: 'none' };
 
 export const ECON_SCHEMA = [
   'CREATE TABLE IF NOT EXISTS wallets (user_id TEXT PRIMARY KEY, coins INTEGER NOT NULL DEFAULT 0 CHECK (coins >= 0))',
@@ -32,6 +32,14 @@ export const ECON_SCHEMA = [
   // leaderboards: each player's best checked time on each obby
   'CREATE TABLE IF NOT EXISTS best_times (board TEXT NOT NULL, user_id TEXT NOT NULL, time REAL NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (board, user_id))',
   'CREATE INDEX IF NOT EXISTS best_times_top ON best_times (board, time)',
+  // daily quests and the log-in streak
+  'CREATE TABLE IF NOT EXISTS quest_prog (user_id TEXT NOT NULL, date TEXT NOT NULL, qid TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, date, qid))',
+  'CREATE TABLE IF NOT EXISTS streaks (user_id TEXT PRIMARY KEY, last TEXT NOT NULL, count INTEGER NOT NULL)',
+];
+// columns added later: [statement, what to run once right after it's added]
+export const ECON_COLUMNS = [
+  ["ALTER TABLE wallets ADD COLUMN xp INTEGER NOT NULL DEFAULT 0",
+    "UPDATE wallets SET xp = COALESCE((SELECT SUM(delta) FROM ledger l WHERE l.user_id = wallets.user_id AND l.delta > 0 AND (l.why LIKE 'run%' OR l.why LIKE 'quest%' OR l.why LIKE 'bonus%')), 0)"],
 ];
 export const seedStock = (db) => LIMITED.map((l) => db.prepare('INSERT OR IGNORE INTO stock (item, left) VALUES (?, ?)').bind(l.key, l.stock));
 
@@ -41,7 +49,9 @@ export const seedStock = (db) => LIMITED.map((l) => db.prepare('INSERT OR IGNORE
 // try to insert a negative one, which the CHECK rule also refuses. Either way the whole batch is cancelled.)
 export function coinStmts(db, uid, delta, why) {
   const log = db.prepare('INSERT INTO ledger (user_id, delta, why, at) VALUES (?, ?, ?, ?)').bind(uid, delta, why, Date.now());
-  if (delta >= 0) return [db.prepare('INSERT INTO wallets (user_id, coins) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET coins = coins + excluded.coins').bind(uid, delta), log];
+  // coins earned by playing (runs, quests, the daily bonus) also count as XP
+  const xp = /^(run|quest|bonus)/.test(why) ? delta : 0;
+  if (delta >= 0) return [db.prepare('INSERT INTO wallets (user_id, coins, xp) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET coins = coins + excluded.coins, xp = xp + excluded.xp').bind(uid, delta, xp), log];
   return [
     db.prepare('UPDATE wallets SET coins = coins + ? WHERE user_id = ?').bind(delta, uid),
     db.prepare('INSERT INTO wallets (user_id, coins) SELECT ?, -1 WHERE NOT EXISTS (SELECT 1 FROM wallets WHERE user_id = ?)').bind(uid, uid),
@@ -71,13 +81,13 @@ export function cleanLook(look, items) {
 
 export async function getWallet(db, uid) {
   const [w, inv, u] = await Promise.all([
-    db.prepare('SELECT coins FROM wallets WHERE user_id = ?').bind(uid).first(),
+    db.prepare('SELECT coins, xp FROM wallets WHERE user_id = ?').bind(uid).first(),
     db.prepare('SELECT item, qty FROM inventory WHERE user_id = ? AND qty > 0').bind(uid).all(),
     db.prepare('SELECT look FROM users WHERE id = ?').bind(uid).first(),
   ]);
   const items = {};
   for (const r of inv.results) items[r.item] = r.qty;
-  return { coins: w ? w.coins : 0, items, look: cleanLook(parse(u && u.look), items) };
+  return { coins: w ? w.coins : 0, xp: w ? w.xp || 0 : 0, level: levelOf(w ? w.xp : 0), items, look: cleanLook(parse(u && u.look), items) };
 }
 // After selling or trading, make sure nobody is wearing something they gave away.
 async function fixLook(db, uid) {
@@ -165,6 +175,82 @@ export async function verify(env, job) {
 export const maxSteps = (env) => Math.max(1200, Math.min(120000, parseInt(env.MAX_VERIFY_STEPS || '14400', 10) || 14400));
 export const maxSteps3d = (env) => Math.max(1200, Math.min(72000, parseInt(env.MAX_VERIFY_STEPS_3D || '18000', 10) || 18000));
 
+/* ---------------- daily quests and the log-in streak ---------------- */
+export const QUESTS = {
+  obby: { text: 'Beat any obby', goal: 1 },
+  levels: { text: 'Win 3 levels on the Play map', goal: 3 },
+  endless: { text: 'Reach 300 m in one Endless Rush run', goal: 1 },
+  daily: { text: "Beat today's daily challenge", goal: 1 },
+  coins: { text: 'Grab 25 coins in levels and obbies', goal: 25 },
+  player: { text: 'Beat a level or obby another player made', goal: 1 },
+};
+const QUEST_REWARD = 40, QUEST_ALL = 60;
+export const STREAK = [20, 30, 40, 50, 60, 80, 150];
+export function questsFor(date = todayUTC()) {
+  const pool = Object.keys(QUESTS);
+  let h = 7;
+  for (const ch of date) h = Math.imul(h ^ ch.charCodeAt(0), 2654435761) >>> 0;
+  const out = [];
+  while (out.length < 3) { h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0; const q = pool.splice(h % pool.length, 1)[0]; out.push(q); }
+  return out;
+}
+export function questBumps(db, uid, by) {
+  const date = todayUTC();
+  return questsFor(date).filter((q) => by[q] > 0).map((q) => db.prepare('INSERT INTO quest_prog (user_id, date, qid, n) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, date, qid) DO UPDATE SET n = n + excluded.n').bind(uid, date, q, Math.floor(by[q])));
+}
+const yesterday = (d) => new Date(Date.parse(d + 'T00:00:00Z') - DAY).toISOString().slice(0, 10);
+async function questStatus(db, uid) {
+  const date = todayUTC(), ids = questsFor(date);
+  const [prog, claims, st] = await Promise.all([
+    db.prepare('SELECT qid, n FROM quest_prog WHERE user_id = ? AND date = ?').bind(uid, date).all(),
+    db.prepare("SELECT what FROM claims WHERE user_id = ? AND what LIKE ?").bind(uid, 'q:' + date + ':%').all(),
+    db.prepare('SELECT last, count FROM streaks WHERE user_id = ?').bind(uid).first(),
+  ]);
+  const n = {}, got = new Set(claims.results.map((c) => c.what.split(':')[2]));
+  for (const p of prog.results) n[p.qid] = p.n;
+  const alive = st && (st.last === date || st.last === yesterday(date));
+  const count = alive ? st.count : 0, today = !!(st && st.last === date);
+  return {
+    date,
+    quests: ids.map((id) => ({ id, text: QUESTS[id].text, goal: QUESTS[id].goal, n: Math.min(QUESTS[id].goal, n[id] || 0), claimed: got.has(id), reward: QUEST_REWARD })),
+    all: { reward: QUEST_ALL, claimed: got.has('all') },
+    streak: { count, today, next: STREAK[(today ? count : count) % STREAK.length], rewards: STREAK },
+  };
+}
+async function claimQuest(ctx, input) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  const s = await questStatus(db, user.id);
+  const id = String(input.id || '');
+  let amount;
+  if (id === 'all') {
+    if (!s.quests.every((q) => q.claimed)) fail(400, 'Finish and collect all three quests first.');
+    amount = QUEST_ALL;
+  } else {
+    const q = s.quests.find((x) => x.id === id);
+    if (!q) fail(404, "That isn't one of today's quests.");
+    if (q.n < q.goal) fail(400, 'Not done yet!');
+    amount = QUEST_REWARD;
+  }
+  const ok = await payOnce(db, [claimStmt(db, user.id, `q:${s.date}:${id}`), ...coinStmts(db, user.id, amount, 'quest ' + id)]);
+  if (!ok) fail(409, 'You already collected that one.');
+  return json({ ok: true, earned: amount, wallet: await getWallet(db, user.id), status: await questStatus(db, user.id) });
+}
+async function claimBonus(ctx) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  const s = await questStatus(db, user.id);
+  if (s.streak.today) fail(409, 'You already got today\'s bonus. Come back tomorrow!');
+  const count = s.streak.count + 1, amount = STREAK[(count - 1) % STREAK.length];
+  const ok = await payOnce(db, [
+    claimStmt(db, user.id, 'bonus:' + s.date),
+    db.prepare('INSERT INTO streaks (user_id, last, count) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET last = excluded.last, count = excluded.count').bind(user.id, s.date, count),
+    ...coinStmts(db, user.id, amount, 'bonus day ' + count),
+  ]);
+  if (!ok) fail(409, 'You already got today\'s bonus. Come back tomorrow!');
+  return json({ ok: true, earned: amount, day: count, wallet: await getWallet(db, user.id), status: await questStatus(db, user.id) });
+}
+
 /* ---------------- routes ---------------- */
 export async function econRoute(ctx, path, method) {
   let m;
@@ -173,6 +259,9 @@ export async function econRoute(ctx, path, method) {
   if (path === '/shop/buy' && method === 'POST') return buy(ctx, await body(ctx.request));
   if (path === '/shop/sell' && method === 'POST') return sell(ctx, await body(ctx.request));
   if (path === '/finish' && method === 'POST') return finish(ctx, await body(ctx.request));
+  if (path === '/quests' && method === 'GET') return json(await questStatus(ctx.db, needUser(ctx).id));
+  if (path === '/quests/claim' && method === 'POST') return claimQuest(ctx, await body(ctx.request));
+  if (path === '/bonus' && method === 'POST') return claimBonus(ctx);
   if (path === '/trades' && method === 'GET') return listTrades(ctx);
   if (path === '/trades' && method === 'POST') return newTrade(ctx, await body(ctx.request));
   if ((m = path.match(/^\/trades\/([A-Za-z0-9]{10})$/)) && method === 'POST') return tradeAction(ctx, m[1], await body(ctx.request));
@@ -329,6 +418,7 @@ async function finishLevel(ctx, user, id, replay) {
   const stmts = [progressStmt(db, user.id, id, bits, run.coins, Math.round(run.time * 10) / 10)];
   // the claim row stops two runs sent at the same moment from both paying for the same stars
   if (earned) stmts.push(claimStmt(db, user.id, `r:${id}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run level ' + id));
+  stmts.push(...questBumps(db, user.id, { levels: 1, coins: run.coins }));
   if (id === 'b-party' && run.deaths === 0) stmts.push(db.prepare("INSERT OR IGNORE INTO claims (user_id, what, at) VALUES (?, 'b:flawless', ?)").bind(user.id, Date.now()));
   if (!(await payOnce(db, stmts))) return json({ ok: true, earned: 0, stars: [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i))), newStars: [], time: run.time, wallet: await getWallet(db, user.id) });
   const stars = [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i)));
@@ -343,6 +433,7 @@ async function finishWorld(ctx, user, id, replay) {
   if (!run.won) fail(400, "That run didn't reach the goal.");
   const key = 'w:' + id;
   const board = await saveTime(db, user.id, key, run.time);
+  await db.batch(questBumps(db, user.id, { obby: 1, coins: run.coins })).catch(() => {});
   const bits = 1 | (run.deaths === 0 ? 2 : 0);
   const old = await progressRow(db, user.id, key);
   const fresh = bits & ~old.stars;
@@ -364,6 +455,7 @@ async function finishGame(ctx, user, id, replay) {
     : await verify(env, { type: '2d', level: data, replay, opts: { maxSteps: maxSteps(env) } });
   if (!run.won) fail(400, "That run didn't reach the goal.");
   const board = await saveTime(db, user.id, 'g:' + id, run.time);
+  await db.batch(questBumps(db, user.id, { player: 1, obby: g.kind === '3d' ? 1 : 0, coins: run.coins || 0 })).catch(() => {});
   if (!g.reward) return json({ ok: true, earned: 0, board });
   if (g.user_id === user.id) return json({ ok: true, earned: 0, board, note: "You made this one, so it doesn't pay you." });
   if (g.project_id) {
@@ -385,6 +477,7 @@ async function finishEndless(ctx, user, seedIn, replay) {
   const run = await verify(env, { type: '2d', raw: true, level: endlessCourse(seed), replay, opts: { maxSteps: maxSteps(env), stopOnDeath: true, truncate: true } });
   const dist = Math.floor(run.x / 32);
   const want = run.coins + Math.floor(dist / 25);
+  await db.batch(questBumps(db, user.id, { endless: dist >= 300 ? 1 : 0, coins: run.coins })).catch(() => {});
   for (let tries = 0; ; tries++) {
     const day = startOfDay();
     const today = await db.prepare("SELECT COALESCE(SUM(delta), 0) AS n FROM ledger WHERE user_id = ? AND why = 'run endless' AND at >= ?").bind(user.id, day).first();

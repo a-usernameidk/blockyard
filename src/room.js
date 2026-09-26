@@ -62,7 +62,7 @@ export class Room {
       return new Response(null, { status: 101, webSocket: client });
     }
     const id = Math.random().toString(36).slice(2, 8);
-    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, admin: !!info.admin, kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
+    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), admin: !!info.admin, kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
     server.serializeAttachment(me);
 
     if (me.kind === 'edit') {
@@ -341,7 +341,7 @@ function att(ws) { try { return ws.deserializeAttachment(); } catch (e) { return
 function send(ws, msg) { try { ws.send(JSON.stringify(msg)); } catch (e) { /* closed */ } }
 function pub(a, pos) {
   const st = pos.get(a.id) || (a.p ? { p: a.p, r: a.r, a: a.a } : {});
-  return { id: a.id, name: a.name, look: a.look, admin: a.admin || undefined, p: st.p || null, r: st.r || 0, a: st.a || 0 };
+  return { id: a.id, name: a.name, look: a.look, lvl: a.lvl || 1, admin: a.admin || undefined, p: st.p || null, r: st.r || 0, a: st.a || 0 };
 }
 // No word filter (Blockyard's choice), just tidy: no invisible characters, no giant messages.
 export function cleanChat(m) {

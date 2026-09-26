@@ -57,9 +57,20 @@ export const TRAILS = [
   { id: 'galaxy', name: 'Galaxy', price: 1000, stock: 12 },
 ];
 
-export const SHOP = { color: COLORS, hat: HATS, trail: TRAILS };
-export const KINDS = ['hat', 'color', 'trail'];
-export const FREE = [...COLORS, ...HATS, ...TRAILS].filter((i) => i.price === 0 && !i.need).map((i) => i.id);
+// Pets follow you around in 3D worlds.
+export const PETS = [
+  { id: 'none', name: 'No pet', price: 0 },
+  { id: 'slime', name: 'Slime', price: 250 },
+  { id: 'chick', name: 'Chick', price: 300 },
+  { id: 'pup', name: 'Pup', price: 400 },
+  { id: 'kitty', name: 'Kitty', price: 400 },
+  { id: 'bee', name: 'Bumble bee', need: { stars: 45 }, hint: 'Earn 45 stars' },
+  { id: 'dragon', name: 'Mini dragon', price: 1500, stock: 10 },
+];
+
+export const SHOP = { color: COLORS, hat: HATS, trail: TRAILS, pet: PETS };
+export const KINDS = ['hat', 'color', 'trail', 'pet'];
+export const FREE = [...COLORS, ...HATS, ...TRAILS, ...PETS].filter((i) => i.price === 0 && !i.need).map((i) => i.id);
 export const itemKey = (kind, id) => kind + ':' + id;
 // 'hat:cap' -> { kind, item } or null
 export function findItem(key) {
@@ -73,4 +84,8 @@ export const isFree = (item) => item.price === 0 && !item.need;
 export const canTrade = (item) => !isFree(item) && !item.need;
 export const valueOf = (item) => (item.need ? 0 : item.price || 0);
 export const sellPrice = (item) => Math.floor(valueOf(item) / 2);
-export const LIMITED = [...COLORS.map((i) => ['color', i]), ...HATS.map((i) => ['hat', i]), ...TRAILS.map((i) => ['trail', i])].filter(([, i]) => i.stock).map(([k, i]) => ({ key: itemKey(k, i.id), stock: i.stock }));
+export const LIMITED = [...COLORS.map((i) => ['color', i]), ...HATS.map((i) => ['hat', i]), ...TRAILS.map((i) => ['trail', i]), ...PETS.map((i) => ['pet', i])].filter(([, i]) => i.stock).map(([k, i]) => ({ key: itemKey(k, i.id), stock: i.stock }));
+
+// Player levels: every coin you earn by playing is also 1 XP.
+export const xpFor = (lvl) => 20 * (lvl - 1) * (lvl - 1);
+export const levelOf = (xp) => Math.floor(Math.sqrt(Math.max(0, xp || 0) / 20)) + 1;

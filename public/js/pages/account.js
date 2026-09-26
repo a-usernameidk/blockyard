@@ -5,6 +5,7 @@ import { api, auth, accounts, isOnline, store } from '../api.js';
 import { progress, proofs } from '../progress.js';
 import { isRude } from '../format.js';
 import { drawTile } from '../render2d.js';
+import { levelOf, xpFor } from '../cosmetics.js';
 import { iconCanvas } from '../art.js';
 import { isMuted, setMuted, unlockAudio, isMusicOn, setMusicOn } from '../audio.js';
 
@@ -16,6 +17,15 @@ export function renderMe() {
   $('#coin-chip').classList.toggle('guest', !w);
   $('#me-dot').style.background = progress.data.equip.color;
   $('#me-name').textContent = session.user ? session.user.name : 'Log in';
+  $('#me-lvl').hidden = !w; if (w) $('#me-lvl').textContent = `Lv ${levelOf(w.xp)}`;
+}
+// A level-up gets a party.
+let lastLevel = 0;
+function levelCheck(w) {
+  if (!w || !session.user) return;
+  const lv = levelOf(w.xp);
+  if (lastLevel && lv > lastLevel) { toast(`LEVEL UP! You're level ${lv} now!`, 'toast-ach'); import('../audio.js').then((a) => a.sfx && a.sfx('win')).catch(() => {}); }
+  lastLevel = lv;
 }
 $('#coin-icon').append((() => { const cv = document.createElement('canvas'); const dpr = Math.min(2, devicePixelRatio || 1); cv.width = cv.height = 22 * dpr; cv.style.width = cv.style.height = '22px'; const c = cv.getContext('2d'); c.scale(dpr * 22 / 32, dpr * 22 / 32); drawTile(c, 'o', 0, 0, () => '.', 0, 'meadow', 'icon'); return cv; })());
 
@@ -60,6 +70,7 @@ export async function startSession() {
   if (r) {
     session.user = r.user;
     progress.use(r.user.id, r);
+    lastLevel = levelOf(r.wallet && r.wallet.xp);
     remember();
     claimProofs();
   } else progress.use(null);
@@ -95,8 +106,8 @@ export async function switchTo(acc) {
   toast(`You're playing as ${r.user.name} now.`);
 }
 // Wallet changed on the server (bought, sold, traded, earned).
-export function setWallet(w) { if (w) { progress.setWallet(w); renderMe(); } }
-export async function refreshWallet() { if (!session.user) return; try { const r = await api.me(); progress.setAccount(r); renderMe(); } catch (e) { /* later */ } }
+export function setWallet(w) { if (w) { progress.setWallet(w); levelCheck(w); renderMe(); } }
+export async function refreshWallet() { if (!session.user) return; try { const r = await api.me(); progress.setAccount(r); levelCheck(r.wallet); renderMe(); } catch (e) { /* later */ } }
 
 // Runs finished as a guest get checked by the server now, and pay out for real.
 async function claimProofs() {
@@ -183,6 +194,9 @@ export function openAccount(mode, name) {
       $('#acct-user').textContent = session.user.name;
       const w = progress.wallet;
       $('#acct-sum').textContent = `${progress.totalStars()} stars, ${w ? w.coins : 0} coins, ${Object.keys(progress.data.ach).length} badges`;
+      const xp = w ? w.xp || 0 : 0, lv = levelOf(xp), a = xpFor(lv), b = xpFor(lv + 1);
+      $('#acct-xp-fill').style.width = `${Math.round((xp - a) / (b - a) * 100)}%`;
+      $('#acct-xp-text').textContent = `Level ${lv}: ${xp - a} / ${b - a} XP to level ${lv + 1}. Every coin you earn playing is 1 XP.`;
       $('#acct-admin').hidden = !session.user.admin;
       $('#acct-in-msg').textContent = '';
       $('#acct-pip').replaceWith(Object.assign(pipCanvas(56), { id: 'acct-pip' }));

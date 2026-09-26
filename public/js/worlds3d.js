@@ -47,14 +47,20 @@ export const PLAZA = make({ id: 'plaza', name: 'Blockyard Plaza', mode: 'hangout
   // dance stage
   box(76, 1, 76, 85, 1, 85, B.wood); box(76, 1, 76, 85, 1, 76, B.neon, 11); box(76, 1, 85, 85, 1, 85, B.neon, 9);
   box(76, 1, 77, 76, 1, 84, B.neon, 10); box(85, 1, 77, 85, 1, 84, B.neon, 6);
-  // bounce tower lookout
-  box(36, 1, 78, 38, 1, 80, B.bounce); box(34, 7, 84, 40, 7, 90, B.plastic, 9); box(36, 8, 86, 38, 8, 88, B.bounce);
-  box(35, 14, 92, 39, 14, 96, B.plastic, 6);
-  for (let i = 0; i < 4; i++) box(34 + i * 2, 15, 92, 34 + i * 2, 15, 92, B.neon, [4, 6, 7, 9][i]);
-  // a little parkour loop with colored blocks
-  const hops = [[86, 2, 36], [89, 3, 38], [92, 4, 36], [94, 5, 33], [91, 6, 30], [87, 7, 31], [84, 8, 33]];
+  // bounce tower lookout: a bounce pad takes you about 5 blocks up, so each level is 4 higher
+  box(36, 1, 78, 38, 1, 80, B.bounce);
+  box(34, 4, 82, 40, 4, 87, B.plastic, 9); box(36, 4, 84, 38, 4, 85, B.bounce);
+  box(34, 8, 89, 40, 8, 95, B.plastic, 6);
+  for (let i = 0; i < 4; i++) set(34 + i * 2, 9, 95, B.neon, [4, 6, 7, 9][i]);
+  set(39, 8, 93, B.teleport, 3); set(42, 1, 80, B.teleport, 3); // a way back down (and back up)
+  set(35, 9, 90, B.coin);
+  // a parkour loop with colored blocks, one block higher each hop (you can jump a bit less than 2)
+  const hops = [[86, 1, 40], [89, 2, 38], [92, 3, 36], [94, 4, 33], [91, 5, 30], [88, 6, 31], [85, 7, 33]];
   hops.forEach(([x, y, z], i) => box(x, y, z, x + 1, y, z + 1, B.plastic, [5, 6, 7, 8, 9, 10, 11][i]));
-  box(80, 8, 30, 83, 8, 36, B.plastic, 0);
+  box(79, 8, 31, 83, 8, 36, B.plastic, 0); set(81, 9, 33, B.coin); set(80, 8, 35, B.teleport, 10); set(84, 1, 44, B.teleport, 10);
+  // an elevator up to a lookout over the square
+  box(44, 0, 46, 45, 0, 47, B.moveY, 7); box(46, 4, 44, 51, 4, 49, B.wood); set(49, 5, 46, B.coin);
+  for (let x = 46; x <= 51; x++) { set(x, 5, 44, B.wood); set(x, 5, 49, B.wood); }
   // low fence
   for (let x = 28; x <= 99; x++) { if (x < 61 || x > 66) { set(x, 1, 28, B.wood); set(x, 1, 99, B.wood); } }
   for (let z = 28; z <= 99; z++) { if (z < 61 || z > 66) { set(28, 1, z, B.wood); set(99, 1, z, B.wood); } }
@@ -131,5 +137,55 @@ export const LAVA = make({ id: 'lava', name: 'Lava Lake', mode: 'obby', sky: 'ni
   for (let x = 24; x <= 100; x += 8) { set(x, 1, 53, B.neon, 11); set(x, 1, 75, B.neon, 8); }
 });
 
-export const WORLDS3D = [PLAZA, SUNNY, TOWER, LAVA];
+// Harder obbies that use the newer blocks. `way` entries can be { ride: [x, y, z, axis], exit: [x, y, z] }
+// for a moving platform: the bot waits for it, rides it, and gets off at `exit`.
+export const FACTORY = make({ id: 'factory', name: 'Conveyor Chaos', mode: 'obby', sky: 'sunset', reward: 150, blurb: 'Conveyor belts, a moving bridge, pick the right teleporter, an elevator, and stairs that push back.' }, ({ box, coin, set, way }) => {
+  box(10, 0, 40, 118, 0, 88, B.lava);
+  box(12, 0, 60, 17, 3, 68, B.stone); set(14, 3, 64, B.spawn); way.push([14.5, 4, 64.5]);
+  // belts that push you sideways
+  for (let x = 18; x <= 33; x++) box(x, 3, 60, x, 3, 68, Math.floor((x - 18) / 4) % 2 ? B.beltN : B.beltS);
+  box(18, 0, 60, 33, 2, 68, B.stone);
+  coin(21, 5, 62); coin(25, 5, 66); coin(29, 5, 62); way.push([33.5, 4, 64.5]);
+  box(34, 0, 61, 38, 3, 67, B.stone); set(36, 3, 64, B.checkpoint); way.push([36.5, 4, 64.5]);
+  // a moving bridge
+  box(39, 3, 63, 40, 3, 64, B.moveX, 9); way.push({ ride: [40, 3, 64, 0], exit: [46.5, 4, 64.5] });
+  box(45, 0, 61, 49, 3, 67, B.stone); coin(47, 5, 62);
+  // three teleporters: only blue goes on
+  set(49, 3, 62, B.teleport, 4); set(49, 3, 64, B.teleport, 9); set(49, 3, 66, B.teleport, 6);
+  box(28, 0, 78, 32, 7, 82, B.stone); set(30, 7, 80, B.teleport, 4); coin(31, 9, 81);
+  box(28, 0, 46, 32, 7, 50, B.stone); set(30, 7, 48, B.teleport, 6); coin(31, 9, 47);
+  way.push([48.5, 4, 64.5]); way.push([49.5, 4, 64.5]);
+  box(54, 0, 60, 60, 3, 68, B.stone); set(56, 3, 64, B.teleport, 9); way.push([58.5, 4, 64.5]);
+  set(58, 3, 62, B.checkpoint); way.push([58.5, 4, 62.5]); way.push([59.5, 4, 64.5]);
+  // an elevator
+  box(61, 3, 63, 62, 3, 64, B.moveY, 11); way.push({ ride: [62, 3, 64, 1], exit: [65.5, 8, 64.5] });
+  box(63, 0, 61, 68, 7, 67, B.stone); set(66, 7, 64, B.checkpoint); coin(66, 9, 64);
+  // stairs that push you back
+  for (let i = 0; i < 4; i++) { box(69 + i * 2, 0, 62, 70 + i * 2, 8 + i, 66, B.stone); box(69 + i * 2, 8 + i, 62, 70 + i * 2, 8 + i, 66, B.beltW); way.push([70 + i * 2, 9 + i, 64.5]); }
+  coin(74, 13, 64);
+  box(79, 0, 61, 84, 11, 67, B.stone); box(79, 11, 61, 84, 11, 67, B.grass); way.push([80.5, 12, 64.5]);
+  set(82, 12, 64, B.goal); way.push([82.5, 12, 64.5]);
+});
+
+export const SKY = make({ id: 'sky', name: 'Sky Gauntlet', mode: 'obby', sky: 'night', reward: 250, blurb: 'The hardest one. Tiny blocks in the sky, a moving platform, ice, crumbling blocks, a bounce and an elevator. Nothing underneath.' }, ({ box, coin, set, way }) => {
+  box(10, 20, 60, 15, 20, 68, B.stone); set(12, 20, 64, B.spawn); way.push([12.5, 21, 64.5]);
+  // one-block hops
+  [[18, 20], [21, 20], [24, 20], [27, 21], [30, 21]].forEach(([x, y], i) => { set(x, y, 64, B.plastic, [5, 6, 7, 8, 9][i]); way.push([x + 0.5, y + 1, 64.5]); if (i % 2 === 0) coin(x, y + 2, 64); });
+  box(33, 21, 62, 36, 21, 66, B.stone); set(35, 21, 64, B.checkpoint); way.push([35.5, 22, 64.5]);
+  box(37, 21, 63, 38, 21, 64, B.moveX, 11); way.push({ ride: [38, 21, 64, 0], exit: [43.5, 22, 64.5] });
+  box(43, 21, 63, 44, 21, 65, B.stone);
+  box(45, 21, 64, 52, 21, 64, B.ice); coin(48, 22, 64); coin(51, 22, 64); way.push([52.5, 22, 64.5]);
+  box(53, 21, 64, 58, 21, 64, B.crumble); way.push([58.5, 22, 64.5]);
+  box(59, 21, 62, 62, 21, 66, B.stone); set(60, 21, 64, B.checkpoint); way.push([60.5, 22, 64.5]);
+  // bounce up to a higher platform
+  box(63, 21, 63, 65, 21, 65, B.bounce); way.push([63.5, 22, 64.5]);
+  box(69, 25, 62, 73, 25, 66, B.stone); set(71, 25, 64, B.checkpoint); coin(71, 27, 66); way.push([71.5, 26, 64.5]);
+  // elevator
+  box(74, 25, 63, 75, 25, 64, B.moveY, 7); way.push({ ride: [75, 25, 64, 1], exit: [78.5, 30, 64.5] });
+  box(76, 29, 62, 80, 29, 66, B.stone); coin(78, 31, 62);
+  box(83, 29, 62, 87, 29, 66, B.grass); way.push([84.5, 30, 64.5]);
+  set(85, 30, 64, B.goal); way.push([85.5, 30, 64.5]);
+});
+
+export const WORLDS3D = [PLAZA, SUNNY, TOWER, LAVA, FACTORY, SKY];
 export const builtinWorld = (id) => WORLDS3D.find((w) => w.id === id) || null;

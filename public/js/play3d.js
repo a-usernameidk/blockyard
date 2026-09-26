@@ -1,9 +1,9 @@
 // Playing a 3D world: your Pip, the camera, other players, chat, emotes, coins, checkpoints and the goal.
 import { createRenderer, M4, hexRGB } from './gl.js';
-import { decodeBlocks, Grid, BLOCKS, B, SX, SY, SZ } from './world.js';
-import { createSim, step3, STEP3, packInput, yawIndex, KEY, P3 } from './physics3d.js';
+import { decodeBlocks, Grid, BLOCKS, B, SX, SY, SZ, PALETTE } from './world.js';
+import { createSim, step3, STEP3, packInput, yawIndex, KEY, P3, moverOffset } from './physics3d.js';
 import { encodeReplay } from './replay.js';
-import { avatarParts, TRAIL3D, EMOTES } from './avatar3d.js';
+import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
 import { openRoom } from './net.js';
 import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
 import { store } from './api.js';
@@ -35,6 +35,19 @@ export function startWorld(root, opts) {
   const viewGrid = decodeBlocks(world.b);
   const obby = world.mode !== 'hangout';
   let S = createSim(world, physGrid);
+  // moving platforms are drawn separately (they don't stay in one place)
+  const moverDraw = S.info.movers.map(([x, y, z, t, c]) => ({ x, y, z, axis: BLOCKS[t].mover, color: hexRGB(PALETTE[c & 15]) }));
+  for (const m of moverDraw) viewGrid.set(m.x, m.y, m.z, 0);
+  // pets follow their owner around
+  const petFollow = (pet, x, y, z, face, dt) => {
+    const bx = x - Math.sin(face) * 1.0 + Math.cos(face) * 0.7, bz = z - Math.cos(face) * 1.0 - Math.sin(face) * 0.7;
+    if (!pet.x || Math.hypot(pet.x - x, pet.z - z) > 8 || Math.abs(pet.y - y) > 6) { pet.x = bx; pet.y = y; pet.z = bz; pet.yaw = face; }
+    const dx = bx - pet.x, dz = bz - pet.z, d = Math.hypot(dx, dz);
+    pet.x += dx * Math.min(1, dt * 5); pet.z += dz * Math.min(1, dt * 5); pet.y += (y - pet.y) * Math.min(1, dt * 8);
+    pet.moving = d > 0.15;
+    if (pet.moving) pet.yaw = Math.atan2(dx, dz); else { let a = face - pet.yaw; a = Math.atan2(Math.sin(a), Math.cos(a)); pet.yaw += a * Math.min(1, dt * 3); }
+  };
+  const myPet = {};
   // in hangouts, don't pile everyone onto the exact same spot
   const scatter = () => {
     if (obby) return;
@@ -247,7 +260,7 @@ export function startWorld(root, opts) {
   }
   function addPlayer(p) {
     if (others.has(p.id)) return;
-    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.name), h('span', { class: 'w3-bubble', hidden: true }));
+    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.name), h('span', { class: 'w3-bubble', hidden: true }));
     tags.append(tag);
     others.set(p.id, { ...p, snaps: p.p ? [{ t: performance.now(), p: p.p, r: p.r || 0, a: p.a || 0 }] : [], tag, walk: 0, bubbleUntil: 0, emote: null, et: 0, trailT: 0 });
     renderList();
@@ -314,7 +327,7 @@ export function startWorld(root, opts) {
     try { await navigator.clipboard.writeText(url); toast('Invite link copied! Send it to a friend.', 2.4); }
     catch (e) { addLine(null, 'Invite link: ' + url, null, true); }
   }
-  const myTag = h('div', { class: 'w3-tag me' }, h('span', { class: 'w3-name' }, (opts.me && opts.me.name) || 'You'), h('span', { class: 'w3-bubble', hidden: true }));
+  const myTag = h('div', { class: 'w3-tag me' }, h('span', { class: 'w3-name' }, opts.me && opts.me.lvl ? h('span', { class: 'lvl' }, `Lv ${opts.me.lvl}`) : null, (opts.me && opts.me.name) || 'You'), h('span', { class: 'w3-bubble', hidden: true }));
   const myBubble = myTag.querySelector('.w3-bubble');
   let myBubbleUntil = 0;
   tags.append(myTag);
@@ -459,6 +472,11 @@ export function startWorld(root, opts) {
     const air = !S.onGround && S.air > 4;
     avatarParts({ x: px, y: py, z: pz, yaw: facing, walk, move: Math.min(1, hv / P3.speed), air, emote: emoteNow, et: emoteAt, t: clock, look }, scene);
     shadow(scene, px, py, pz);
+    if (look.pet && look.pet !== 'none') { petFollow(myPet, px, py, pz, facing, dt); petParts(look.pet, myPet.x, myPet.y, myPet.z, myPet.yaw, clock, myPet.moving ? Math.abs(Math.sin(clock * 10)) : 0, scene); }
+    if (moverDraw.length) {
+      const off = moverOffset(Math.max(0, S.steps - 1 + k));
+      for (const m of moverDraw) scene.push({ prim: 'cube', color: m.color, glow: 0.12, m: M4.trs(m.x + 0.5 + (m.axis === 0 ? off : 0), m.y + 0.5 + (m.axis === 1 ? off : 0), m.z + 0.5 + (m.axis === 2 ? off : 0), 0, 0, 0, 1.0, 1.0, 1.0) });
+    }
     const nowMs = performance.now();
     for (const o of others.values()) {
       const st = sampled(o, nowMs - 130);
@@ -469,6 +487,7 @@ export function startWorld(root, opts) {
       if (o.emote) o.et += dt;
       avatarParts({ x: st.p[0], y: st.p[1], z: st.p[2], yaw: st.r, walk: o.walk, move: oMove ? 1 : 0, air: oAir, emote: o.emote, et: o.et, t: clock, look: o.look }, scene);
       shadow(scene, st.p[0], st.p[1], st.p[2]);
+      if (o.look && o.look.pet && o.look.pet !== 'none') { o.pet = o.pet || {}; petFollow(o.pet, st.p[0], st.p[1], st.p[2], st.r, dt); petParts(o.look.pet, o.pet.x, o.pet.y, o.pet.z, o.pet.yaw, clock, o.pet.moving ? Math.abs(Math.sin(clock * 10)) : 0, scene); }
       o.trailT -= dt;
       if (o.trailT <= 0 && o.look && o.look.trail !== 'none') { o.trailT = 0.08; trailFor({ x: st.p[0], y: st.p[1], z: st.p[2] }, o.look.trail, oMove || oAir); }
       o.pos = st.p;

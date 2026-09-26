@@ -14,7 +14,7 @@ import { builtinWorld } from '../public/js/worlds3d.js';
 import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
 import { findItem } from '../public/js/cosmetics.js';
-import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool } from './econ.js';
+import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool, ECON_COLUMNS, questBumps } from './econ.js';
 export { Room } from './room.js';
 
 const PAGE = 24;
@@ -91,6 +91,7 @@ function ensureSchema(db) {
     ready = (async () => {
       await db.batch(SCHEMA.map((s) => db.prepare(s)));
       for (const c of COLUMNS) { try { await db.prepare(c).run(); } catch (e) { /* already there */ } }
+      for (const [c, once] of ECON_COLUMNS) { let added = false; try { await db.prepare(c).run(); added = true; } catch (e) { /* already there */ } if (added) await db.prepare(once).run(); }
       await db.batch([
         db.prepare('CREATE INDEX IF NOT EXISTS games_user ON games (user_id, created_at)'),
         db.prepare('CREATE INDEX IF NOT EXISTS games_list ON games (kind, visibility, hidden, created_at DESC)'),
@@ -248,7 +249,7 @@ async function addEvent(db, kind, who) {
     db.prepare('DELETE FROM events WHERE at < ?').bind(now - 2 * DAY),
   ]);
 }
-const lookOf = (text) => { try { const l = JSON.parse(text || '{}'); return { color: /^#[0-9a-f]{6}$/i.test(l.color) ? l.color : DEFAULT_LOOK.color, hat: String(l.hat || 'none').slice(0, 20), trail: String(l.trail || 'none').slice(0, 20) }; } catch (e) { return { ...DEFAULT_LOOK }; } };
+const lookOf = (text) => { try { const l = JSON.parse(text || '{}'); return { color: /^#[0-9a-f]{6}$/i.test(l.color) ? l.color : DEFAULT_LOOK.color, hat: String(l.hat || 'none').slice(0, 20), trail: String(l.trail || 'none').slice(0, 20), pet: String(l.pet || 'none').slice(0, 20) }; } catch (e) { return { ...DEFAULT_LOOK }; } };
 
 /* ---------------- accounts ---------------- */
 async function sessionUser(db, request, env) {
@@ -787,7 +788,7 @@ async function joinPlay(ctx, input) {
   const u = await db.prepare('SELECT look FROM users WHERE id = ?').bind(user.id).first();
   const w = await getWallet(db, user.id);
   const look = cleanLook(lookOf(u && u.look), w.items);
-  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, a: user.admin, w: world.id, c: code, x: now + 20e3 });
+  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, a: user.admin, w: world.id, c: code, x: now + 20e3 });
   return json({ ticket, code, world, private: priv });
 }
 async function joinEdit(ctx, input) {
@@ -808,7 +809,7 @@ async function connectRoom(request, env, url) {
   const p = await readTicket(await roomSecret(env), url.searchParams.get('t'));
   if (!p) fail(401, 'That ticket expired. Join again.');
   const headers = new Headers(request.headers);
-  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, admin: !!p.a, world: p.w, code: p.c, project: p.p }));
+  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, admin: !!p.a, world: p.w, code: p.c, project: p.p }));
   return env.ROOMS.get(env.ROOMS.idFromName(p.r)).fetch(new Request(request, { headers }));
 }
 async function kickEverywhere(env, db, uid, why) {
@@ -852,7 +853,7 @@ async function postDaily(ctx, input) {
     .bind(date, user.id, progress, run.won ? 1 : 0, Date.now())];
   const earned = run.won && !(before && before.won) ? REWARD.dailyWin : 0;
   // the claim row makes sure two runs sent at the same moment can't both pay
-  if (earned) stmts.push(db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(user.id, 'd:' + date, Date.now()), ...coinStmts(db, user.id, earned, 'run daily'));
+  if (earned) stmts.push(db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(user.id, 'd:' + date, Date.now()), ...coinStmts(db, user.id, earned, 'run daily'), ...questBumps(db, user.id, { daily: 1 }));
   try { await db.batch(stmts); } catch (e) { if (isConstraint(e)) return json({ ok: true, progress, won: run.won, earned: 0 }); throw e; }
   return json({ ok: true, progress, won: run.won, earned, wallet: earned ? await getWallet(db, user.id) : undefined });
 }
