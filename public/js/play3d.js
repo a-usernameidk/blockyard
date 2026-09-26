@@ -215,7 +215,7 @@ export function startWorld(root, opts) {
   const others = new Map();
   let myId = null, room = null, lastSend = 0, lastSent = '', online = false;
   function addLine(who, text, color, sys) {
-    const li = h('li', { class: sys ? 'sys' : '' });
+    const li = h('li', { class: sys === 'big' ? 'sys big' : sys ? 'sys' : '' });
     if (who) li.append(h('b', { style: color ? `color:${color}` : null }, who + ': '));
     li.append(text);
     log.append(li);
@@ -279,7 +279,7 @@ export function startWorld(root, opts) {
       }
       case 'emote': { const o = others.get(m.id); if (o) { o.emote = m.e; o.et = 0; } break; }
       case 'look': { const o = others.get(m.id); if (o) { o.look = m.look; renderList(); } break; }
-      case 'sys': addLine(null, m.m, null, true); break;
+      case 'sys': addLine(null, m.m, null, m.big ? 'big' : true); break;
       case 'kicked': case 'full': case 'error': showMsg(m.m, true); break;
     }
   }
@@ -478,8 +478,8 @@ export function startWorld(root, opts) {
     } else { hudTime.textContent = ''; hudCoins.textContent = S.totalCoins ? `Coins ${S.coins}/${S.totalCoins}` : ''; hudDeaths.textContent = ''; }
     for (const li of log.children) li.classList.toggle('old', nowMs - Number(li.dataset.at) > 12000);
 
-    // tell the room where I am (8 times a second, only when something changed)
-    if (room && online && myId && nowMs - lastSend > 125) {
+    // tell the room where I am (about 6 times a second, only when something changed)
+    if (room && online && myId && nowMs - lastSend > 150) {
       const a = (moving ? 1 : 0) | (air ? 2 : 0) | ((emoteNow ? EMOTES.indexOf(emoteNow) + 1 : 0) << 2);
       const st = [Math.round(px * 100) / 100, Math.round(py * 100) / 100, Math.round(pz * 100) / 100, Math.round(facing * 100) / 100, a];
       const key = st.join(',');

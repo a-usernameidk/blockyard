@@ -20,8 +20,17 @@ export async function loadOnline(force) {
   const dot = $('#nav-online');
   dot.hidden = !online.total; dot.textContent = online.total ? String(online.total) : '';
   dot.title = online.total ? `${plural(online.total, 'player')} in worlds right now` : '';
+  showAnnounce(online.announce || '');
   return online;
 }
+// The admin's message across the top of the site. Hiding it hides only that message.
+export function showAnnounce(text, force) {
+  const box = $('#announce');
+  if (force) store.set('announce-hidden', '');
+  $('#announce-text').textContent = text;
+  box.hidden = !text || store.get('announce-hidden', '') === text;
+}
+$('#announce-x').addEventListener('click', () => { store.set('announce-hidden', $('#announce-text').textContent); $('#announce').hidden = true; });
 
 /* ---------------- cards ---------------- */
 const builtinThumbs = new Map();

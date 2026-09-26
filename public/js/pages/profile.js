@@ -6,6 +6,7 @@ import { ACHIEVEMENTS } from '../progress.js';
 import { itemPreview } from './closet.js';
 import { publishedCard } from './play.js';
 import { playerWorldCard } from './worlds.js';
+import { manageUser } from './admin.js';
 
 async function showProfile(name) {
   show('profile', '');
@@ -26,7 +27,9 @@ async function showProfile(name) {
         u.playing ? el('p', { class: 'playing' }, el('span', { class: 'live-dot' }), `Playing ${u.playing.name || 'a player world'} right now`) : null,
         el('div', { class: 'row' },
           !me ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => (session.user ? go('#/closet/trade/' + u.name) : needLogin('Trading needs an account.')) }, 'Trade with them') : el('button', { class: 'btn', type: 'button', 'data-go': '#/closet' }, 'Change my look'),
-          u.playing && u.playing.code && !me ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + u.playing.code) }, 'Join them') : null))),
+          u.playing && u.playing.code && !me ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + u.playing.code) }, 'Join them') : null),
+        session.user && session.user.admin ? el('div', { class: 'admin-strip row' }, el('b', {}, 'Admin'),
+          el('button', { class: 'btn btn-sun', type: 'button', onclick: () => manageUser(u.name) }, me ? 'Give myself coins or items' : 'Coins, items, kick, ban…')) : null)),
     badges.length ? el('h2', {}, 'Badges') : null,
     badges.length ? el('div', { class: 'chips' }, ...badges.map((b) => el('span', { class: 'chip', title: b.text }, b.name))) : null,
     el('h2', {}, 'Closet'),

@@ -154,7 +154,7 @@ function renderCaption() {
   if (owned && w && canTrade(item) && (w.items[key] || 0) > 0) buttons.push(el('button', { class: 'btn btn-danger', type: 'button', onclick: () => sell(key, item) }, `Sell for ${sellPrice(item)}`));
   if (!owned) {
     if (!w) buttons.push(el('button', { class: 'btn btn-sun', type: 'button', onclick: () => openAccount() }, 'Log in to buy'));
-    else if (item.need) buttons.push(progress.canUnlock(item) || true ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item) }, 'Unlock it') : null);
+    else if (item.need) buttons.push(progress.canUnlock(item) ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item) }, 'Unlock it') : el('button', { class: 'btn', type: 'button', disabled: true }, 'Locked'));
     else {
       const price = dealPrice(key, item), left = item.stock && shopInfo ? shopInfo.stock[key] : null;
       const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item) }, `Buy for ${price} coins`);

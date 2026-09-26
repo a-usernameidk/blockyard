@@ -39,6 +39,11 @@ export class Room {
       }
       return json({ ok: true, kicked: n });
     }
+    if (url.pathname === '/announce') {
+      const m = cleanChat(url.searchParams.get('m'));
+      if (m) this.broadcast({ t: 'sys', m: 'Announcement: ' + m, big: true });
+      return json({ ok: true });
+    }
     if (url.pathname === '/count') return json({ players: this.state.getWebSockets().length });
     if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'Expected a WebSocket.' }, 426);
 
@@ -61,6 +66,7 @@ export class Room {
     server.serializeAttachment(me);
 
     if (me.kind === 'edit') {
+      if (!live.length && !this.dirty) this.doc = null; // first builder in: read the newest saved copy
       try { await this.loadDoc(me.project); } catch (e) { send(server, { t: 'error', m: 'Could not open this project.' }); server.close(4004, 'no project'); return new Response(null, { status: 101, webSocket: client }); }
     }
     await this.loadLog();
@@ -73,9 +79,10 @@ export class Room {
 
   async webSocketMessage(ws, raw) {
     const me = att(ws);
-    if (!me || typeof raw !== 'string' || raw.length > 200000) return;
+    if (!me || me.left || typeof raw !== 'string' || raw.length > 200000) return;
     let msg;
     try { msg = JSON.parse(raw); } catch (e) { return; }
+    if (!msg || typeof msg !== 'object') return;
     const lim = this.limits(me.id);
     switch (msg.t) {
       case 'st': { // where I am: position, facing, animation
@@ -163,7 +170,7 @@ export class Room {
     this.pos.delete(me.id);
     this.rate.delete(me.id);
     this.broadcast({ t: 'leave', id: me.id }, ws);
-    if (me.kind === 'play') await this.presence(me, false);
+    if (me.kind === 'play') await this.presence(me, false, ws);
     if (me.kind === 'edit' && this.alive(ws).length === 0) await this.flush();
   }
   async alarm() {
@@ -183,7 +190,9 @@ export class Room {
     try { ws.serializeAttachment(a); } catch (e) { /* closed */ }
     try { ws.close(code, 'bye'); } catch (e) { /* gone */ }
     this.pos.delete(a.id);
+    this.rate.delete(a.id);
     this.broadcast({ t: 'leave', id: a.id }, ws);
+    if (a.kind === 'play') this.presence(a, false, ws);
   }
   alive(except) { return this.state.getWebSockets().filter((ws) => ws !== except && att(ws) && !att(ws).left); }
   broadcast(msg, except) {
@@ -195,10 +204,10 @@ export class Room {
     if (!l) { l = { chat: [], ops: [], reports: 0, saved: 0 }; this.rate.set(id, l); }
     return l;
   }
-  async presence(me, here) {
+  async presence(me, here, except) {
     const db = this.env.DB;
     if (!db || !me.code) return;
-    const n = this.alive().length, now = Date.now();
+    const n = this.alive(except).length, now = Date.now();
     try {
       await db.batch([
         db.prepare('UPDATE servers SET players = ?, updated = ? WHERE code = ?').bind(n, now, me.code),
@@ -218,10 +227,10 @@ export class Room {
     if (row.kind === '3d') {
       let grid;
       try { grid = decodeBlocks(String(data.b || '')); } catch (e) { grid = new Grid(); }
-      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[data.sky] ? data.sky : 'day' }, grid };
+      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day' }, grid };
     } else {
       const lv = { n: row.name, style: 'adventure', theme: 'meadow', form: 'hopper', speed: '~', w: 48, h: 12, d: '', ...data };
-      this.doc = { id: row.id, kind: '2d', meta: { n: cleanText(lv.n, LIMITS.name) || row.name, style: lv.style === 'rush' ? 'rush' : 'adventure', theme: THEMES.includes(lv.theme) ? lv.theme : 'meadow', form: FORMS.includes(lv.form) ? lv.form : 'hopper', speed: lv.speed in SPEED_NAMES ? lv.speed : '~' }, w: lv.w | 0, h: lv.h | 0, a: String(lv.d || '').split('') };
+      this.doc = { id: row.id, kind: '2d', meta: { n: cleanText(lv.n, LIMITS.name) || row.name, style: lv.style === 'rush' ? 'rush' : 'adventure', theme: THEMES.includes(lv.theme) ? lv.theme : 'meadow', form: FORMS.includes(lv.form) ? lv.form : 'hopper', speed: Object.hasOwn(SPEED_NAMES, lv.speed) ? lv.speed : '~' }, w: lv.w | 0, h: lv.h | 0, a: String(lv.d || '').split('') };
       if (this.doc.a.length !== this.doc.w * this.doc.h) { this.doc.w = 48; this.doc.h = 12; this.doc.a = Array(48 * 12).fill('.'); }
     }
   }
@@ -240,12 +249,12 @@ export class Room {
       if (typeof op.f.n === 'string') { const n = cleanText(op.f.n, 40); if (n) f.n = n; }
       if (d.kind === '3d') {
         if (op.f.mode === 'obby' || op.f.mode === 'hangout') f.mode = op.f.mode;
-        if (SKIES[op.f.sky]) f.sky = op.f.sky;
+        if (Object.hasOwn(SKIES, op.f.sky)) f.sky = op.f.sky;
       } else {
         if (op.f.style === 'rush' || op.f.style === 'adventure') f.style = op.f.style;
         if (THEMES.includes(op.f.theme)) f.theme = op.f.theme;
         if (FORMS.includes(op.f.form)) f.form = op.f.form;
-        if (op.f.speed in SPEED_NAMES) f.speed = op.f.speed;
+        if (typeof op.f.speed === 'string' && Object.hasOwn(SPEED_NAMES, op.f.speed)) f.speed = op.f.speed;
       }
       if (!Object.keys(f).length) return null;
       Object.assign(d.meta, f);
@@ -295,7 +304,12 @@ export class Room {
     const { kind, ...data } = out;
     try {
       await this.env.DB.prepare('UPDATE projects SET data = ?, name = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(data), out.n, Date.now(), this.doc.id).run();
-    } catch (e) { this.dirty = true; }
+    } catch (e) {
+      // didn't save: try again in a few seconds
+      this.dirty = true;
+      this.saveAt = Date.now() + SAVE_DELAY * 3;
+      try { await this.state.storage.setAlarm(this.saveAt); } catch (e2) { /* next change will retry */ }
+    }
   }
 
   /* ---------- checking runs ---------- */

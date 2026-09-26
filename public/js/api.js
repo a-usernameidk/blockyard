@@ -49,10 +49,30 @@ export function isOnline() {
   return onlineCheck;
 }
 
+// This tab only (for "don't keep me logged in"): gone when the tab closes.
+const tab = {
+  get(k) { try { return sessionStorage.getItem(PREFIX + k) || ''; } catch (e) { return ''; } },
+  set(k, v) { try { if (v) sessionStorage.setItem(PREFIX + k, v); else sessionStorage.removeItem(PREFIX + k); } catch (e) { /* blocked */ } },
+};
 // The login token for this browser (empty for guests).
 export const auth = {
-  get token() { return store.get('token', ''); },
-  set token(t) { store.set('token', t || ''); },
+  get token() { return tab.get('token') || store.get('token', ''); },
+  set token(t) { if (!t) { tab.set('token', ''); store.set('token', ''); } else if (tab.get('token')) tab.set('token', t); else store.set('token', t); },
+  // keep: remember it on this computer. Otherwise only this tab knows it.
+  use(t, keep) { if (keep) { tab.set('token', ''); store.set('token', t); } else { store.set('token', ''); tab.set('token', t); } },
+  get kept() { return !tab.get('token') && !!store.get('token', ''); },
+};
+
+// Accounts saved on this computer, for switching between them without typing a password.
+export const accounts = {
+  list() { const a = store.get('accounts', []); return Array.isArray(a) ? a.filter((x) => x && x.id && x.name && x.token) : []; },
+  save({ id, name, token, color }) {
+    const all = this.list().filter((a) => a.id !== id);
+    all.unshift({ id, name, token, color: color || '#ff6b35', at: Date.now() });
+    store.set('accounts', all.slice(0, 8));
+  },
+  update(id, fields) { store.set('accounts', this.list().map((a) => (a.id === id ? { ...a, ...fields } : a))); },
+  remove(id) { store.set('accounts', this.list().filter((a) => a.id !== id)); },
 };
 
 async function request(method, path, body, headers = {}, wait = 12000) {
@@ -81,11 +101,13 @@ async function request(method, path, body, headers = {}, wait = 12000) {
 const enc = encodeURIComponent;
 const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== '' && v != null)).toString();
 export const api = {
-  signup: (name, password, progress) => request('POST', '/auth/signup', { name, password, progress }),
-  login: (name, password) => request('POST', '/auth/login', { name, password }),
-  recover: (name, recovery, password) => request('POST', '/auth/recover', { name, recovery, password }),
+  signup: (name, password, progress, remember = true) => request('POST', '/auth/signup', { name, password, progress, remember }),
+  login: (name, password, remember = true) => request('POST', '/auth/login', { name, password, remember }),
+  recover: (name, recovery, password, remember = true) => request('POST', '/auth/recover', { name, recovery, password, remember }),
   logout: () => request('POST', '/auth/logout'),
   me: () => request('GET', '/me'),
+  // switching to a saved account: check its login still works, and move the saved-login cookie to it
+  meAs: (token) => request('GET', '/me', null, { authorization: 'Bearer ' + token, 'x-remember': '1' }),
   deleteMe: () => request('DELETE', '/me'),
   saveProgress: (progress) => request('PUT', '/me/progress', { progress }),
   myGames: () => request('GET', '/me/games'),
@@ -103,6 +125,10 @@ export const api = {
   daily: (date) => request('GET', `/daily?date=${enc(date)}`),
   postDaily: (date, replay) => request('POST', '/daily', { date, replay }),
   admin: (method, path, body) => request(method, '/admin' + path, body),
+  adminUser: (name) => request('GET', `/admin/users/${enc(name)}`),
+  adminAct: (name, action, extra = {}) => request('POST', `/admin/users/${enc(name)}`, { action, ...extra }),
+  announce: (text) => request('POST', '/admin/announce', { text }),
+  setStock: (item, left) => request('POST', '/admin/stock', { item, left }),
   // coins, closet, trades
   look: (look) => request('PUT', '/me/look', look),
   shop: () => request('GET', '/shop'),

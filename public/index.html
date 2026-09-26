@@ -28,6 +28,7 @@
     <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Log in</span></button>
   </div>
 </header>
+<div class="announce" id="announce" role="status" hidden><span class="announce-tag">News</span><span id="announce-text"></span><button class="announce-x" id="announce-x" type="button" aria-label="Hide this message">&times;</button></div>
 
 <main>
 <!-- ============ HOME ============ -->
@@ -305,6 +306,7 @@
     <button class="tab" role="tab" data-atab="chat">Chat reports</button>
     <button class="tab" role="tab" data-atab="games">Games</button>
     <button class="tab" role="tab" data-atab="users">Players</button>
+    <button class="tab" role="tab" data-atab="site">News &amp; shop</button>
   </div>
   <p class="msg" id="admin-msg"></p>
   <div id="admin-chat" class="admin-list"></div>
@@ -315,6 +317,19 @@
       <button class="btn" id="admin-user-find">Find</button>
     </div>
     <div class="admin-list" id="admin-users"></div>
+  </div>
+  <div id="admin-site" hidden>
+    <div class="admin-box">
+      <h2>Announcement</h2>
+      <p class="small">Shows across the top of the site for everyone, and pops up in every 3D server running right now. Leave it empty and post to remove it.</p>
+      <textarea id="admin-announce" maxlength="200" rows="2" placeholder="Like: Double coins weekend! Or: New obby just dropped."></textarea>
+      <div class="row"><button class="btn btn-sun" id="admin-announce-go" type="button">Post it</button><button class="btn" id="admin-announce-clear" type="button">Remove it</button></div>
+    </div>
+    <div class="admin-box">
+      <h2>Limited items</h2>
+      <p class="small">How many are left in the shop. Raise it to restock, set it to 0 to sell out.</p>
+      <div class="admin-list" id="admin-stock"></div>
+    </div>
   </div>
 </section>
 </main>
@@ -398,6 +413,7 @@
       <div class="row"><button class="btn" data-close>Close</button></div>
     </div>
     <div id="acct-out" hidden>
+      <div id="acct-saved" class="acct-saved" hidden></div>
       <div class="tabs acct-tabs" role="tablist">
         <button class="tab" data-acct="login" aria-selected="true" role="tab">Log in</button>
         <button class="tab" data-acct="signup" aria-selected="false" role="tab">Sign up</button>
@@ -412,6 +428,7 @@
         </div>
         <label for="acct-pw" id="acct-pw-label">Password</label>
         <input id="acct-pw" type="password" maxlength="72" autocomplete="current-password" required>
+        <label class="check"><input type="checkbox" id="acct-keep" checked> Keep me logged in on this computer</label>
         <p class="small" id="acct-hint"></p>
         <p class="msg" id="acct-msg"></p>
         <div class="row"><button class="btn btn-sun" type="submit" id="acct-go">Log in</button><button class="btn" type="button" data-close>Cancel</button></div>
@@ -425,10 +442,19 @@
         <button class="btn" id="acct-admin" data-go="#/admin" hidden>Admin</button>
         <button class="btn btn-sun" id="acct-logout">Log out</button>
       </div>
+      <div class="acct-saved" id="acct-switch"></div>
       <p class="small">Graphics in 3D: <button class="linkish" id="acct-gfx" type="button"></button></p>
       <p class="small">Want your account gone? <button class="linkish" id="acct-delete" type="button">Delete my account</button></p>
       <p class="msg" id="acct-in-msg"></p>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="manage-modal" hidden role="dialog" aria-modal="true" aria-labelledby="manage-h">
+  <div class="panel manage-panel">
+    <h2 id="manage-h">Manage player</h2>
+    <div id="manage-body"></div>
+    <div class="row"><button class="btn" type="button" data-close>Done</button></div>
   </div>
 </div>
 

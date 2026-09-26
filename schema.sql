@@ -157,3 +157,6 @@ CREATE INDEX trades_from ON trades (from_id, status, created_at);
 
 CREATE TABLE trade_done (id TEXT PRIMARY KEY);
 
+
+-- Site settings: the admin announcement, and the key live-room tickets are signed with when SALT is missing.
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);

@@ -2,6 +2,13 @@
 import { drawPip } from './art.js';
 import { progress } from './progress.js';
 
+// Leaving something out with null or false (like `x ? el(...) : null`) means "nothing here",
+// the same as in el() below, instead of the word "null" showing up on the page.
+for (const name of ['append', 'prepend', 'replaceChildren']) {
+  const orig = Element.prototype[name];
+  Element.prototype[name] = function (...kids) { return orig.apply(this, kids.filter((k) => k != null && k !== false)); };
+}
+
 export const $ = (s) => document.querySelector(s);
 export const $$ = (s) => [...document.querySelectorAll(s)];
 export const session = { user: null, online: false, rooms: false };
@@ -22,11 +29,11 @@ export function el(tag, props = {}, ...kids) {
 /* ---------------- pages ---------------- */
 const VIEWS = ['home', 'levels', 'discover', 'play', 'edit', 'worlds', 'world', 'w3', 'build', 'create', 'closet', 'profile', 'daily', 'admin'];
 let current = '';
-const leaving = new Map(); // view -> function to call when leaving it
+const leaving = new Map(); // view -> functions to call when leaving it
 export const currentView = () => current;
-export function onLeave(view, fn) { leaving.set(view, fn); }
+export function onLeave(view, fn) { if (!leaving.has(view)) leaving.set(view, []); leaving.get(view).push(fn); }
 export function show(name, nav) {
-  if (current && current !== name && leaving.has(current)) { try { leaving.get(current)(name); } catch (e) { console.error(e); } }
+  if (current && current !== name) for (const fn of leaving.get(current) || []) { try { fn(name); } catch (e) { console.error(e); } }
   current = name;
   for (const v of VIEWS) { const s = document.getElementById('view-' + v); if (s) s.hidden = v !== name; }
   $$('[data-nav]').forEach((b) => { if (b.dataset.nav === (nav || name)) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });

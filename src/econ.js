@@ -51,6 +51,8 @@ const takeItem = (db, uid, key) => [
   db.prepare('UPDATE inventory SET qty = qty - 1 WHERE user_id = ? AND item = ?').bind(uid, key),
   db.prepare('INSERT INTO inventory (user_id, item, qty) SELECT ?, ?, -1 WHERE NOT EXISTS (SELECT 1 FROM inventory WHERE user_id = ? AND item = ?)').bind(uid, key, uid, key),
 ];
+// For admins: add or remove one of an item (limited stock isn't touched).
+export const itemStmts = (db, uid, key, n) => (n > 0 ? [giveItem(db, uid, key)] : [...takeItem(db, uid, key), tidy(db, uid)]);
 const tidy = (db, a, b = a) => db.prepare('DELETE FROM inventory WHERE qty = 0 AND user_id IN (?, ?)').bind(a, b);
 const parse = (t, fallback = {}) => { try { const v = JSON.parse(t || ''); return v && typeof v === 'object' ? v : fallback; } catch (e) { return fallback; } };
 
@@ -104,7 +106,7 @@ export async function migrateUser(db, uid, progressText) {
   const owned = Array.isArray(p.owned) ? p.owned : [];
   for (const key of new Set(owned)) {
     const f = findItem(key);
-    if (f && !isFree(f.item) && !f.item.stock) stmts.push(db.prepare('INSERT OR IGNORE INTO inventory (user_id, item, qty) VALUES (?, ?, 1)').bind(uid, key));
+    if (f && !isFree(f.item) && !f.item.stock && !f.item.need) stmts.push(db.prepare('INSERT OR IGNORE INTO inventory (user_id, item, qty) VALUES (?, ?, 1)').bind(uid, key));
   }
   const levels = p.levels && typeof p.levels === 'object' ? p.levels : {};
   for (const lv of BUILTIN) {
@@ -113,7 +115,9 @@ export async function migrateUser(db, uid, progressText) {
     const bits = (l.stars[0] ? 1 : 0) | (l.stars[1] ? 2 : 0) | (l.stars[2] ? 4 : 0);
     if (bits) stmts.push(db.prepare('INSERT OR IGNORE INTO level_progress (user_id, level, stars, coins, best) VALUES (?, ?, ?, ?, ?)').bind(uid, lv.id, bits, Math.max(0, Math.floor(l.coins || 0)), typeof l.time === 'number' ? l.time : null));
   }
-  const look = p.equip && typeof p.equip === 'object' ? p.equip : {};
+  const items = {};
+  for (const key of owned) { const f = findItem(key); if (f && !isFree(f.item) && !f.item.stock && !f.item.need) items[key] = 1; }
+  const look = cleanLook(p.equip && typeof p.equip === 'object' ? p.equip : {}, items);
   stmts.push(db.prepare('UPDATE users SET econ = 1, look = ? WHERE id = ?').bind(JSON.stringify(look), uid));
   await db.batch(stmts);
 }
@@ -135,11 +139,15 @@ export async function accountExtras(db, uid) {
 export async function verify(env, job) {
   if (env.ROOMS) {
     try {
-      const stub = env.ROOMS.get(env.ROOMS.idFromName('v:' + Math.floor(Math.random() * 4)));
+      const stub = env.ROOMS.get(env.ROOMS.idFromName('v:' + Math.floor(Math.random() * 16)));
       const r = await (await stub.fetch('https://room/verify', { method: 'POST', body: JSON.stringify(job) })).json();
       if (!r.ok) fail(400, r.error || 'That run could not be checked.');
       return job.type === 'publish3d' ? r : r.run;
-    } catch (e) { if (e.status) throw e; /* fall back to checking here */ }
+    } catch (e) {
+      if (e.status) throw e;
+      // checking here instead would go over the free plan's time limit, so just ask to try again
+      fail(503, 'The run checker is busy. Try again in a few seconds.');
+    }
   }
   try {
     if (job.type === '2d') return runReplay(job.raw ? job.level : normalizeLevel(job.level), String(job.replay || ''), job.opts || {});
@@ -249,6 +257,12 @@ async function finish(ctx, input) {
   fail(400, 'Unknown kind of run.');
 }
 
+const claimStmt = (db, uid, what) => db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(uid, what, Date.now());
+// Runs a batch that includes a claim row. False if that claim was already taken (nothing changes then).
+async function payOnce(db, stmts) {
+  try { await db.batch(stmts); return true; } catch (e) { if (isConstraint(e)) return false; throw e; }
+}
+
 async function progressRow(db, uid, level) {
   return (await db.prepare('SELECT stars, coins, best FROM level_progress WHERE user_id = ? AND level = ?').bind(uid, level).first()) || { stars: 0, coins: 0, best: null };
 }
@@ -273,9 +287,10 @@ async function finishLevel(ctx, user, id, replay) {
   const newCoins = Math.max(0, run.coins - old.coins);
   const earned = popcount(fresh) * REWARD.star + newCoins;
   const stmts = [progressStmt(db, user.id, id, bits, run.coins, Math.round(run.time * 10) / 10)];
-  if (earned) stmts.push(...coinStmts(db, user.id, earned, 'run level ' + id));
+  // the claim row stops two runs sent at the same moment from both paying for the same stars
+  if (earned) stmts.push(claimStmt(db, user.id, `r:${id}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run level ' + id));
   if (id === 'b-party' && run.deaths === 0) stmts.push(db.prepare("INSERT OR IGNORE INTO claims (user_id, what, at) VALUES (?, 'b:flawless', ?)").bind(user.id, Date.now()));
-  await db.batch(stmts);
+  if (!(await payOnce(db, stmts))) return json({ ok: true, earned: 0, stars: [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i))), newStars: [], time: run.time, wallet: await getWallet(db, user.id) });
   const stars = [0, 1, 2].map((i) => !!((old.stars | bits) & (1 << i)));
   return json({ ok: true, earned, stars, newStars: [0, 1, 2].filter((i) => fresh & (1 << i)), time: run.time, wallet: await getWallet(db, user.id) });
 }
@@ -292,17 +307,21 @@ async function finishWorld(ctx, user, id, replay) {
   const fresh = bits & ~old.stars;
   const earned = (fresh & 1 ? w.reward : 0) + (fresh & 2 ? REWARD.obbyNoFall : 0) + Math.max(0, run.coins - old.coins) * REWARD.coin3d;
   const stmts = [progressStmt(db, user.id, key, bits, run.coins, Math.round(run.time * 10) / 10)];
-  if (earned) stmts.push(...coinStmts(db, user.id, earned, 'run world ' + id));
-  await db.batch(stmts);
+  if (earned) stmts.push(claimStmt(db, user.id, `r:${key}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run world ' + id));
+  if (!(await payOnce(db, stmts))) return json({ ok: true, earned: 0, first: false, noFall: !!(bits & 2), time: run.time, wallet: await getWallet(db, user.id) });
   return json({ ok: true, earned, first: !!(fresh & 1), noFall: !!(bits & 2), time: run.time, wallet: await getWallet(db, user.id) });
 }
 
 async function finishGame(ctx, user, id, replay) {
   const { db, env } = ctx;
-  const g = await db.prepare('SELECT id, kind, data, reward, user_id, hidden FROM games WHERE id = ?').bind(id).first();
+  const g = await db.prepare('SELECT id, kind, data, reward, user_id, hidden, project_id FROM games WHERE id = ?').bind(id).first();
   if (!g || g.hidden) fail(404, 'That game was not found.');
   if (!g.reward) return json({ ok: true, earned: 0 });
   if (g.user_id === user.id) return json({ ok: true, earned: 0, note: "You made this one, so it doesn't pay you." });
+  if (g.project_id) {
+    const builder = await db.prepare('SELECT 1 FROM projects WHERE id = ? AND owner_id = ? UNION SELECT 1 FROM collabs WHERE project_id = ? AND user_id = ?').bind(g.project_id, user.id, g.project_id, user.id).first();
+    if (builder) return json({ ok: true, earned: 0, note: "You helped build this one, so it doesn't pay you." });
+  }
   const done = await db.prepare('SELECT 1 FROM claims WHERE user_id = ? AND what = ?').bind(user.id, 'g:' + id).first();
   if (done) return json({ ok: true, earned: 0, note: 'You already got the reward for this one.' });
   const data = JSON.parse(g.data);
@@ -322,14 +341,19 @@ async function finishEndless(ctx, user, seedIn, replay) {
   if (!Number.isInteger(seed) || seed < 0 || seed > 1e9) fail(400, 'That run is broken.');
   const run = await verify(env, { type: '2d', raw: true, level: endlessCourse(seed), replay, opts: { maxSteps: maxSteps(env), stopOnDeath: true, truncate: true } });
   const dist = Math.floor(run.x / 32);
-  const today = await db.prepare("SELECT COALESCE(SUM(delta), 0) AS n FROM ledger WHERE user_id = ? AND why = 'run endless' AND at >= ?").bind(user.id, startOfDay()).first();
-  const room = Math.max(0, REWARD.endlessCap - today.n);
-  const earned = Math.min(room, run.coins + Math.floor(dist / 25));
-  const stmts = [db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(user.id, 'e:' + seed, Date.now())];
-  if (earned) stmts.push(...coinStmts(db, user.id, earned, 'run endless'));
-  if (dist >= 1000) stmts.push(db.prepare("INSERT OR IGNORE INTO claims (user_id, what, at) VALUES (?, 'b:endless1000', ?)").bind(user.id, Date.now()));
-  try { await db.batch(stmts); } catch (e) { if (isConstraint(e)) fail(409, 'That run was already counted.'); throw e; }
-  return json({ ok: true, earned, distance: dist, capped: earned < run.coins + Math.floor(dist / 25), wallet: await getWallet(db, user.id) });
+  const want = run.coins + Math.floor(dist / 25);
+  for (let tries = 0; ; tries++) {
+    const day = startOfDay();
+    const today = await db.prepare("SELECT COALESCE(SUM(delta), 0) AS n FROM ledger WHERE user_id = ? AND why = 'run endless' AND at >= ?").bind(user.id, day).first();
+    const earned = Math.min(Math.max(0, REWARD.endlessCap - today.n), want);
+    const stmts = [claimStmt(db, user.id, 'e:' + seed)];
+    // "ec:<day>:<paid so far>" means two runs at once can't both fit under the daily cap
+    if (earned) stmts.push(claimStmt(db, user.id, `ec:${day}:${today.n}`), ...coinStmts(db, user.id, earned, 'run endless'));
+    if (dist >= 1000) stmts.push(db.prepare("INSERT OR IGNORE INTO claims (user_id, what, at) VALUES (?, 'b:endless1000', ?)").bind(user.id, Date.now()));
+    if (await payOnce(db, stmts)) return json({ ok: true, earned, distance: dist, capped: earned < want, wallet: await getWallet(db, user.id) });
+    const seen = await db.prepare('SELECT 1 FROM claims WHERE user_id = ? AND what = ?').bind(user.id, 'e:' + seed).first();
+    if (seen || tries >= 2) fail(409, 'That run was already counted.');
+  }
 }
 
 /* ---------------- trading ---------------- */

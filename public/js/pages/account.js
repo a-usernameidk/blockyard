@@ -1,7 +1,7 @@
 // Logging in and out, the account pop-up, the coin counter, sound buttons, and sending
 // a guest's finished runs to the server once they have an account.
-import { $, $$, el, session, ask, toast, openModal, closeModal, copyText, pipCanvas, route, go } from '../app.js';
-import { api, auth, isOnline, store } from '../api.js';
+import { $, $$, el, session, ask, toast, openModal, closeModal, copyText, pipCanvas, route, go, currentView } from '../app.js';
+import { api, auth, accounts, isOnline, store } from '../api.js';
 import { progress, proofs } from '../progress.js';
 import { isRude } from '../format.js';
 import { drawTile } from '../render2d.js';
@@ -50,17 +50,49 @@ export async function startSession() {
   const on = await isOnline();
   session.online = on;
   try { const h = await fetch('/api/health').then((r) => r.json()); session.rooms = !!h.rooms; } catch (e) { session.rooms = false; }
-  if (!on || !auth.token) { progress.use(null); changed(); return; }
-  try {
-    const r = await api.me();
+  if (!on) { progress.use(null); changed(); return; }
+  let r = null;
+  if (auth.token) {
+    try { r = await api.me(); } catch (e) { if (e.status === 401) { forget(auth.token); auth.token = ''; } }
+  }
+  // no login saved in the page (or it ran out): the saved-login cookie may still have one
+  if (!r && !auth.token) { try { r = await api.me(); if (r.token) auth.use(r.token, true); } catch (e) { /* guest */ } }
+  if (r) {
     session.user = r.user;
     progress.use(r.user.id, r);
+    remember();
     claimProofs();
-  } catch (e) {
-    if (e.status === 401) auth.token = '';
-    progress.use(null);
-  }
+  } else progress.use(null);
   changed();
+}
+// Put the current account in the saved list (only when it's kept on this computer).
+function remember() {
+  if (!session.user || !auth.kept) return;
+  accounts.save({ id: session.user.id, name: session.user.name, token: auth.token, color: progress.data.equip.color });
+}
+function forget(token) { for (const a of accounts.list()) if (a.token === token) accounts.remove(a.id); }
+async function saveNow() {
+  clearTimeout(syncTimer);
+  if (session.user && session.online) { try { await api.saveProgress(progress.data); } catch (e) { /* best effort */ } }
+}
+// Switch to another account saved on this computer.
+export async function switchTo(acc) {
+  if (session.user && session.user.id === acc.id) return;
+  let r;
+  try { r = await api.meAs(acc.token); } catch (e) {
+    if (e.status === 401) { accounts.remove(acc.id); toast(`${acc.name} isn't logged in anymore. Log in again.`); renderSaved(); openAccount('login', acc.name); } else toast(e.message);
+    return;
+  }
+  await saveNow();
+  closeModal($('#account-modal'));
+  auth.use(acc.token, true);
+  session.user = r.user;
+  progress.use(r.user.id, r);
+  remember();
+  changed();
+  // live rooms were opened as the old account, so go somewhere safe
+  if (['w3', 'build', 'edit', 'play', 'admin'].includes(currentView())) go('#/'); else route();
+  toast(`You're playing as ${r.user.name} now.`);
 }
 // Wallet changed on the server (bought, sold, traded, earned).
 export function setWallet(w) { if (w) { progress.setWallet(w); renderMe(); } }
@@ -78,14 +110,16 @@ async function claimProofs() {
   if (total) toast(`Your guest runs were checked: +${total} coins!`, 'toast-ach');
 }
 
-async function signedIn(res, { fresh = false } = {}) {
-  auth.token = res.token;
+async function signedIn(res, { fresh = false, keep = true } = {}) {
+  await saveNow();
+  auth.use(res.token, keep);
   session.user = res.user;
   let bring = false;
   if (!fresh && progress.guestHasProgress()) {
     bring = await ask('Bring your guest progress?', 'You played as a guest in this browser. Add those stars and runs to this account? Runs that earned coins get checked by the server and pay out.', [{ label: 'Yes, add them', value: true, cls: 'btn-sun' }, { label: 'No, leave them', value: false }]);
   }
   progress.use(res.user.id, res);
+  remember();
   if (fresh || bring) { progress.absorbGuest(); claimProofs(); }
   else proofs.clear();
   api.saveProgress(progress.data).catch(() => {});
@@ -109,11 +143,42 @@ function setAcctMode(m) {
   $('#acct-msg').textContent = '';
 }
 $$('[data-acct]').forEach((b) => b.addEventListener('click', () => setAcctMode(b.dataset.acct)));
-export function openAccount(mode) {
+// The saved-accounts list: "Continue as" when logged out, "Switch to" when logged in.
+function accountCard(a, label) {
+  return el('div', { class: 'acct-card' }, el('span', { class: 'dot', style: `background:${/^#[0-9a-f]{6}$/i.test(a.color) ? a.color : '#ff6b35'}` }), el('b', {}, a.name),
+    el('button', { class: 'btn btn-sun', type: 'button', onclick: () => switchTo(a) }, label),
+    el('button', { class: 'btn', type: 'button', title: `Forget ${a.name} on this computer`, 'aria-label': `Forget ${a.name} on this computer`, onclick: () => { accounts.remove(a.id); renderSaved(); } }, '✕'));
+}
+function renderSaved() {
+  const others = accounts.list().filter((a) => !session.user || a.id !== session.user.id);
+  const out = $('#acct-saved');
+  out.hidden = !!session.user || !others.length || adding;
+  out.replaceChildren(...(others.length ? [el('h3', {}, 'Saved on this computer'), ...others.map((a) => accountCard(a, 'Continue'))] : []));
+  $('#acct-switch').replaceChildren(...(session.user ? [
+    el('h3', {}, others.length ? 'Switch account' : 'More accounts'),
+    ...others.map((a) => accountCard(a, 'Switch')),
+    el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', onclick: addAccount }, 'Add another account')),
+  ] : []));
+}
+let adding = false;
+async function addAccount() {
+  await saveNow();
+  adding = true;
+  $('#acct-in').hidden = true; $('#acct-out').hidden = false;
+  setAcctMode('login');
+  $('#acct-name').value = ''; $('#acct-pw').value = '';
+  $('#acct-hint').textContent = session.user ? `Log in to another account. ${session.user.name} stays saved here${auth.kept ? '' : ' if you tick "Keep me logged in" next time'}, so you can switch back.` : '';
+  renderSaved();
+  $('#acct-name').focus();
+}
+export function openAccount(mode, name) {
+  adding = false;
   isOnline().then((on) => {
     $('#acct-offline').hidden = on;
     $('#acct-out').hidden = !on || !!session.user;
     $('#acct-in').hidden = !on || !session.user;
+    if (name) $('#acct-name').value = name;
+    renderSaved();
     if (session.user) {
       $('#acct-user').textContent = session.user.name;
       const w = progress.wallet;
@@ -135,22 +200,34 @@ $('#acct-form').addEventListener('submit', async (e) => {
   if (acctMode === 'signup' && isRude(name)) { msg.textContent = 'Pick a different username. That one has a blocked word in it.'; return; }
   $('#acct-go').disabled = true; msg.textContent = 'One sec…';
   try {
-    if (acctMode === 'login') { const r = await api.login(name, pw); closeModal($('#account-modal')); await signedIn(r); toast(`Welcome back, ${r.user.name}!`); }
-    else if (acctMode === 'signup') {
-      const r = await api.signup(name, pw, progress.data);
+    const keep = $('#acct-keep').checked;
+    const wasAdding = adding && session.user;
+    if (acctMode === 'login') {
+      const r = await api.login(name, pw, keep);
       closeModal($('#account-modal'));
-      await signedIn(r, { fresh: true });
+      if (wasAdding) await leaveRooms();
+      await signedIn(r, { keep });
+      toast(`Welcome back, ${r.user.name}!`);
+    } else if (acctMode === 'signup') {
+      // a second account starts fresh; guest progress only goes to your first one
+      const r = await api.signup(name, pw, wasAdding ? {} : progress.data, keep);
+      closeModal($('#account-modal'));
+      if (wasAdding) await leaveRooms();
+      await signedIn(r, { fresh: !wasAdding, keep });
       showRecovery(r.recovery);
     } else {
-      const r = await api.recover(name, $('#acct-rec').value, pw);
+      const r = await api.recover(name, $('#acct-rec').value, pw, keep);
       closeModal($('#account-modal'));
-      await signedIn(r);
+      if (wasAdding) await leaveRooms();
+      await signedIn(r, { keep });
       showRecovery(r.recovery);
     }
+    adding = false;
     $('#acct-pw').value = ''; msg.textContent = '';
   } catch (err) { msg.textContent = err.message; }
   $('#acct-go').disabled = false;
 });
+async function leaveRooms() { if (['w3', 'build', 'edit', 'play', 'admin'].includes(currentView())) go('#/'); }
 function showRecovery(code) { $('#rec-code').textContent = code; openModal('#recovery-modal'); }
 $('#rec-copy').addEventListener('click', (e) => copyText($('#rec-code').textContent, e.currentTarget, 'Copy code'));
 function signedOut() {
@@ -159,14 +236,17 @@ function signedOut() {
   changed(); route();
 }
 $('#acct-logout').addEventListener('click', async () => {
-  try { await api.saveProgress(progress.data); await api.logout(); } catch (e) { /* still log out here */ }
+  const was = session.user;
+  await saveNow();
+  try { await api.logout(); } catch (e) { /* still log out here */ }
+  if (was) accounts.remove(was.id);
   closeModal($('#account-modal'));
   signedOut();
-  toast('Logged out. You are playing as a guest now.');
+  toast(accounts.list().length ? 'Logged out. Click "Log in" to pick another saved account.' : 'Logged out. You are playing as a guest now.');
 });
 $('#acct-delete').addEventListener('click', async () => {
   closeModal($('#account-modal'));
   const ok = await ask('Delete your account?', 'This removes your account, your coins and items, your projects, and every game you published. It cannot be undone.', [{ label: 'Delete everything', value: true, cls: 'btn-danger' }]);
   if (!ok) return;
-  try { await api.deleteMe(); signedOut(); toast('Your account is deleted.'); } catch (e) { toast(e.message); }
+  try { const id = session.user && session.user.id; await api.deleteMe(); if (id) accounts.remove(id); signedOut(); toast('Your account is deleted.'); } catch (e) { toast(e.message); }
 });

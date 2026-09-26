@@ -19,6 +19,8 @@ const team = new Map();
 
 onLeave('edit', () => { if (!testing) closeSession(); });
 onLeave('build', () => closeSession());
+// testing a level opens the play page; going anywhere but back to the editor closes the project
+onLeave('play', (to) => { if (testing && to !== 'edit') { testing = false; closeSession(); } });
 function closeSession() {
   if (room) { room.send({ t: 'save' }); room.close(); room = null; }
   if (isCollab()) detachCollab();

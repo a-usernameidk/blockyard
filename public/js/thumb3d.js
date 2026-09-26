@@ -14,18 +14,26 @@ export function drawWorldThumb(cv, thumb, skyId = 'day') {
   c.fillStyle = g; c.fillRect(0, 0, W, H);
   const t = readThumb(thumb);
   if (!t) return;
-  let maxY = 1, minY = 99;
-  for (const [ty, , y] of t.cells) if (ty) { maxY = Math.max(maxY, y); minY = Math.min(minY, y); }
+  // only the part of the map that has something built on it, so small worlds fill the picture
+  let maxY = 1, minY = 99, r0 = t.N, r1 = -1, c0 = t.N, c1 = -1;
+  t.cells.forEach(([ty, , y], i) => {
+    if (!ty) return;
+    maxY = Math.max(maxY, y); minY = Math.min(minY, y);
+    const r = Math.floor(i / t.N), col = i % t.N;
+    r0 = Math.min(r0, r); r1 = Math.max(r1, r); c0 = Math.min(c0, col); c1 = Math.max(c1, col);
+  });
+  if (r1 < 0) return;
+  const NR = r1 - r0 + 1, NC = c1 - c0 + 1;
   const lift = Math.min(3, 40 / Math.max(1, maxY - minY + 1));
-  const cs = Math.min(W * 0.8 / t.N, (H - 10) / (t.N * 0.55 + (maxY - minY) * lift / 8 + 2));
-  const ox = (W - t.N * cs) / 2, oy = H - 8 - t.N * cs * 0.55;
-  for (let r = 0; r < t.N; r++) for (let col = 0; col < t.N; col++) {
+  const cs = Math.min(W * 0.86 / NC, (H - 12) / (NR * 0.55 + (maxY - minY + 1) * lift / 8 + 1));
+  const ox = (W - NC * cs) / 2, oy = H - 8 - NR * cs * 0.55;
+  for (let r = r0; r <= r1; r++) for (let col = c0; col <= c1; col++) {
     const [ty, co, y] = t.cells[r * t.N + col];
     if (!ty || !BLOCKS[ty]) continue;
     const b = BLOCKS[ty];
     const base = rgb(b.tint ? PALETTE[co & 15] : b.color || '#ffd23f');
     const hy = (y - minY + 1) * lift * cs / 8;
-    const x = ox + col * cs, sy = oy + r * cs * 0.55 - hy;
+    const x = ox + (col - c0) * cs, sy = oy + (r - r0) * cs * 0.55 - hy;
     c.fillStyle = css(base, 0.62); c.fillRect(x, sy + cs * 0.55, cs + 0.5, hy + 2);
     c.fillStyle = css(base, b.glow ? 1.15 : 0.95 + 0.1 * ((col + r) % 2)); c.fillRect(x, sy, cs + 0.5, cs * 0.55 + 0.5);
   }

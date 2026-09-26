@@ -1,6 +1,10 @@
-// Admin: chat reports, reported games (hide, delete, make them pay coins), and players (ban, give coins).
-import { $, $$, el, session, show, go, addRoute, ask, toast, timeAgo, plural } from '../app.js';
+// Admin: chat reports, reported games (hide, delete, make them pay coins), players (coins, items,
+// passwords, kick, ban), the site announcement, and limited item stock.
+import { $, $$, el, session, show, go, addRoute, ask, toast, timeAgo, plural, openModal } from '../app.js';
 import { api } from '../api.js';
+import { SHOP, KINDS, LIMITED, itemKey, findItem } from '../cosmetics.js';
+import { refreshWallet } from './account.js';
+import { showAnnounce } from './worlds.js';
 import { normalizeLevel } from '../format.js';
 import { thumb } from './play.js';
 import { drawWorldThumb } from '../thumb3d.js';
@@ -8,15 +12,15 @@ import { drawWorldThumb } from '../thumb3d.js';
 let tab = 'chat';
 async function showAdmin() {
   show('admin', '');
-  if (!session.user || !session.user.admin) { $('#admin-msg').textContent = 'Log in with your admin account to see this page.'; ['#admin-chat', '#admin-games', '#admin-users'].forEach((s) => { $(s).innerHTML = ''; }); return; }
+  if (!session.user || !session.user.admin) { $('#admin-msg').textContent = 'Log in with your admin account to see this page.'; ['#admin-chat', '#admin-games', '#admin-users', '#admin-stock'].forEach((s) => { $(s).innerHTML = ''; }); $('#admin-site').hidden = true; return; }
   setTab(tab);
 }
 function setTab(t) {
   tab = t;
   $$('[data-atab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.atab === t)));
-  $('#admin-chat').hidden = t !== 'chat'; $('#admin-games-wrap').hidden = t !== 'games'; $('#admin-users-wrap').hidden = t !== 'users';
+  $('#admin-chat').hidden = t !== 'chat'; $('#admin-games-wrap').hidden = t !== 'games'; $('#admin-users-wrap').hidden = t !== 'users'; $('#admin-site').hidden = t !== 'site';
   $('#admin-msg').textContent = '';
-  if (t === 'chat') loadChat(); else if (t === 'games') loadGames(); else findUsers();
+  if (t === 'chat') loadChat(); else if (t === 'games') loadGames(); else if (t === 'site') loadSite(); else findUsers();
 }
 $$('[data-atab]').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.atab)));
 $('#admin-refresh').addEventListener('click', () => setTab(tab));
@@ -33,6 +37,7 @@ async function loadChat() {
         el('div', { class: 'row' },
           el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { if (await ask(`Ban ${r.target}?`, 'They get logged out, kicked from every server, and their games are hidden.', [{ label: 'Ban', value: true, cls: 'btn-danger' }])) { try { await api.admin('POST', '/chat/' + r.id, { action: 'ban' }); toast(`${r.target} banned.`); loadChat(); } catch (e) { toast(e.message); } } } }, 'Ban'),
           el('button', { class: 'btn', type: 'button', onclick: async () => { try { await api.admin('POST', '/chat/' + r.id, { action: 'dismiss' }); loadChat(); } catch (e) { toast(e.message); } } }, 'Dismiss'),
+          el('button', { class: 'btn', type: 'button', onclick: () => manageUser(r.target) }, 'Manage'),
           el('a', { class: 'btn', href: '#/u/' + r.target }, 'Profile'))));
     }
   } catch (e) { $('#admin-msg').textContent = e.message; }
@@ -68,11 +73,64 @@ async function adminUser(name, action) {
   if (!ok) return;
   try { await api.admin('POST', '/users/' + encodeURIComponent(name), { action }); toast(`${name} ${action === 'ban' ? 'banned' : 'unbanned'}.`); if (tab === 'games') loadGames(); else findUsers(); } catch (e) { toast(e.message); }
 }
-async function grant(name) {
-  const input = el('input', { type: 'number', value: '100', min: '-100000', max: '100000', 'aria-label': 'Coins' });
-  const ok = await ask(`Give coins to ${name}`, 'Use a minus number to take coins away.', [{ label: 'Give', value: true, cls: 'btn-sun' }], input);
-  if (!ok) return;
-  try { const r = await api.admin('POST', '/users/' + encodeURIComponent(name), { action: 'grant', amount: Number(input.value) }); toast(`${name} has ${r.wallet.coins} coins now.`); findUsers(); } catch (e) { toast(e.message); }
+/* ---------------- one player: coins, items, password, kick, ban ---------------- */
+const allItems = () => KINDS.flatMap((k) => SHOP[k].filter((i) => i.price > 0 || i.need).map((i) => ({ key: itemKey(k, i.id), label: `${i.name} (${k})` })));
+export async function manageUser(name) {
+  const box = $('#manage-body');
+  $('#manage-h').textContent = `Manage ${name}`;
+  box.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
+  openModal('#manage-modal');
+  let u;
+  try { u = await api.adminUser(name); } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); return; }
+  const self = session.user && session.user.name.toLowerCase() === u.name.toLowerCase();
+  const note = el('p', { class: 'msg', role: 'status' });
+  const act = async (action, extra, done) => {
+    note.textContent = 'One sec…';
+    try {
+      const r = await api.adminAct(u.name, action, extra);
+      note.textContent = done(r);
+      if (self && r.wallet) refreshWallet();
+      if (action !== 'password') setTimeout(() => manageUser(u.name).then(() => { $('#manage-body .msg').textContent = note.textContent; }), 250);
+      if (tab === 'users' && $('#view-admin') && !$('#view-admin').hidden) findUsers();
+    } catch (e) { note.textContent = e.message; }
+  };
+  // coins
+  const amount = el('input', { type: 'number', value: '100', min: '0', max: '10000000', 'aria-label': 'How many coins' });
+  const n = () => Math.floor(Number(amount.value) || 0);
+  const coins = el('section', {}, el('h3', {}, `Coins: ${u.wallet.coins}`),
+    el('div', { class: 'row' }, amount,
+      el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('grant', { amount: n() }, (r) => `Gave ${n()}. ${u.name} has ${r.wallet.coins} coins now.`) }, 'Give'),
+      el('button', { class: 'btn', type: 'button', onclick: () => act('grant', { amount: -n() }, (r) => `Took ${n()}. ${u.name} has ${r.wallet.coins} coins now.`) }, 'Take'),
+      el('button', { class: 'btn', type: 'button', onclick: () => act('setcoins', { amount: n() }, (r) => `${u.name} has ${r.wallet.coins} coins now.`) }, 'Set to this')),
+    el('div', { class: 'row', style: 'margin-top:8px' }, ...[100, 1000, 10000].map((v) => el('button', { class: 'btn', type: 'button', onclick: () => act('grant', { amount: v }, (r) => `Gave ${v}. ${u.name} has ${r.wallet.coins} coins now.`) }, `+${v}`))));
+  // items
+  const pick = el('select', { 'aria-label': 'Item' }, ...allItems().map((i) => el('option', { value: i.key }, i.label)));
+  const owned = Object.entries(u.wallet.items).map(([key, qty]) => { const f = findItem(key); return f ? `${f.item.name}${qty > 1 ? ' x' + qty : ''}` : null; }).filter(Boolean);
+  const itemName = () => (findItem(pick.value) || { item: { name: pick.value } }).item.name;
+  const items = el('section', {}, el('h3', {}, 'Items'),
+    el('p', { class: 'small' }, owned.length ? 'Has: ' + owned.join(', ') : 'No items yet.'),
+    el('div', { class: 'row', style: 'margin-top:8px' }, pick,
+      el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('give', { item: pick.value }, () => `Gave ${u.name} a ${itemName()}.`) }, 'Give'),
+      el('button', { class: 'btn', type: 'button', onclick: () => act('take', { item: pick.value }, () => `Took a ${itemName()} from ${u.name}.`) }, 'Take')));
+  // password
+  const pw = el('input', { type: 'text', minlength: '6', maxlength: '72', placeholder: 'New password', autocomplete: 'off', 'aria-label': 'New password' });
+  const canPw = self || !u.admin;
+  const pass = canPw ? el('section', {}, el('h3', {}, 'Password'),
+    el('p', { class: 'small' }, self ? 'Change your own password. You get logged out on every other computer.' : 'For players who forgot their password and lost their recovery code. They get logged out everywhere.'),
+    el('div', { class: 'row', style: 'margin-top:8px' }, pw, el('button', { class: 'btn', type: 'button', onclick: () => {
+      if (pw.value.length < 6) { note.textContent = 'Passwords need at least 6 characters.'; return; }
+      act('password', { password: pw.value }, () => (self ? 'Password changed. Log in again on this computer.' : `Done. Tell ${u.name} their new password, and to change it.`));
+    } }, 'Set password'))) : null;
+  // kick / ban
+  const safety = u.admin ? null : el('section', {}, el('h3', {}, 'Safety'),
+    el('div', { class: 'row' },
+      el('button', { class: 'btn', type: 'button', onclick: () => act('kick', {}, () => `${u.name} was removed from every 3D server.`) }, 'Kick from servers'),
+      el('button', { class: 'btn ' + (u.banned ? 'btn-grass' : 'btn-danger'), type: 'button', onclick: async () => { const b = !u.banned; if (await ask(`${b ? 'Ban' : 'Unban'} ${u.name}?`, b ? 'They get logged out, kicked from every server, cannot log back in, and all their games are hidden.' : 'They can log in again and their games come back.', [{ label: b ? 'Ban' : 'Unban', value: true, cls: 'btn-danger' }])) { openModal('#manage-modal'); act(b ? 'ban' : 'unban', {}, () => `${u.name} ${b ? 'banned' : 'unbanned'}.`); } else openModal('#manage-modal'); } }, u.banned ? 'Unban' : 'Ban')));
+  const history = el('section', {}, el('h3', {}, 'Recent coins'),
+    u.ledger.length ? el('ul', { class: 'ledger' }, ...u.ledger.map((l) => el('li', {}, el('span', {}, `${l.why} · ${timeAgo(l.at)}`), el('span', { class: l.delta < 0 ? 'minus' : 'plus' }, (l.delta > 0 ? '+' : '') + l.delta)))) : el('p', { class: 'small' }, 'Nothing yet.'));
+  box.replaceChildren(
+    el('p', { class: 'small' }, `${u.admin ? 'Admin. ' : ''}${u.banned ? 'Banned. ' : ''}Playing since ${new Date(u.since).toLocaleDateString()}. ${plural(u.games, 'published game')}. `, el('a', { class: 'linkish', href: '#/u/' + u.name, 'data-go': '#/u/' + u.name }, 'Profile')),
+    note, coins, items, pass, safety, history);
 }
 async function findUsers() {
   const box = $('#admin-users'); box.innerHTML = '';
@@ -82,11 +140,32 @@ async function findUsers() {
     if (!users.length) box.append(el('p', { class: 'small' }, 'No players with that name.'));
     for (const u of users) {
       box.append(el('div', { class: 'admin-row small-row' + (u.banned ? ' hidden-game' : '') }, el('a', { class: 'linkish', href: '#/u/' + u.name }, el('b', {}, u.name)), el('span', { class: 'small' }, `${plural(u.games, 'game')}, ${u.coins} coins. ${u.banned ? 'Banned.' : ''}`),
-        el('div', { class: 'row' }, el('button', { class: 'btn btn-sun', type: 'button', onclick: () => grant(u.name) }, 'Give coins'),
+        el('div', { class: 'row' }, el('button', { class: 'btn btn-sun', type: 'button', onclick: () => manageUser(u.name) }, 'Manage'),
           el('button', { class: 'btn ' + (u.banned ? 'btn-grass' : 'btn-danger'), type: 'button', onclick: () => adminUser(u.name, u.banned ? 'unban' : 'ban') }, u.banned ? 'Unban' : 'Ban'))));
     }
   } catch (e) { toast(e.message); }
 }
 $('#admin-user-find').addEventListener('click', findUsers);
+
+/* ---------------- announcement and limited stock ---------------- */
+async function loadSite() {
+  const box = $('#admin-stock');
+  box.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
+  try {
+    const [on, shop] = await Promise.all([api.online(), api.shop()]);
+    $('#admin-announce').value = on.announce || '';
+    box.replaceChildren(...LIMITED.map((l) => {
+      const f = findItem(l.key);
+      const input = el('input', { type: 'number', min: '0', max: '100000', value: String(shop.stock[l.key] ?? l.stock), 'aria-label': `How many ${f.item.name} are left` });
+      return el('div', { class: 'stock-row' }, el('b', {}, f.item.name), el('span', { class: 'small' }, `started with ${l.stock}`), input,
+        el('button', { class: 'btn', type: 'button', onclick: async () => { try { await api.setStock(l.key, Number(input.value)); toast(`${f.item.name}: ${input.value} left in the shop.`); } catch (e) { toast(e.message); } } }, 'Save'));
+    }));
+  } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); }
+}
+async function postAnnounce(text) {
+  try { const r = await api.announce(text); showAnnounce(r.announce, true); toast(r.announce ? 'Posted. Everyone sees it now.' : 'Announcement removed.'); if (!text) $('#admin-announce').value = ''; } catch (e) { toast(e.message); }
+}
+$('#admin-announce-go').addEventListener('click', () => postAnnounce($('#admin-announce').value.trim()));
+$('#admin-announce-clear').addEventListener('click', () => postAnnounce(''));
 $('#admin-user-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') findUsers(); });
 addRoute(/^#\/admin$/, () => showAdmin());
