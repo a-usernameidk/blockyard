@@ -20,7 +20,7 @@ const h = (tag, attrs = {}, ...kids) => {
   return n;
 };
 const TOOLS = [['place', 'Place', '1'], ['break', 'Break', '2'], ['paint', 'Paint', '3'], ['pick', 'Pick', '4']];
-const ORDER = ['grass', 'dirt', 'stone', 'wood', 'brick', 'sand', 'snow', 'leaves', 'metal', 'plastic', 'neon', 'glass', 'ghost', 'ice', 'lava', 'bounce', 'speed', 'crumble', 'checkpoint', 'beltN', 'beltE', 'beltS', 'beltW', 'teleport', 'moveX', 'moveZ', 'moveY', 'goal', 'spawn', 'coin'];
+const ORDER = ['grass', 'dirt', 'stone', 'wood', 'brick', 'sand', 'snow', 'leaves', 'metal', 'plastic', 'neon', 'glass', 'ghost', 'ice', 'lava', 'bounce', 'speed', 'crumble', 'checkpoint', 'beltN', 'beltE', 'beltS', 'beltW', 'teleport', 'moveX', 'moveZ', 'moveY', 'disco', 'goal', 'spawn', 'coin'];
 export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') + '|' + (w.b || ''); for (let i = 0; i < s.length; i++) { hh ^= s.charCodeAt(i); hh = Math.imul(hh, 16777619) >>> 0; } return hh.toString(36) + ':' + s.length; };
 
 // opts: { world, title, me, look, room (ticket fn or null), canPublish, onChange(world), onPublish(world, proof), onFriends(), onExit(), low }

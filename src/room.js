@@ -120,6 +120,16 @@ export class Room {
         this.broadcast({ t: 'chat', ...line, uid: undefined });
         break;
       }
+      case 'throw': { // snowballs: just passed on to everyone else (they're only for fun)
+        const now = Date.now();
+        lim.throws = (lim.throws || []).filter((t) => now - t < 1000);
+        if (lim.throws.length >= 3) return;
+        const o = Array.isArray(msg.o) ? msg.o.slice(0, 3).map(Number) : [], d = Array.isArray(msg.d) ? msg.d.slice(0, 3).map(Number) : [];
+        if (o.length !== 3 || d.length !== 3 || ![...o, ...d].every(Number.isFinite) || Math.hypot(...d) > 1.5) return;
+        lim.throws.push(now);
+        this.broadcast({ t: 'throw', id: me.id, o: o.map((v) => Math.round(v * 100) / 100), d: d.map((v) => Math.round(v * 1000) / 1000) }, ws);
+        break;
+      }
       case 'shout': { // admins only: a big message everyone in this server sees
         if (!me.admin) return;
         const m = cleanChat(msg.m);
@@ -127,7 +137,7 @@ export class Room {
         break;
       }
       case 'emote': {
-        const e = ['wave', 'dance', 'cheer', 'sit', 'point'].includes(msg.e) ? msg.e : null;
+        const e = ['wave', 'dance', 'cheer', 'sit', 'point', 'flip', 'spin'].includes(msg.e) ? msg.e : null;
         if (e) this.broadcast({ t: 'emote', id: me.id, e });
         break;
       }

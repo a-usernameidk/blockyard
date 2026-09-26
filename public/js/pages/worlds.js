@@ -198,6 +198,7 @@ async function enterWorld(id, code) {
     game: (() => { try { return gameConfig(w.world, w.builtin ? builtinWorld(id) : null); } catch (e) { return null; } })(),
     onPrize: () => refreshWallet(),
     portals: w.builtin ? builtinWorld(id).portals || null : null,
+    snow: !!(w.builtin && builtinWorld(id).snow),
     onPortal: (to) => go(to.startsWith('#') ? to : `#/w/${to}/play`),
     onlineCount: (wid) => online.worlds[wid] || 0,
     onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },

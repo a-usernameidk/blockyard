@@ -26,13 +26,13 @@ function make(meta, draw) {
 // axis 'x': the gate is wide along x (you walk through it along z). axis 'z': the other way.
 function gates({ box, set }, list) {
   for (const g of list) {
-    const { x, z, c } = g;
+    const { x, z, c } = g, y = g.y || 0;
     if (g.axis === 'x') {
-      box(x - 2, 1, z, x - 2, 5, z, B.neon, c); box(x + 2, 1, z, x + 2, 5, z, B.neon, c); box(x - 2, 6, z, x + 2, 6, z, B.plastic, c);
-      box(x - 1, 0, z - 1, x + 1, 0, z + 1, B.plastic, c);
+      box(x - 2, y + 1, z, x - 2, y + 5, z, B.neon, c); box(x + 2, y + 1, z, x + 2, y + 5, z, B.neon, c); box(x - 2, y + 6, z, x + 2, y + 6, z, B.plastic, c);
+      box(x - 1, y, z - 1, x + 1, y, z + 1, B.plastic, c);
     } else {
-      box(x, 1, z - 2, x, 5, z - 2, B.neon, c); box(x, 1, z + 2, x, 5, z + 2, B.neon, c); box(x, 6, z - 2, x, 6, z + 2, B.plastic, c);
-      box(x - 1, 0, z - 1, x + 1, 0, z + 1, B.plastic, c);
+      box(x, y + 1, z - 2, x, y + 5, z - 2, B.neon, c); box(x, y + 1, z + 2, x, y + 5, z + 2, B.neon, c); box(x, y + 6, z - 2, x, y + 6, z + 2, B.plastic, c);
+      box(x - 1, y, z - 1, x + 1, y, z + 1, B.plastic, c);
     }
   }
 }
@@ -50,6 +50,7 @@ const PLAZA_GATES = [
   { to: 'sky', label: 'Sky Gauntlet', x: 78, z: 95, axis: 'x', c: 10 },
   { to: 'arena', label: 'All Minigames', x: 95, z: 64, axis: 'z', c: 11 },
   { to: '#/worlds', label: 'Player Worlds', x: 32, z: 64, axis: 'z', c: 8 },
+  { to: 'town', label: 'Snowy Town', x: 32, z: 44, axis: 'z', c: 0 },
 ];
 
 const tree = (box, x, y, z, h = 4) => {
@@ -283,12 +284,75 @@ export const ARENA = make({
   lobby: [64.5, 1, 64.5], areas: ARENA_AREAS,
 }, arenaMap);
 // One world per minigame (same map, just that game), so each Plaza gate has its own servers.
-const oneGame = (game, name, sky, blurb) => make({ id: 'mg-' + game, name, mode: 'hangout', sky, game, hidden: true, portals: BACK_GATE, blurb, lobby: [64.5, 1, 64.5], areas: { [game]: ARENA_AREAS[game] } }, arenaMap);
+const oneGame = (game, name, sky, blurb) => make({ id: 'mg-' + game, name, mode: 'hangout', sky, game, portals: BACK_GATE, blurb, lobby: [64.5, 1, 64.5], areas: { [game]: ARENA_AREAS[game] } }, arenaMap);
 export const MG_RACE = oneGame('race', 'Race', 'day', 'Race the course. First to the goal wins.');
 export const MG_TAG = oneGame('tag', 'Tag', 'sunset', "Don't get tagged. Whoever gets tagged is IT too.");
 export const MG_PAINT = oneGame('paint', 'Paintball', 'day', 'Shoot paint. 3 hits splats someone.');
 export const MG_KOTH = oneGame('koth', 'King of the Hill', 'sunset', 'Hold the glowing hilltop the longest.');
 export const MG_LAVA = oneGame('lava', 'Rising Lava', 'night', 'Climb before the lava gets you.');
 
-export const WORLDS3D = [PLAZA, ARENA, SUNNY, TOWER, LAVA, FACTORY, SKY, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA];
+// Snowy Town: a place to hang out, like a little penguin town. A dance club with a flashing disco floor,
+// a coffee shop, a gift shop (your closet), a ski hill with a sled race gate, a frozen pond to slide around on,
+// igloos, a snowball fort, and snowball fights everywhere (click or X).
+const TOWN_GATES = [
+  { to: 'plaza', label: 'Back to the Plaza', x: 64, z: 104, axis: 'x', c: 7 },
+  { to: 'arena', label: 'Minigames', x: 106, z: 64, axis: 'z', c: 11 },
+  { to: '#/closet', label: 'Gift Shop (your Closet)', x: 101, z: 50, axis: 'x', c: 6 },
+  { to: 'mg-race', label: 'Sled Race', x: 34, z: 91, axis: 'x', c: 9, y: 9 },
+];
+export const TOWN = make({ id: 'town', name: 'Snowy Town', mode: 'hangout', sky: 'day', snow: true, portals: TOWN_GATES,
+  blurb: 'A snowy hangout: dance club, coffee shop, ski hill, frozen pond and snowball fights. Click or press X to throw!' }, ({ box, set, coin }) => {
+  box(14, 0, 14, 113, 0, 113, B.snow);
+  // town square with a big tree
+  box(52, 0, 52, 76, 0, 76, B.stone); box(56, 0, 56, 72, 0, 72, B.brick); set(64, 0, 70, B.spawn);
+  box(64, 1, 62, 64, 3, 62, B.wood);
+  for (let i = 0; i < 4; i++) box(62 + i / 2 | 0, 4 + i * 2, 60 + i / 2 | 0, 66 - (i / 2 | 0), 5 + i * 2, 64 - (i / 2 | 0), B.leaves);
+  set(64, 12, 62, B.neon, 6);
+  for (const [x, z, c] of [[60, 58, 4], [68, 58, 9], [60, 66, 6], [68, 66, 11]]) set(x, 7, z, B.neon, c);
+  for (const [x, z] of [[53, 53], [75, 53], [53, 75], [75, 75]]) { box(x, 1, z, x, 3, z, B.wood); set(x, 4, z, B.neon, 6); }
+  // the dance club (north-west)
+  box(24, 0, 24, 46, 0, 44, B.metal); box(28, 0, 28, 42, 0, 40, B.disco);
+  for (let y = 1; y <= 6; y++) for (let x = 24; x <= 46; x++) for (const z of [24, 44]) if (!(z === 44 && x >= 33 && x <= 37 && y <= 4)) set(x, y, z, y === 6 ? B.neon : B.brick, 10);
+  for (let y = 1; y <= 6; y++) for (let z = 24; z <= 44; z++) { set(24, y, z, y === 6 ? B.neon : B.brick, 10); set(46, y, z, y === 6 ? B.neon : B.brick, 10); }
+  box(24, 7, 24, 46, 7, 44, B.metal);
+  box(31, 1, 25, 39, 2, 26, B.metal); box(33, 3, 25, 37, 3, 25, B.neon, 11);
+  for (const x of [28, 42]) { box(x, 1, 25, x + 1, 4, 26, B.plastic, 3); set(x, 3, 27, B.neon, 8); }
+  for (const [x, z, c] of [[30, 30, 4], [40, 30, 9], [30, 38, 6], [40, 38, 7], [35, 34, 11]]) set(x, 6, z, B.neon, c);
+  box(32, 5, 45, 38, 5, 45, B.neon, 11);
+  // coffee shop (north-east)
+  box(82, 0, 24, 102, 0, 42, B.wood);
+  for (let y = 1; y <= 5; y++) {
+    for (let x = 82; x <= 102; x++) { set(x, y, 24, B.wood); if (!(x >= 90 && x <= 94 && y <= 3)) set(x, y, 42, (y === 3 && (x % 4 === 0)) ? B.glass : B.wood, 9); }
+    for (let z = 24; z <= 42; z++) { set(82, y, z, (y === 3 && z % 4 === 0) ? B.glass : B.wood, 9); set(102, y, z, (y === 3 && z % 4 === 0) ? B.glass : B.wood, 9); }
+  }
+  box(82, 6, 24, 102, 6, 42, B.brick);
+  box(85, 1, 26, 99, 2, 27, B.wood); box(85, 3, 26, 99, 3, 27, B.plastic, 13);
+  for (const x of [88, 92, 96]) set(x, 4, 26, B.plastic, 12);
+  for (const [x, z] of [[87, 32], [93, 32], [99, 32], [87, 37], [93, 37], [99, 37]]) { set(x, 1, z, B.wood); box(x - 1, 2, z - 1, x + 1, 2, z + 1, B.plastic, 0); set(x, 3, z, B.plastic, 12); }
+  box(90, 7, 38, 94, 7, 38, B.neon, 13);
+  // gift shop (east)
+  box(97, 0, 44, 105, 0, 52, B.stone);
+  for (let y = 1; y <= 7; y++) for (let x = 97; x <= 105; x++) set(x, y, 44, B.plastic, 11);
+  for (let y = 1; y <= 7; y++) for (let z = 44; z <= 49; z++) { set(97, y, z, B.plastic, 11); set(105, y, z, B.plastic, 11); }
+  box(97, 8, 44, 105, 8, 49, B.plastic, 6);
+  // ski hill (south-west) with a sled race gate on top and an icy slide down
+  for (let k = 0; k <= 8; k++) box(22 + k, k, 80 + k, 46 - k, k, 104 - k, B.snow);
+  for (let k = 1; k <= 8; k++) box(47 - k, k - 1, 90, 47 - k, k - 1, 92, B.ice);
+  for (const [x, z] of [[22, 80], [46, 80], [22, 104], [46, 104]]) { box(x, 1, z, x, 2, z, B.wood); box(x - 1, 3, z - 1, x + 1, 5, z + 1, B.leaves); set(x, 6, z, B.snow); }
+  coin(34, 10, 88);
+  // frozen pond (south-east): slide around!
+  box(80, 0, 78, 106, 0, 100, B.ice);
+  for (let x = 80; x <= 106; x += 2) { set(x, 1, 78, B.snow); set(x, 1, 100, B.snow); }
+  coin(93, 1, 89);
+  // igloos
+  const igloo = (x, z) => { box(x - 3, 1, z - 3, x + 3, 2, z + 3, B.snow); box(x - 2, 3, z - 2, x + 2, 3, z + 2, B.snow); box(x - 1, 4, z - 1, x + 1, 4, z + 1, B.snow); box(x - 2, 1, z - 2, x + 2, 2, z + 2, 0); box(x, 1, z + 3, x, 2, z + 3, 0); };
+  igloo(20, 58); igloo(20, 70); igloo(108, 88);
+  // snowball fort: two walls to hide behind
+  box(52, 1, 84, 62, 2, 84, B.snow); box(66, 1, 92, 76, 2, 92, B.snow); box(52, 1, 88, 53, 1, 90, B.snow2); box(75, 1, 86, 76, 1, 88, B.snow2);
+  // a path between everything
+  box(62, 0, 44, 66, 0, 52, B.stone); box(62, 0, 76, 66, 0, 106, B.stone); box(76, 0, 62, 108, 0, 66, B.stone); box(46, 0, 62, 52, 0, 66, B.stone);
+  gates({ box, set }, TOWN_GATES);
+});
+
+export const WORLDS3D = [PLAZA, TOWN, ARENA, SUNNY, TOWER, LAVA, FACTORY, SKY, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA];
 export const builtinWorld = (id) => WORLDS3D.find((w) => w.id === id) || null;

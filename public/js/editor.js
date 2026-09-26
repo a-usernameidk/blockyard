@@ -118,7 +118,7 @@ function renderTools() {
   if (ED.tab === 'portals' && !rush) {
     const note = document.createElement('p');
     note.className = 'tools-note';
-    note.textContent = 'Form, speed and size portals work in Rush levels. Set Style to Rush to use them.';
+    note.textContent = 'Speed portals work everywhere. Form and size portals work in Rush levels (set Style to Rush).';
     toolsEl.appendChild(note);
   }
   quickEl.innerHTML = '';

@@ -303,7 +303,7 @@ function adventure(G, input, dt) {
   const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   const ice = p.onGround && p.groundTile === 'I';
   const acc = p.onGround ? (ice ? ADV.accIce : ADV.accGround) : ADV.accAir;
-  const target = dir * ADV.run;
+  const target = dir * ADV.run * p.speed;
   p.vx = p.vx < target ? Math.min(target, p.vx + acc * dt) : Math.max(target, p.vx - acc * dt);
   if (dir) p.face = dir;
   p.coyote = p.onGround ? 0.1 : p.coyote - dt;
@@ -472,7 +472,9 @@ function triggers(G) {
         case 'u': if (inTile && p.grav !== -1) { p.grav = -1; p.vy *= 0.5; p.onGround = false; ev(G, 'portal', X + 16, Y + 16, { c }); } break;
         case 'n': if (inTile && p.grav !== 1) { p.grav = 1; p.vy *= 0.5; p.onGround = false; ev(G, 'portal', X + 16, Y + 16, { c }); } break;
         default:
-          if (!G.rush || !inTile) break;
+          if (!inTile) break;
+          // Adventure levels have speed portals too (they change how fast you run)
+          if (!G.rush) { if (c in SPEEDS && p.speed !== SPEEDS[c]) { p.speed = SPEEDS[c]; ev(G, 'portal', X + 16, Y + 16, { c }); } break; }
           if (PORTAL_FORM[c] && p.form !== PORTAL_FORM[c]) {
             p.form = PORTAL_FORM[c]; p.spring = 0; p.rot = 0;
             if (FLYING.has(p.form)) p.vy *= 0.5;

@@ -136,6 +136,7 @@ void main() {
     float s = fract(dot(q, d) * 3.0 - abs(dot(q, vec2(-d.y, d.x))) * 2.0 - u_time * 1.3);
     m *= s < 0.35 ? 1.35 : 0.8;
   }
+  else if (p == 38.0) { float k = floor(u_time * 2.2 + hash(bp.xz) * 5.0); col = 0.55 + 0.45 * cos(6.2831 * (k * 0.27 + vec3(0.0, 0.33, 0.67))); m = 1.0 + 0.25 * (1.0 - smoothstep(0.0, 0.12, edge)); }
   else if (p == 37.0) { float s = step(0.42, abs(fract(uv.x * 2.0 + uv.y * 2.0) - 0.5)); m *= 0.9 + 0.2 * s; if (edge < 0.1) col = mix(col, vec3(1.0, 0.85, 0.2), 0.8); }
   else if (p == 36.0) { vec2 q = uv - 0.5; float r = length(q); float w = sin(r * 22.0 - u_time * 5.0 + atan(q.y, q.x) * 2.0); col = mix(col, vec3(1.0), 0.25 + 0.25 * w); m = 1.0 + 0.2 * (1.0 - smoothstep(0.0, 0.5, r)); }
   else if (p == 31.0) { m *= fract(uv.x * 4.0) < 0.5 ? 1.05 : 0.85; }

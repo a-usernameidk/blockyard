@@ -42,6 +42,8 @@ export const BLOCKS = [
   { id: 'moveX', name: 'Mover ↔', pat: 37, tint: true, mover: 0, tip: 'Moving platform. Slides 4 blocks east and back. Blocks next to each other move together.' },
   { id: 'moveZ', name: 'Mover ↕', pat: 37, tint: true, mover: 2, tip: 'Moving platform. Slides 4 blocks south and back.' },
   { id: 'moveY', name: 'Elevator', pat: 37, tint: true, mover: 1, tip: 'Moving platform. Goes 4 blocks up and back down.' },
+  { id: 'disco', name: 'Disco floor', pat: 38, color: '#b06cff', glow: true, tip: 'A dance floor that flashes colors. Great for dance parties.' },
+  { id: 'snow2', name: 'Snow pile', pat: 7, color: '#ffffff', tip: 'Soft snow.' },
 ];
 export const B = Object.fromEntries(BLOCKS.map((b, i) => [b ? b.id : 'air', i]));
 BLOCKS.forEach((b, i) => { if (b) b.n = i; });

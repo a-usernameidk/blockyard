@@ -3,7 +3,7 @@ import { M4, hexRGB } from './gl.js';
 
 const INK = hexRGB('#1d2340'), WHITE = [1, 1, 1];
 const shade = (c, k) => c.map((v) => Math.max(0, Math.min(1, v * k)));
-export const EMOTES = ['wave', 'dance', 'cheer', 'sit', 'point'];
+export const EMOTES = ['wave', 'dance', 'cheer', 'sit', 'point', 'flip', 'spin'];
 
 // st: { x, y, z, yaw, walk (phase), move (0..1), air, emote, et (seconds into emote), t (clock), look {color, hat} }
 export function avatarParts(st, out = []) {
@@ -20,8 +20,11 @@ export function avatarParts(st, out = []) {
   else if (em === 'cheer') { armL = armR = -2.9; armLz = 0.4; armRz = -0.4; bob = Math.abs(Math.sin(et * 7)) * 0.18; }
   else if (em === 'dance') { spin = Math.sin(et * 5) * 0.6; bob = Math.abs(Math.sin(et * 10)) * 0.1; armL = -2.6 * (Math.sin(et * 5) > 0 ? 1 : 0.2); armR = -2.6 * (Math.sin(et * 5) > 0 ? 0.2 : 1); footL = Math.sin(et * 10) * 0.12; footR = -footL; }
   else if (em === 'sit') { sit = 0.28; footL = footR = 0.3; armL = armR = -0.5; }
+  let flipX = 0, lift = 0;
+  if (em === 'flip') { const k = Math.min(1, et / 0.7); flipX = -k * Math.PI * 2; lift = Math.sin(k * Math.PI) * 1.1; armL = armR = -2.8; }
+  else if (em === 'spin') { spin = et * 14; armL = armR = -1.6; armLz = 1.2; armRz = -1.2; }
 
-  const base = M4.trs(st.x, st.y, st.z, (st.yaw || 0) + spin);
+  const base = flipX ? M4.mul(M4.mul(M4.trs(st.x, st.y + lift + 0.6, st.z, st.yaw || 0), M4.trs(0, 0, 0, 0, flipX, 0)), M4.trs(0, -0.6, 0)) : M4.trs(st.x, st.y, st.z, (st.yaw || 0) + spin);
   const add = (prim, color, local, extra = {}) => { out.push({ prim, color, m: M4.mul(base, local), ...extra }); };
   const box = (x, y, z, sx, sy, sz, color, ry = 0, rx = 0, rz = 0, extra) => add('cube', color, M4.trs(x, y, z, ry, rx, rz, sx, sy, sz), extra);
   const at = (x, y, z, sx, sy, sz, color, prim = 'cube', ry = 0, rx = 0, rz = 0, extra) => add(prim, color, M4.trs(x, y, z, ry, rx, rz, sx, sy, sz), extra);

@@ -28,7 +28,7 @@ export function setMutedPlayer(name, on) {
   store.set('muted-players', [...m]);
 }
 const isMutedPlayer = (name) => muted().has(String(name).toLowerCase());
-const EMOTE_LABEL = { wave: 'Wave', dance: 'Dance', cheer: 'Cheer', sit: 'Sit', point: 'Point' };
+const EMOTE_LABEL = { wave: 'Wave', dance: 'Dance', cheer: 'Cheer', sit: 'Sit', point: 'Point', flip: 'Flip', spin: 'Spin' };
 
 // opts: { world, title, by, mode, look, me, room (async ticket fn or null), onWin, onExit, onProfile, onTrade, test, low, note }
 export function startWorld(root, opts) {
@@ -159,7 +159,7 @@ export function startWorld(root, opts) {
     }
     if (down && (e.key === 'Enter' || e.key === '/') && room) { e.preventDefault(); chatInput.focus(); return; }
     if (down && e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) { resetPress = true; }
-    if (down && /^Digit[1-5]$/.test(e.code)) { emote(EMOTES[Number(e.code.slice(5)) - 1]); return; }
+    if (down && /^Digit[1-7]$/.test(e.code)) { emote(EMOTES[Number(e.code.slice(5)) - 1]); return; }
     if (down && e.code === 'KeyF' && isAdminMe && !e.repeat) { setFly(!fly); return; }
     const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'j', KeyQ: 'ql', KeyE: 'qr', ShiftLeft: 'dn', ShiftRight: 'dn' }[e.code];
     if (!k) return;
@@ -201,7 +201,7 @@ export function startWorld(root, opts) {
     if (joyId === e.pointerId) { joyId = null; joyVec = null; joy.classList.remove('on'); joy.firstChild.style.transform = ''; }
     if (camDrag && camDrag.id === e.pointerId) {
       // a quick click (not a drag) shoots in Paintball
-      if (paintOn() && Math.hypot(e.clientX - camDrag.sx, e.clientY - camDrag.sy) < 7 && performance.now() - camDrag.t < 350) shoot();
+      if (Math.hypot(e.clientX - camDrag.sx, e.clientY - camDrag.sy) < 7 && performance.now() - camDrag.t < 350) { if (paintOn()) shoot(); else if (snowOn()) throwSnow(); }
       camDrag = null;
     }
   };
@@ -336,6 +336,7 @@ export function startWorld(root, opts) {
       case 'kicked': case 'full': case 'error': showMsg(m.m, true); break;
       case 'round': onRound(m); break;
       case 'paint': onPaint(m); break;
+      case 'throw': if (opts.snow && Array.isArray(m.o) && Array.isArray(m.d)) addSnowball(m.o, m.d, m.id); break;
       case 'prize': toast(m.coins ? `+${m.coins} coins!` : "You won! (You've hit today's minigame coin limit.)", 2.5); sfx('coin'); if (opts.onPrize) opts.onPrize(); break;
     }
   }
@@ -407,8 +408,35 @@ export function startWorld(root, opts) {
   const shootBtn = h('button', { class: 'tbtn w3-shoot', type: 'button', hidden: true, 'aria-label': 'Shoot paint' }, 'Shoot');
   stage.append(cross, shootBtn);
   shootBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); shoot(); });
-  addEventListener('keydown', (e) => { if (e.code === 'KeyX' && paintOn() && !typing() && stage.isConnected) shoot(); });
+  addEventListener('keydown', (e) => { if (e.code !== 'KeyX' || typing() || !stage.isConnected || stopped) return; if (paintOn()) shoot(); else if (snowOn()) throwSnow(); });
   function paintOn() { return !!cfg && rs.phase === 'play' && rs.mode === 'paint' && inRound; }
+  /* ----- snowballs (Snowy Town): only for fun ----- */
+  const snowOn = () => !!opts.snow && !paintOn();
+  const snowballs = [];
+  let lastSnow = 0;
+  function addSnowball(o, d, by) { snowballs.push({ x: o[0], y: o[1], z: o[2], vx: d[0] * 20, vy: d[1] * 20, vz: d[2] * 20, life: 2.5, by }); }
+  function throwSnow() {
+    const now = performance.now();
+    if (!snowOn() || now - lastSnow < 350) return;
+    lastSnow = now;
+    const [dx, dy, dz] = aim.dir, l = Math.hypot(dx, dy + 0.22, dz);
+    const d = [dx / l, (dy + 0.22) / l, dz / l], o = [S.p.x, S.p.y + 1.3, S.p.z];
+    addSnowball(o, d, myId || 'me'); sfx('jump');
+    if (room) room.send({ t: 'throw', o, d });
+  }
+  function snowTick(dt, scene) {
+    for (let i = snowballs.length - 1; i >= 0; i--) {
+      const b = snowballs[i];
+      b.vy -= 18 * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; b.life -= dt;
+      let hit = b.life <= 0 || camSolid(b.x, b.y, b.z);
+      const mine = b.by === (myId || 'me');
+      if (!hit && !mine && Math.hypot(b.x - S.p.x, b.y - (S.p.y + 0.8), b.z - S.p.z) < 0.75) { hit = true; toast(`${nameOf(b.by)} got you with a snowball!`, 1.4); sfx('land'); }
+      if (!hit && mine) for (const o of others.values()) if (o.pos && Math.hypot(b.x - o.pos[0], b.y - (o.pos[1] + 0.8), b.z - o.pos[2]) < 0.75) { hit = true; toast(`Hit ${o.name}!`, 0.9); break; }
+      if (hit) { burst(b.x, b.y, b.z, ['#ffffff', '#dff4ff'], 10, 3, 2); snowballs.splice(i, 1); continue; }
+      scene.push({ prim: 'sphere', color: [1, 1, 1], m: M4.trs(b.x, b.y, b.z, 0, 0, 0, 0.32, 0.32, 0.32) });
+    }
+  }
+  if (opts.snow) setTimeout(() => { if (!stopped) toast('Click or press X to throw snowballs!', 3); }, 5000);
   function shoot() {
     const now = performance.now();
     if (!paintOn() || now - lastShot < ROUND.shotEvery) return;
@@ -522,14 +550,15 @@ export function startWorld(root, opts) {
     for (const g of gateList) {
       // the glowing portal surface
       const wx = g.axis === 'x' ? 3 : 0.25, wz = g.axis === 'x' ? 0.25 : 3;
-      scene.push({ prim: 'cube', color: g.color, glow: 1, alpha: 0.35 + Math.sin(clock * 3 + g.x) * 0.12, m: M4.trs(g.cx, 3, g.cz, 0, 0, 0, wx, 4.8, wz) });
-      scene.push({ prim: 'cube', color: [1, 1, 1], glow: 1, alpha: 0.25, m: M4.trs(g.cx, 1 + ((clock * 1.5 + g.x) % 4.5), g.cz, 0, 0, 0, wx * 0.9, 0.12, wz * 0.9) });
-      placeTag(g.tag, g.cx, 7.6, g.cz, false, 90);
+      const gy = g.y || 0;
+      scene.push({ prim: 'cube', color: g.color, glow: 1, alpha: 0.35 + Math.sin(clock * 3 + g.x) * 0.12, m: M4.trs(g.cx, gy + 3, g.cz, 0, 0, 0, wx, 4.8, wz) });
+      scene.push({ prim: 'cube', color: [1, 1, 1], glow: 1, alpha: 0.25, m: M4.trs(g.cx, gy + 1 + ((clock * 1.5 + g.x) % 4.5), g.cz, 0, 0, 0, wx * 0.9, 0.12, wz * 0.9) });
+      placeTag(g.tag, g.cx, gy + 7.6, g.cz, false, 90);
       if (gateCountT <= 0 && opts.onlineCount) { const n = opts.onlineCount(g.to); g.tag.lastChild.textContent = n ? `${n} playing` : ''; }
     }
     if (gateCountT <= 0) gateCountT = 3;
     if (fly || (inRound && rs.phase === 'play')) { travel = null; return; }
-    const inside = gateList.find((g) => px >= g.box[0] && px <= g.box[2] && pz >= g.box[1] && pz <= g.box[3] && py >= 0.5 && py <= 6);
+    const inside = gateList.find((g) => px >= g.box[0] && px <= g.box[2] && pz >= g.box[1] && pz <= g.box[3] && py >= (g.y || 0) + 0.5 && py <= (g.y || 0) + 6);
     if (!inside) { if (travel) { travel = null; toast('', 0.01); } return; }
     if (!travel || travel.g !== inside) { travel = { g: inside, t: 0 }; toast(`Going to ${inside.label}…`, 1.2); sfx('checkpoint'); }
     travel.t += dt;
@@ -739,6 +768,7 @@ export function startWorld(root, opts) {
     }
     roundTick(px, py, pz, scene, clock);
     gateTick(px, py, pz, scene, dt);
+    if (snowballs.length) snowTick(dt, scene);
     if (!fly) tipTick(dt);
     R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, far: opts.low ? 140 : 230 });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
