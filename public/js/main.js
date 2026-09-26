@@ -7,7 +7,7 @@ import './pages/create.js';
 import './pages/closet.js';
 import './pages/profile.js';
 import './pages/admin.js';
-import { renderMe, startSession, onSession, checkFriends } from './pages/account.js';
+import { renderMe, startSession, onSession, checkFriends, checkMail } from './pages/account.js';
 import { checkTrades } from './pages/closet.js';
 import { loadOnline } from './pages/worlds.js';
 import { drawPip } from './art.js';
@@ -43,4 +43,4 @@ startSession().then(() => {
   else if (!['w3', 'build', 'edit', 'play'].includes(currentView())) route();
   loadOnline(true);
 });
-setInterval(() => { if (!document.hidden) { loadOnline(); checkTrades(); checkFriends(); } }, 60000);
+setInterval(() => { if (!document.hidden) { loadOnline(); checkTrades(); checkFriends(); checkMail(); } }, 60000);

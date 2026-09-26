@@ -94,9 +94,16 @@ function pubRow(g) {
   vis.value = g.visibility;
   vis.addEventListener('change', async () => { try { await api.visibility(g.id, vis.value); toast('Saved.'); } catch (e) { toast(e.message); } });
   const link = g.kind === '3d' ? '#/w/' + g.id : '#/p/' + g.id;
+  // Builders can make their own games pay coins
+  let pay = null;
+  if (session.user && session.user.role === 'builder') {
+    pay = el('select', { 'aria-label': 'Coins it pays' }, ...[0, 10, 25].map((n) => el('option', { value: String(n) }, n ? `Pays ${n} coins` : 'Pays nothing')));
+    pay.value = String([0, 10, 25].includes(g.reward) ? g.reward : 0);
+    pay.addEventListener('change', async () => { try { await api.gameReward(g.id, Number(pay.value)); toast(Number(pay.value) ? `It pays ${pay.value} coins now (once per player).` : "It doesn't pay coins anymore."); } catch (e) { toast(e.message); } });
+  }
   return el('div', { class: 'pub-row' + (g.hidden ? ' hidden-game' : '') },
     el('div', {}, el('b', {}, g.name), el('span', { class: 'small' }, ` ${g.kind === '3d' ? '3D world' : '2D level'}, ${plural(g.plays, 'play')}, ${plural(g.likes, 'like')}${g.reward ? `, pays ${g.reward} coins` : ''}${g.hidden ? '. Hidden by reports or an admin.' : ''}`)),
-    el('div', { class: 'row' }, vis,
+    el('div', { class: 'row' }, vis, pay,
       el('button', { class: 'btn', type: 'button', onclick: (e) => copyText(siteBase() + link, e.currentTarget, 'Copy link') }, 'Copy link'),
       el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go(link) }, 'Play'),
       el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { if (await ask(`Unpublish "${g.name}"?`, 'It disappears for everyone. Your project stays, so you can publish again.', [{ label: 'Unpublish', value: true, cls: 'btn-danger' }])) { try { await api.remove(g.id); showCreate(); } catch (e) { toast(e.message); } } } }, 'Unpublish')));

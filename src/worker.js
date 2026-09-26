@@ -65,6 +65,11 @@ const SCHEMA = [
     status TEXT NOT NULL DEFAULT 'open', at INTEGER NOT NULL)`,
   'CREATE INDEX IF NOT EXISTS chat_reports_open ON chat_reports (status, at)',
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+  // mailbox: coins from the admin, a new role, trade offers, what your levels earned
+  `CREATE TABLE IF NOT EXISTS mail (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+    body TEXT NOT NULL, ref TEXT, data TEXT, at INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0)`,
+  'CREATE INDEX IF NOT EXISTS mail_user ON mail (user_id, at)',
+  'CREATE INDEX IF NOT EXISTS mail_ref ON mail (user_id, ref)',
   // everything admins do, so you can look back
   'CREATE TABLE IF NOT EXISTS admin_log (id INTEGER PRIMARY KEY AUTOINCREMENT, admin TEXT NOT NULL, path TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL)',
   // friends: a asked b. status 'pending' until b says yes, then 'ok'
@@ -82,6 +87,7 @@ const COLUMNS = [
   'ALTER TABLE games ADD COLUMN thumb TEXT',
   "ALTER TABLE users ADD COLUMN look TEXT NOT NULL DEFAULT '{}'",
   'ALTER TABLE users ADD COLUMN econ INTEGER NOT NULL DEFAULT 0',
+  "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT ''",
 ];
 
 // Tables are created automatically the first time the Worker runs.
@@ -201,6 +207,8 @@ async function handle(request, env, url) {
   if (path === '/friends' && method === 'GET') return friendsList(ctx);
   if (path === '/friends' && method === 'POST') return friendAction(ctx, await body(request));
   if (path === '/me/password' && method === 'POST') return changePassword(ctx, await body(request));
+  if (path === '/me/mail' && method === 'GET') return myMail(ctx);
+  if ((m = path.match(/^\/me\/mail\/(\d+|all)$/)) && method === 'POST') return mailAction(ctx, m[1], await body(request));
   fail(404, 'Unknown address.');
 }
 
@@ -258,12 +266,12 @@ async function sessionUser(db, request, env) {
   if (!token) { token = readCookie(request); viaCookie = !!token; }
   if (!token || token.length > 100) return null;
   const hash = await sha256(token);
-  const row = await db.prepare(`SELECT u.id, u.name, u.banned, s.expires FROM sessions s JOIN users u ON u.id = s.user_id
+  const row = await db.prepare(`SELECT u.id, u.name, u.banned, u.role, s.expires FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires > ?`).bind(hash, Date.now()).first();
   if (!row || row.banned) return null;
   // logins you keep using never run out
   if (row.expires - Date.now() < (SESSION_DAYS - 30) * DAY) await db.prepare('UPDATE sessions SET expires = ? WHERE token_hash = ?').bind(Date.now() + SESSION_DAYS * DAY, hash).run();
-  return { id: row.id, name: row.name, token, viaCookie, admin: isAdmin(env, row) };
+  return { id: row.id, name: row.name, token, viaCookie, admin: isAdmin(env, row), role: row.role || '' };
 }
 // "Keep me logged in": the login also goes in a cookie. Otherwise only this tab remembers it.
 const remember = (resp, input, token) => (input && input.remember === false ? resp : withCookie(resp, token, SESSION_DAYS));
@@ -282,7 +290,8 @@ function checkPassword(pw) {
 async function account(ctx, u, extra = {}) {
   const { db, env } = ctx;
   if (!u.econ) await migrateUser(db, u.id, u.progress);
-  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u) }, progress: JSON.parse(u.progress || '{}'), ...(await accountExtras(db, u.id)) };
+  const [ex, mail, rr] = await Promise.all([accountExtras(db, u.id), db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(u.id).first(), db.prepare('SELECT role FROM users WHERE id = ?').bind(u.id).first()]);
+  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u), role: (rr && rr.role) || '' }, progress: JSON.parse(u.progress || '{}'), ...ex, unread: mail.n };
 }
 async function signup(ctx, input) {
   const { db, env, ip } = ctx;
@@ -370,7 +379,7 @@ async function deleteMe(ctx) {
     db.prepare('DELETE FROM games WHERE user_id = ?').bind(user.id),
     db.prepare('DELETE FROM collabs WHERE project_id IN (SELECT id FROM projects WHERE owner_id = ?)').bind(user.id),
     db.prepare('DELETE FROM projects WHERE owner_id = ?').bind(user.id),
-    ...['sessions', 'daily', 'wallets', 'inventory', 'level_progress', 'claims', 'collabs', 'presence', 'best_times'].map((t) => db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(user.id)),
+    ...['sessions', 'daily', 'wallets', 'inventory', 'level_progress', 'claims', 'collabs', 'presence', 'best_times', 'mail'].map((t) => db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(user.id)),
     db.prepare('DELETE FROM friends WHERE a = ? OR b = ?').bind(user.id, user.id),
     db.prepare("UPDATE trades SET status = 'cancelled' WHERE status = 'open' AND (from_id = ? OR to_id = ?)").bind(user.id, user.id),
     db.prepare('DELETE FROM users WHERE id = ?').bind(user.id),
@@ -386,6 +395,52 @@ async function findUsers(ctx) {
   const { results } = await ctx.db.prepare('SELECT name, look FROM users WHERE name_lower LIKE ? AND banned = 0 ORDER BY name_lower LIMIT 10').bind(q + '%').all();
   return json({ users: results.map((u) => ({ name: u.name, look: lookOf(u.look) })) });
 }
+/* ---------------- mailbox ---------------- */
+export const mailStmt = (db, uid, kind, title, text, ref = null, data = null) =>
+  db.prepare('INSERT INTO mail (user_id, kind, title, body, ref, data, at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(uid, kind, String(title).slice(0, 90), String(text).slice(0, 600), ref, data ? JSON.stringify(data) : null, Date.now());
+async function myMail(ctx) {
+  const user = needUser(ctx);
+  const { results } = await ctx.db.prepare('SELECT id, kind, title, body, data, at, read FROM mail WHERE user_id = ? ORDER BY at DESC LIMIT 60').bind(user.id).all();
+  return json({ mail: results.map((x) => ({ ...x, read: !!x.read, data: x.data ? JSON.parse(x.data) : null })), unread: results.filter((x) => !x.read).length });
+}
+async function mailAction(ctx, id, input) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  if (id === 'all') {
+    if (input.action === 'read') await db.prepare('UPDATE mail SET read = 1 WHERE user_id = ?').bind(user.id).run();
+    else if (input.action === 'delete') await db.prepare('DELETE FROM mail WHERE user_id = ? AND read = 1').bind(user.id).run();
+    else fail(400, 'Unknown action.');
+  } else if (input.action === 'delete') await db.prepare('DELETE FROM mail WHERE id = ? AND user_id = ?').bind(Number(id), user.id).run();
+  else fail(400, 'Unknown action.');
+  return json({ ok: true });
+}
+
+/* ---------------- creators earn coins when people play and like their games ---------------- */
+const CREATOR = { like: 3, play: 1, dailyCap: 300 };
+async function payCreator(ctx, game, what) {
+  const { db } = ctx, user = ctx.user;
+  if (!user || !game.user_id || game.user_id === user.id) return;
+  // each player counts once per game for plays (likes are already once per player)
+  if (what === 'play') {
+    const r = await db.prepare('INSERT OR IGNORE INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(user.id, 'pl:' + game.id, Date.now()).run();
+    if (!r.meta.changes) return;
+  }
+  const today = Date.now() - (Date.now() % DAY), date = new Date(today).toISOString().slice(0, 10);
+  const got = await db.prepare("SELECT COALESCE(SUM(delta), 0) AS n FROM ledger WHERE user_id = ? AND why LIKE 'creator%' AND at >= ?").bind(game.user_id, today).first();
+  const coins = Math.min(CREATOR[what], Math.max(0, CREATOR.dailyCap - got.n));
+  // one mail per game per day that keeps adding up
+  const ref = `earn:${game.id}:${date}`;
+  const old = await db.prepare('SELECT id, data FROM mail WHERE user_id = ? AND ref = ?').bind(game.user_id, ref).first();
+  const d = old && old.data ? JSON.parse(old.data) : { game: game.id, name: game.name, likes: 0, plays: 0, coins: 0 };
+  d[what === 'like' ? 'likes' : 'plays']++; d.coins += coins;
+  const text = `Today "${d.name}" got ${d.plays} new ${d.plays === 1 ? 'player' : 'players'} and ${d.likes} ${d.likes === 1 ? 'like' : 'likes'}. You earned ${d.coins} coins from it.`;
+  const stmts = [];
+  if (coins) stmts.push(...coinStmts(db, game.user_id, coins, 'creator ' + game.id));
+  stmts.push(old ? db.prepare('UPDATE mail SET body = ?, data = ?, at = ?, read = 0 WHERE id = ?').bind(text, JSON.stringify(d), Date.now(), old.id)
+    : mailStmt(db, game.user_id, 'earn', `People are playing ${d.name}!`, text, ref, d));
+  await db.batch(stmts);
+}
+
 /* ---------------- change my password ---------------- */
 async function changePassword(ctx, input) {
   const user = needUser(ctx);
@@ -456,7 +511,7 @@ async function friendAction(ctx, input) {
 
 async function profile(ctx, name) {
   const { db } = ctx;
-  const u = await db.prepare('SELECT id, name, created_at, banned FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
+  const u = await db.prepare('SELECT id, name, created_at, banned, role FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
   if (!u || u.banned) fail(404, 'No player with that name.');
   const [items, games, here] = await Promise.all([
     publicItems(db, u.id),
@@ -468,7 +523,7 @@ async function profile(ctx, name) {
     const pub = builtinWorld(here.world) || (await db.prepare("SELECT 1 FROM games WHERE id = ? AND visibility = 'public' AND hidden = 0").bind(here.world).first());
     playing = pub ? { world: here.world, code: here.private ? null : here.code, name: worldName(here.world) } : { world: null, code: null, name: null };
   }
-  return json({ name: u.name, since: u.created_at, ...items, games: games.results.map(row), playing });
+  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), ...items, games: games.results.map(row), playing });
 }
 const worldName = (id) => { const b = builtinWorld(id); return b ? b.name : null; };
 
@@ -575,6 +630,15 @@ async function ownGame(ctx, id) {
 }
 async function updateGame(ctx, id, input) {
   const g = await ownGame(ctx, id);
+  if (input.only === 'reward') {
+    // Builders (a role the admin gives out) can make their own games pay a few coins
+    if (!ctx.user || (ctx.user.role !== 'builder' && !ctx.user.admin)) fail(403, 'Only Builders can make their levels pay coins. Ask the admin!');
+    if (g.user_id !== ctx.user.id && !ctx.user.admin) fail(403, 'You can only do that for your own games.');
+    const amount = Math.floor(Number(input.amount) || 0);
+    if (![0, 10, 25].includes(amount)) fail(400, 'Pick 0, 10 or 25 coins.');
+    await ctx.db.prepare('UPDATE games SET reward = ? WHERE id = ?').bind(amount, id).run();
+    return json({ ok: true, id, reward: amount });
+  }
   if (input.only === 'visibility') {
     if (!VIS.includes(input.visibility)) fail(400, 'Pick public, unlisted or private.');
     await ctx.db.prepare('UPDATE games SET visibility = ? WHERE id = ?').bind(input.visibility, id).run();
@@ -601,18 +665,19 @@ function removeGame(db, id) {
 }
 async function gameAction(ctx, id, action) {
   const { db } = ctx;
-  const game = await db.prepare('SELECT id, visibility, user_id, project_id FROM games WHERE id = ? AND hidden = 0').bind(id).first();
+  const game = await db.prepare('SELECT id, name, visibility, user_id, project_id FROM games WHERE id = ? AND hidden = 0').bind(id).first();
   if (!game || !(await canSeeGame(ctx, game))) fail(404, 'That game was not found. It may have been removed.');
   if (action === 'play') {
     const r = await db.prepare('INSERT OR IGNORE INTO plays (game_id, who, at) VALUES (?, ?, ?)').bind(id, ctx.ip, Date.now()).run();
     if (r.meta.changes) await db.prepare('UPDATE games SET plays = plays + 1 WHERE id = ?').bind(id).run();
+    await payCreator(ctx, game, 'play').catch(() => {});
     return json({ ok: true });
   }
   const user = needUser(ctx);
   const who = 'u:' + user.id;
   if (action === 'like') {
     const r = await db.prepare('INSERT OR IGNORE INTO likes (game_id, who) VALUES (?, ?)').bind(id, who).run();
-    if (r.meta.changes) await db.prepare('UPDATE games SET likes = likes + 1 WHERE id = ?').bind(id).run();
+    if (r.meta.changes) { await db.prepare('UPDATE games SET likes = likes + 1 WHERE id = ?').bind(id).run(); await payCreator(ctx, game, 'like').catch(() => {}); }
     return json({ ok: true });
   }
   const input = await body(ctx.request);
@@ -788,7 +853,7 @@ async function joinPlay(ctx, input) {
   const u = await db.prepare('SELECT look FROM users WHERE id = ?').bind(user.id).first();
   const w = await getWallet(db, user.id);
   const look = cleanLook(lookOf(u && u.look), w.items);
-  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, a: user.admin, w: world.id, c: code, x: now + 20e3 });
+  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, o: user.role || undefined, a: user.admin, w: world.id, c: code, x: now + 20e3 });
   return json({ ticket, code, world, private: priv });
 }
 async function joinEdit(ctx, input) {
@@ -809,7 +874,7 @@ async function connectRoom(request, env, url) {
   const p = await readTicket(await roomSecret(env), url.searchParams.get('t'));
   if (!p) fail(401, 'That ticket expired. Join again.');
   const headers = new Headers(request.headers);
-  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, admin: !!p.a, world: p.w, code: p.c, project: p.p }));
+  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, role: p.o || '', admin: !!p.a, world: p.w, code: p.c, project: p.p }));
   return env.ROOMS.get(env.ROOMS.idFromName(p.r)).fetch(new Request(request, { headers }));
 }
 async function kickEverywhere(env, db, uid, why) {
@@ -969,14 +1034,14 @@ async function admin(ctx, path, method) {
   }
   m = path.match(/^\/users\/([A-Za-z0-9_]{3,16})$/);
   if (m && method === 'GET') {
-    const u = await db.prepare('SELECT id, name, banned, created_at FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
+    const u = await db.prepare('SELECT id, name, banned, created_at, role FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
     if (!u) fail(404, 'No user with that name.');
     const [w, ledger, games] = await Promise.all([
       getWallet(db, u.id),
       db.prepare('SELECT delta, why, at FROM ledger WHERE user_id = ? ORDER BY at DESC LIMIT 25').bind(u.id).all(),
       db.prepare('SELECT COUNT(*) AS n FROM games WHERE user_id = ?').bind(u.id).first(),
     ]);
-    return json({ name: u.name, banned: !!u.banned, since: u.created_at, admin: isAdmin(env, u), wallet: w, ledger: ledger.results, games: games.n });
+    return json({ name: u.name, banned: !!u.banned, since: u.created_at, admin: isAdmin(env, u), role: u.role || '', wallet: w, ledger: ledger.results, games: games.n });
   }
   if (m && method === 'POST') {
     const input = await body(ctx.request);
@@ -990,13 +1055,15 @@ async function admin(ctx, path, method) {
         amount -= (await getWallet(db, u.id)).coins;
         if (!amount) return json({ ok: true, wallet: await getWallet(db, u.id) });
       } else if (!amount || Math.abs(amount) > 1000000) fail(400, 'Pick an amount between -1000000 and 1000000.');
-      try { await db.batch(coinStmts(db, u.id, amount, 'admin ' + user.name)); } catch (e) { fail(400, "They don't have that many coins to take away."); }
+      const note = action === 'grant' && amount > 0 && u.id !== user.id ? [mailStmt(db, u.id, 'gift', `You got ${amount} coins!`, `${user.name} gave you ${amount} coins.${input.note ? ' "' + String(input.note).slice(0, 200) + '"' : ''}`)] : [];
+      try { await db.batch([...coinStmts(db, u.id, amount, 'admin ' + user.name), ...note]); } catch (e) { fail(400, "They don't have that many coins to take away."); }
       return json({ ok: true, wallet: await getWallet(db, u.id) });
     }
     if (action === 'give' || action === 'take') {
       const f = findItem(input.item);
       if (!f) fail(400, 'Unknown item.');
-      try { await db.batch(itemStmts(db, u.id, f.key, action === 'give' ? 1 : -1)); } catch (e) { if (isConstraint(e)) fail(400, "They don't have that item."); throw e; }
+      const note = action === 'give' && u.id !== user.id ? [mailStmt(db, u.id, 'gift', `You got a ${f.item.name}!`, `${user.name} gave you a ${f.item.name}. It's in your closet.`)] : [];
+      try { await db.batch([...itemStmts(db, u.id, f.key, action === 'give' ? 1 : -1), ...note]); } catch (e) { if (isConstraint(e)) fail(400, "They don't have that item."); throw e; }
       if (action === 'take') {
         const w = await getWallet(db, u.id);
         await db.prepare('UPDATE users SET look = ? WHERE id = ?').bind(JSON.stringify(w.look), u.id).run();
@@ -1014,6 +1081,16 @@ async function admin(ctx, path, method) {
         db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(u.id),
       ]);
       return json({ ok: true });
+    }
+    if (action === 'role') {
+      const role = ['builder', ''].includes(input.role) ? input.role : null;
+      if (role === null) fail(400, 'Unknown role.');
+      await db.batch([
+        db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u.id),
+        role ? mailStmt(db, u.id, 'role', "You're a Builder now!", `${user.name} made you a Builder. You get a Builder badge, and you can make your own published levels and worlds pay coins (on the Create page).`)
+          : mailStmt(db, u.id, 'role', 'Your Builder role was removed', `${user.name} took away your Builder role.`),
+      ]);
+      return json({ ok: true, role });
     }
     if (action === 'kick') { if (isAdmin(env, u)) fail(400, "You can't kick an admin."); await kickEverywhere(env, db, u.id, 'An admin removed you from this server.'); return json({ ok: true }); }
     if (isAdmin(env, u)) fail(400, "You can't ban an admin.");

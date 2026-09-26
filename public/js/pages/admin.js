@@ -121,6 +121,12 @@ export async function manageUser(name) {
       if (pw.value.length < 6) { note.textContent = 'Passwords need at least 6 characters.'; return; }
       act('password', { password: pw.value }, () => (self ? 'Password changed. Log in again on this computer.' : `Done. Tell ${u.name} their new password, and to change it.`));
     } }, 'Set password'))) : null;
+  // roles
+  const roles = u.admin ? null : el('section', {}, el('h3', {}, 'Role'),
+    el('p', { class: 'small' }, u.role === 'builder' ? `${u.name} is a Builder: they have a Builder badge and can make their own games pay coins.` : 'Builders get a Builder badge and can make their own published games pay 10 or 25 coins.'),
+    el('div', { class: 'row', style: 'margin-top:8px' }, u.role === 'builder'
+      ? el('button', { class: 'btn', type: 'button', onclick: () => act('role', { role: '' }, () => `${u.name} isn't a Builder anymore.`) }, 'Remove Builder')
+      : el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('role', { role: 'builder' }, () => `${u.name} is a Builder now! They got a mail about it.`) }, 'Make Builder')));
   // kick / ban
   const safety = u.admin ? null : el('section', {}, el('h3', {}, 'Safety'),
     el('div', { class: 'row' },
@@ -130,7 +136,7 @@ export async function manageUser(name) {
     u.ledger.length ? el('ul', { class: 'ledger' }, ...u.ledger.map((l) => el('li', {}, el('span', {}, `${l.why} · ${timeAgo(l.at)}`), el('span', { class: l.delta < 0 ? 'minus' : 'plus' }, (l.delta > 0 ? '+' : '') + l.delta)))) : el('p', { class: 'small' }, 'Nothing yet.'));
   box.replaceChildren(
     el('p', { class: 'small' }, `${u.admin ? 'Admin. ' : ''}${u.banned ? 'Banned. ' : ''}Playing since ${new Date(u.since).toLocaleDateString()}. ${plural(u.games, 'published game')}. `, el('a', { class: 'linkish', href: '#/u/' + u.name, 'data-go': '#/u/' + u.name }, 'Profile')),
-    note, coins, items, pass, safety, history);
+    note, coins, items, roles, pass, safety, history);
 }
 async function findUsers() {
   const box = $('#admin-users'); box.innerHTML = '';

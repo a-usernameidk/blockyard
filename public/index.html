@@ -24,6 +24,7 @@
   <div class="me">
     <button class="btn icon-btn" id="mute" aria-pressed="false" aria-label="Sound effects"></button>
     <button class="btn icon-btn" id="music" aria-pressed="false" aria-label="Music"></button>
+    <button class="btn icon-btn mail-btn" id="mail-btn" type="button" aria-label="Mailbox" title="Mailbox" hidden><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5" fill="#fff" stroke="#1d2340" stroke-width="2.4"/><path d="M3.5 6.5 12 13l8.5-6.5" fill="none" stroke="#1d2340" stroke-width="2.4" stroke-linejoin="round"/></svg><span class="count" id="mail-count" hidden></span></button>
     <button class="btn coin-chip" id="coin-chip" data-go="#/closet" title="Your coins"><span id="coin-icon"></span><span id="coin-count">0</span></button>
     <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span class="lvl-chip" id="me-lvl" hidden></span><span id="me-name">Log in</span><span class="count" id="me-count" hidden></span></button>
   </div>
@@ -474,6 +475,14 @@
     <p class="msg" id="fl-msg"></p>
     <div id="fl-body" class="mail-list"></div>
     <div class="row"><button class="btn" type="button" data-close>Close</button></div>
+  </div>
+</div>
+
+<div class="modal" id="mail-modal" hidden role="dialog" aria-modal="true" aria-labelledby="mail-h">
+  <div class="panel mail-panel">
+    <h2 id="mail-h">Mailbox</h2>
+    <div id="mail-list" class="mail-list"></div>
+    <div class="row"><button class="btn" type="button" id="mail-clear">Delete read mail</button><button class="btn" type="button" data-close>Close</button></div>
   </div>
 </div>
 

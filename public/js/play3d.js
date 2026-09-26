@@ -273,7 +273,7 @@ export function startWorld(root, opts) {
   }
   function addPlayer(p) {
     if (others.has(p.id)) return;
-    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.name), h('span', { class: 'w3-bubble', hidden: true }));
+    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.role === 'builder' ? h('span', { class: 'lvl builder' }, 'Builder') : null, p.name), h('span', { class: 'w3-bubble', hidden: true }));
     tags.append(tag);
     others.set(p.id, { ...p, snaps: p.p ? [{ t: performance.now(), p: p.p, r: p.r || 0, a: p.a || 0 }] : [], tag, walk: 0, bubbleUntil: 0, emote: null, et: 0, trailT: 0 });
     renderList();

@@ -47,7 +47,8 @@ export const editLevel = (lv) => remixHandler && remixHandler(lv);
 export const MAP = WORLDS.flatMap((w) => w.ids).map((id) => BUILTIN.find((b) => b.id === id)).filter(Boolean);
 const worldOf = (i) => { let n = i; for (const w of WORLDS) { if (n < w.ids.length) return { name: w.name, n: n + 1 }; n -= w.ids.length; } return { name: '', n: i + 1 }; };
 const beaten = (id) => { const b = progress.level(id); return !!(b && b.won); };
-const unlocked = (i) => i === 0 || beaten(MAP[i - 1].id);
+// open when the one before is beaten (or you already beat this one or a later one, so new levels never lock old ones)
+const unlocked = (i) => i === 0 || beaten(MAP[i - 1].id) || MAP.slice(i).some((lv) => beaten(lv.id));
 export function nextLevelIndex() { const i = MAP.findIndex((lv, k) => unlocked(k) && !beaten(lv.id)); return i < 0 ? 0 : i; }
 let selected = -1;
 
@@ -94,7 +95,7 @@ function renderMap() {
   const nodes = MAP.map((lv, i) => {
     const open = unlocked(i), done = beaten(lv.id);
     const w = worldOf(i);
-    const b = el('button', { class: `node node-${lv.style}${open ? '' : ' locked'}${done ? ' done' : ''}${i === selected ? ' sel' : ''}${w.n === 1 && i > 0 ? ' world-start' : ''}`, type: 'button', 'aria-label': `${w.name} level ${w.n}: ${lv.n}${open ? '' : ' (locked)'}` },
+    const b = el('button', { class: `node node-${lv.style}${open ? '' : ' locked'}${done ? ' done' : ''}${i === selected ? ' sel' : ''}${w.n === 1 ? ' world-start' : ''}`, type: 'button', 'data-world': w.name, 'aria-label': `${w.name} level ${w.n}: ${lv.n}${open ? '' : ' (locked)'}` },
       open ? el('span', { class: 'node-n' }, String(i + 1)) : iconCanvas('lock', 26));
     if (open) { const sr = starRow(progress.stars(lv.id), 13); sr.classList.add('node-stars'); b.append(sr); }
     b.addEventListener('click', () => { selected = i; renderMap(); });

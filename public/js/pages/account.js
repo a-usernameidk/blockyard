@@ -1,6 +1,6 @@
 // Logging in and out, the account pop-up, the coin counter, sound buttons, and sending
 // a guest's finished runs to the server once they have an account.
-import { $, $$, el, session, ask, toast, openModal, closeModal, copyText, pipCanvas, route, go, currentView } from '../app.js';
+import { $, $$, el, session, ask, toast, openModal, closeModal, copyText, pipCanvas, route, go, currentView, timeAgo } from '../app.js';
 import { api, auth, accounts, isOnline, store } from '../api.js';
 import { progress, proofs } from '../progress.js';
 import { isRude } from '../format.js';
@@ -54,7 +54,7 @@ renderMute();
 /* ---------------- session ---------------- */
 const signedInFns = new Set();
 export function onSession(fn) { signedInFns.add(fn); }
-const changed = () => { renderMe(); checkFriends(); for (const fn of signedInFns) fn(session.user); };
+const changed = () => { renderMe(); checkFriends(); checkMail(); for (const fn of signedInFns) fn(session.user); };
 
 export async function startSession() {
   const on = await isOnline();
@@ -267,6 +267,33 @@ $('#acct-pw-change').addEventListener('click', async () => {
   if (!ok) return;
   try { await api.changePassword(old.value, pw.value); toast('Password changed!'); } catch (e) { toast(e.message); }
 });
+
+/* ---------------- mailbox ---------------- */
+function setMailCount(n) { const c = $('#mail-count'); c.hidden = !n; c.textContent = String(n); $('#mail-btn').hidden = !session.user; }
+export async function checkMail() {
+  if (!session.user) { setMailCount(0); return; }
+  try { const r = await api.mail(); setMailCount(r.unread); return r; } catch (e) { return null; }
+}
+const MAIL_ICON = { gift: '🎁', role: '⭐', trade: '🔁', earn: '🪙' };
+async function openMail() {
+  const list = $('#mail-list');
+  list.replaceChildren(el('p', { class: 'small' }, 'Loading…'));
+  openModal('#mail-modal');
+  const r = await checkMail();
+  if (!r) { list.replaceChildren(el('p', { class: 'small' }, "Couldn't load your mail.")); return; }
+  list.replaceChildren(...(r.mail.length ? r.mail.map((m) => el('div', { class: 'mail' + (m.read ? '' : ' unread') },
+    el('h3', {}, el('span', {}, `${MAIL_ICON[m.kind] || '✉️'} ${m.title}`), el('span', { class: 'small' }, timeAgo(m.at))),
+    el('p', {}, m.body),
+    el('div', { class: 'row' },
+      m.kind === 'trade' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet/trades'); } }, 'See trades') : null,
+      m.kind === 'gift' ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet'); } }, 'Open closet') : null,
+      m.kind === 'earn' && m.data && m.data.game ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/create'); } }, 'My games') : null,
+      el('button', { class: 'btn', type: 'button', onclick: async (e) => { try { await api.mailAction(m.id, 'delete'); e.target.closest('.mail').remove(); } catch (err) { toast(err.message); } } }, 'Delete'))))
+    : [el('p', { class: 'mail-empty' }, 'No mail yet. Gifts, trade offers and what your levels earn show up here.')]));
+  if (r.unread) { api.mailAction('all', 'read').catch(() => {}); setMailCount(0); }
+}
+$('#mail-btn').addEventListener('click', openMail);
+$('#mail-clear').addEventListener('click', async () => { try { await api.mailAction('all', 'delete'); openMail(); } catch (e) { toast(e.message); } });
 
 /* ---------------- friends ---------------- */
 let friendData = null;

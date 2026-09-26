@@ -67,6 +67,8 @@ const takeItem = (db, uid, key) => [
 // For admins: add or remove one of an item (limited stock isn't touched).
 export const itemStmts = (db, uid, key, n) => (n > 0 ? [giveItem(db, uid, key)] : [...takeItem(db, uid, key), tidy(db, uid)]);
 const tidy = (db, a, b = a) => db.prepare('DELETE FROM inventory WHERE qty = 0 AND user_id IN (?, ?)').bind(a, b);
+// a message in someone's mailbox
+const mail = (db, uid, kind, title, text) => db.prepare('INSERT INTO mail (user_id, kind, title, body, at) VALUES (?, ?, ?, ?, ?)').bind(uid, kind, title.slice(0, 90), text.slice(0, 600), Date.now());
 const parse = (t, fallback = {}) => { try { const v = JSON.parse(t || ''); return v && typeof v === 'object' ? v : fallback; } catch (e) { return fallback; } };
 
 const owns = (items, kind, id) => FREE.includes(id) || (items[kind + ':' + id] || 0) > 0;
@@ -519,8 +521,11 @@ async function newTrade(ctx, input) {
   for (const k of want) if (!theirs.items[k]) fail(400, `${to.name} doesn't have one of the items you asked for.`);
   if (giveCoins > mine.coins) fail(400, "You don't have that many coins.");
   const id = randomId(10);
-  await db.prepare('INSERT INTO trades (id, from_id, to_id, give, want, give_coins, want_coins, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, user.id, to.id, JSON.stringify(give), JSON.stringify(want), giveCoins, wantCoins, Date.now()).run();
+  await db.batch([
+    db.prepare('INSERT INTO trades (id, from_id, to_id, give, want, give_coins, want_coins, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, user.id, to.id, JSON.stringify(give), JSON.stringify(want), giveCoins, wantCoins, Date.now()),
+    mail(db, to.id, 'trade', `${user.name} wants to trade!`, `${user.name} sent you a trade offer. Open Closet → Trades to see it.`),
+  ]);
   return json({ ok: true, id }, 201);
 }
 
@@ -573,6 +578,7 @@ async function tradeAction(ctx, id, input) {
     fail(409, "This trade can't happen anymore. Someone doesn't have those items or coins now.");
   }
   await fixLook(db, A);
+  await mail(db, A, 'trade', 'Trade accepted!', `${user.name} accepted your trade. Your new stuff is in your closet.`).run().catch(() => {});
   return json({ ok: true, wallet: await fixLook(db, Bid) });
 }
 
