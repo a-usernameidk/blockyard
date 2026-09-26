@@ -1,7 +1,7 @@
 // The 3D builder: fly around, place and break blocks, paint, pick, fill boxes, test your obby,
 // and build together with friends live (their edits show up as they make them).
 import { createRenderer, M4, hexRGB, raycast } from './gl.js';
-import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, PALETTE, SKIES, MODES, SX, SY, SZ, idx, MAX_BLOCKS, normalizeWorld } from './world.js';
+import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, PALETTE, SKIES, MODES, GAME_TYPES, SX, SY, SZ, idx, MAX_BLOCKS, normalizeWorld } from './world.js';
 import { avatarParts } from './avatar3d.js';
 import { openRoom } from './net.js';
 import { sfx, unlockAudio } from './audio.js';
@@ -25,7 +25,8 @@ export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') +
 
 // opts: { world, title, me, look, room (ticket fn or null), canPublish, onChange(world), onPublish(world, proof), onFriends(), onExit(), low }
 export function startBuilder(root, opts) {
-  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day' };
+  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '' };
+  const typeOf = (m) => (m.game || m.mode);
   let grid = decodeBlocks(opts.world.b || '');
   let proof = opts.proof || null;
   const ed = { tool: 'place', block: B.plastic, color: 9, box: false, boxA: null, hover: null, undo: [], redo: [] };
@@ -57,7 +58,7 @@ export function startBuilder(root, opts) {
   const redoBtn = h('button', { class: 'btn', type: 'button', title: 'Redo (Ctrl+Y)', onclick: () => redo() }, 'Redo');
   const modeSel = h('select', { 'aria-label': 'World type' }, ...Object.entries(MODES).map(([v, l]) => h('option', { value: v }, l)));
   const skySel = h('select', { 'aria-label': 'Sky' }, ...Object.entries(SKIES).map(([v, s]) => h('option', { value: v }, s.name)));
-  modeSel.value = meta.mode; skySel.value = meta.sky;
+  modeSel.value = typeOf(meta); skySel.value = meta.sky;
   const palette = h('div', { class: 'b3-blocks' });
   const swatches = h('div', { class: 'swatches b3-colors' });
   const blockTip = h('p', { class: 'small b3-tip' });
@@ -266,17 +267,17 @@ export function startBuilder(root, opts) {
   function setMeta(f, send = true) {
     Object.assign(meta, f);
     if (f.sky) { R.setSky(meta.sky); skySel.value = meta.sky; }
-    if (f.mode) modeSel.value = meta.mode;
+    if (f.mode || f.game != null) modeSel.value = typeOf(meta);
     if (f.n && document.activeElement !== nameIn) nameIn.value = meta.n;
     if (send && room) room.send({ t: 'op', op: { k: 'meta', f }, n: ++seq });
     changed();
   }
-  modeSel.addEventListener('change', () => setMeta({ mode: modeSel.value }));
+  modeSel.addEventListener('change', () => { const v = modeSel.value, g = GAME_TYPES.includes(v); setMeta({ mode: g ? 'hangout' : v, game: g ? v : '' }); });
   skySel.addEventListener('change', () => setMeta({ sky: skySel.value }));
   let nameT = 0;
   nameIn.addEventListener('input', () => { meta.n = nameIn.value.trim().slice(0, 40) || 'My world'; clearTimeout(nameT); nameT = setTimeout(() => setMeta({ n: meta.n }), 500); });
 
-  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, b: encodeBlocks(grid) }; }
+  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), b: encodeBlocks(grid) }; }
   let changeT = 0;
   function changed() {
     clearTimeout(changeT);
@@ -316,8 +317,8 @@ export function startBuilder(root, opts) {
           // the room's copy is the real one: load it, then re-send anything we did while disconnected
           const mine = pending.size ? [...pending.keys()].map((i) => [i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ, grid.t[i], grid.c[i]]) : [];
           grid = decodeBlocks(m.doc.b); R.setGrid(grid);
-          meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky };
-          R.setSky(meta.sky); skySel.value = meta.sky; modeSel.value = meta.mode; if (document.activeElement !== nameIn) nameIn.value = meta.n;
+          meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky, game: m.doc.game || '' };
+          R.setSky(meta.sky); skySel.value = meta.sky; modeSel.value = typeOf(meta); if (document.activeElement !== nameIn) nameIn.value = meta.n;
           pending.clear();
           if (mine.length) { applyLocal(mine); share(mine); }
           changed();

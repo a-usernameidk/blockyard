@@ -7,6 +7,7 @@ import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
 import { openRoom } from './net.js';
 import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
 import { store } from './api.js';
+import { GAMES, ROUND, onHill, inBox } from './games.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -91,7 +92,7 @@ export function startWorld(root, opts) {
   const gfxBtn = h('button', { class: 'btn', type: 'button', title: 'Graphics quality' }, opts.low ? 'Graphics: fast' : 'Graphics: pretty');
   const bar = h('div', { class: 'bar w3-bar' },
     h('button', { class: 'btn', type: 'button', onclick: () => opts.onExit && opts.onExit() }, opts.test ? 'Back to building' : 'Leave'),
-    h('div', { class: 'bar-title' }, h('h2', {}, opts.title || world.n), h('span', { class: 'by' }, opts.by ? 'by ' + opts.by : obby ? 'Obby' : 'Hangout')),
+    h('div', { class: 'bar-title' }, h('h2', {}, opts.title || world.n), h('span', { class: 'by' }, opts.by ? 'by ' + opts.by : opts.game ? 'Minigames' : obby ? 'Obby' : 'Hangout')),
     obby ? restartBtn : null, resetBtn, inviteBtn, gfxBtn, fullBtn);
   /* ---------------- admin tools (only for admins) ---------------- */
   const isAdminMe = !!(opts.me && opts.me.admin);
@@ -240,7 +241,11 @@ export function startWorld(root, opts) {
         case 'crumble': sfx('crumble'); break;
         case 'teleport': sfx('bounce'); burst(e.x, e.y + 0.8, e.z, ['#b06cff', '#ffffff', '#7cc8ff'], 14, 3, 3); burst(S.p.x, S.p.y + 0.8, S.p.z, ['#b06cff', '#ffffff', '#7cc8ff'], 14, 3, 3); toast('Whoosh!', 0.8); break;
         case 'die': sfx('die'); burst(e.x, e.y + 0.6, e.z, [look.color, '#ffffff'], 16, 4, 4); fade.classList.remove('on'); void fade.offsetWidth; fade.classList.add('on'); break;
-        case 'win': sfx('win'); won(); break;
+        case 'win':
+          sfx('win');
+          if (inRound && rs.mode === 'race') { if (room) room.send({ t: 'fin' }); toast('Finished!', 2); }
+          else won();
+          break;
       }
     }
     S.events.length = 0;
@@ -303,6 +308,7 @@ export function startWorld(root, opts) {
         addLine(null, others.size ? `You joined. ${others.size} other ${others.size === 1 ? 'player is' : 'players are'} here.` : 'You joined. Nobody else is here yet. Press Invite to bring a friend.', null, true);
         if (m.code) { inviteBtn.hidden = false; inviteBtn.onclick = () => invite(m.code); }
         lastSent = '';
+        if (m.round) onRound(m.round);
         break;
       case 'join': addPlayer(m.player); addLine(null, `${m.player.name} joined.`, null, true); sfx('join'); break;
       case 'leave': { const o = others.get(m.id); if (o) addLine(null, `${o.name} left.`, null, true); removePlayer(m.id); break; }
@@ -320,6 +326,8 @@ export function startWorld(root, opts) {
       case 'look': { const o = others.get(m.id); if (o) { o.look = m.look; renderList(); } break; }
       case 'sys': addLine(null, m.m, null, m.big ? 'big' : true); break;
       case 'kicked': case 'full': case 'error': showMsg(m.m, true); break;
+      case 'round': onRound(m); break;
+      case 'prize': toast(m.coins ? `+${m.coins} coins!` : "You won! (You've hit today's minigame coin limit.)", 2.5); sfx('coin'); if (opts.onPrize) opts.onPrize(); break;
     }
   }
   async function invite(code) {
@@ -366,6 +374,81 @@ export function startWorld(root, opts) {
     msgBox.replaceChildren(h('div', { class: 'panel' }, h('p', {}, text), h('div', { class: 'row' },
       h('button', { class: 'btn btn-sun', type: 'button', onclick: () => { msgBox.hidden = true; } }, 'Keep playing'),
       withLeave ? h('button', { class: 'btn', type: 'button', onclick: () => opts.onExit && opts.onExit() }, 'Leave') : null)));
+  }
+
+  /* ---------------- minigames ---------------- */
+  const cfg = opts.game || null;
+  const roundBox = h('div', { class: 'w3-round', hidden: !cfg, 'aria-live': 'polite' });
+  stage.append(roundBox);
+  if (cfg) roundBox.textContent = opts.room ? 'Connecting to the minigames…' : 'Minigames need other players. Log in and invite a friend!';
+  const rs = { phase: null, mode: null, endsLocal: 0, it: new Set(), alive: new Set(), fin: [], scores: {}, lava: null, results: null };
+  let inRound = false, lastTag = 0, roundText = '';
+  const nameOf = (id) => (id === myId ? 'You' : (others.get(id) || {}).name || 'Someone');
+  const toXYZ = (a, spread) => ({ x: a[0] + (spread ? (Math.random() - 0.5) * spread : 0), y: a[1], z: a[2] + (spread ? (Math.random() - 0.5) * spread : 0) });
+  function placeAt(at, obbyNow) {
+    S.spawn = at; S.p = { ...at }; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p };
+    S.cp = null; S.cpIdx = -1; S.won = false; S.obby = obbyNow; S.onGround = false; winShown = false; winBox.hidden = true;
+    if (fly) setFly(false);
+  }
+  function enterArea(mode) {
+    const a = cfg.areas[mode];
+    inRound = true;
+    placeAt(toXYZ(a.spawn, mode === 'race' ? 2 : 5), mode === 'race');
+    // look toward the goal (race) or the hill
+    const g = mode === 'koth' && a.hill ? { x: (a.hill[0] + a.hill[3] + 1) / 2, z: (a.hill[2] + a.hill[5] + 1) / 2 } : mode === 'race' ? goals.find((q) => inBox(a, q.x, q.z)) : null;
+    if (g) cam.yaw = Math.atan2(g.x - S.p.x, -(g.z - S.p.z));
+    toast(GAMES[mode].name + '!', 1.6); sfx('checkpoint');
+  }
+  function backToLobby() { inRound = false; placeAt(toXYZ(cfg.lobby, 4), world.mode !== 'hangout' && !cfg); }
+  function onRound(m) {
+    if (!cfg) return;
+    const was = rs.phase;
+    Object.assign(rs, { phase: m.phase, mode: m.mode, endsLocal: performance.now() + (m.left || 0), it: new Set(m.it || []), alive: new Set(m.alive || []), fin: m.fin || [], scores: m.scores || {}, lava: m.lava, results: m.results, need: m.need });
+    if (m.phase === 'play' && was !== 'play' && rs.alive.has(myId)) enterArea(m.mode);
+    else if (m.phase !== 'play' && inRound) backToLobby();
+    if (m.ev) {
+      if (m.ev.tag) { toast(m.ev.tag === myId ? "You got tagged! Now you're IT!" : `${nameOf(m.ev.tag)} got tagged!`, 1.6); sfx(m.ev.tag === myId ? 'die' : 'bounce'); }
+      if (m.ev.out && m.ev.out !== myId) toast(`${nameOf(m.ev.out)} fell in the lava!`, 1.4);
+      if (m.ev.fin) toast(`${nameOf(m.ev.fin)} finished #${rs.fin.indexOf(m.ev.fin) + 1}!`, 1.6);
+    }
+    if (m.phase === 'results' && was === 'play') sfx('win');
+    for (const o of others.values()) o.tag.classList.toggle('it', rs.phase === 'play' && rs.mode === 'tag' && rs.it.has(o.id));
+    myTag.classList.toggle('it', rs.phase === 'play' && rs.mode === 'tag' && rs.it.has(myId));
+  }
+  let lastHb = 0;
+  function roundTick(px, py, pz, scene, clock) {
+    if (!cfg || !rs.phase) return;
+    if (room && online && performance.now() - lastHb > 4000) { lastHb = performance.now(); room.send({ t: 'hb' }); }
+    const secs = Math.max(0, Math.ceil((rs.endsLocal - performance.now()) / 1000));
+    const clockTxt = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    let t = '';
+    if (rs.phase === 'wait') t = `Minigames: waiting for players (${others.size + 1}/${rs.need || 2}). Press Invite to bring a friend!`;
+    else if (rs.phase === 'intro') t = `Next: ${GAMES[rs.mode].name} in ${secs}s. ${GAMES[rs.mode].short}`;
+    else if (rs.phase === 'results') t = rs.results && rs.results.length ? 'Winners: ' + rs.results.map((w) => `${w.id === myId ? 'You' : w.name}${w.coins ? ` (+${w.coins})` : ''}`).join(', ') : 'Nobody won that one!';
+    else if (!inRound) t = `${GAMES[rs.mode].name} in progress (${clockTxt}). You're watching, you'll join the next round.`;
+    else if (rs.mode === 'race') t = `RACE ${clockTxt}. ${rs.fin.includes(myId) ? `You finished #${rs.fin.indexOf(myId) + 1}!` : 'Get to the goal!'}`;
+    else if (rs.mode === 'tag') t = `TAG ${clockTxt}. ${rs.it.has(myId) ? "You're IT! Tag the others!" : `Run! ${rs.it.size} ${rs.it.size === 1 ? 'player is' : 'players are'} IT.`}`;
+    else if (rs.mode === 'koth') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `KING OF THE HILL ${clockTxt}. You: ${Math.floor(rs.scores[myId] || 0)}s${top ? `, leader: ${nameOf(top[0])} ${Math.floor(top[1])}s` : ''}`; }
+    else if (rs.mode === 'lava') t = `RISING LAVA ${clockTxt}. ${rs.alive.has(myId) ? `${rs.alive.size} left. Keep climbing!` : 'You fell in. Watch the rest!'}`;
+    if (t !== roundText) { roundText = t; roundBox.textContent = t; roundBox.hidden = false; }
+    roundBox.classList.toggle('hot', rs.phase === 'play' && inRound && (rs.mode !== 'tag' || rs.it.has(myId)));
+    if (rs.phase !== 'play') return;
+    // the rising lava and the glowing hill
+    if (rs.mode === 'lava' && rs.lava != null) {
+      const a = cfg.areas.lava, b = a.box || [0, 0, SX - 1, SZ - 1], base = a.lavaFrom || 0, top = rs.lava - 0.45;
+      scene.push({ prim: 'cube', color: hexRGB('#ff5a1f'), glow: 0.9, alpha: 0.88, m: M4.trs((b[0] + b[2] + 1) / 2, (base + top) / 2, (b[1] + b[3] + 1) / 2, 0, 0, 0, b[2] - b[0] + 1, Math.max(0.05, top - base), b[3] - b[1] + 1) });
+      if (inRound && rs.alive.has(myId) && py < rs.lava - 0.6 && inBox(a, px, pz)) { rs.alive.delete(myId); if (room) room.send({ t: 'out' }); sfx('die'); burst(px, py + 0.5, pz, ['#ff5a1f', '#ffd23f'], 20, 4, 5); toast('The lava got you!', 2); backToLobby(); }
+    }
+    if (rs.mode === 'koth' && cfg.areas.koth.hill) {
+      const hl = cfg.areas.koth.hill, on = inRound && onHill(cfg.areas.koth, px, py, pz);
+      scene.push({ prim: 'cube', color: hexRGB(on ? '#44c06a' : '#ffd23f'), glow: 1, alpha: 0.18 + Math.sin(clock * 4) * 0.06, m: M4.trs((hl[0] + hl[3] + 1) / 2, hl[4] + 2.5, (hl[2] + hl[5] + 1) / 2, 0, 0, 0, hl[3] - hl[0] + 1.1, 3, hl[5] - hl[2] + 1.1) });
+    }
+    if (rs.mode === 'tag' && inRound && rs.it.has(myId) && room && performance.now() - lastTag > 350) {
+      for (const o of others.values()) {
+        if (!o.pos || rs.it.has(o.id) || !rs.alive.has(o.id)) continue;
+        if (Math.hypot(o.pos[0] - px, o.pos[1] - py, o.pos[2] - pz) < ROUND.tagReach) { room.send({ t: 'tag', id: o.id }); lastTag = performance.now(); break; }
+      }
+    }
   }
 
   /* ---------------- winning ---------------- */
@@ -516,6 +599,7 @@ export function startWorld(root, opts) {
       const s = p.size * Math.max(0.3, p.life / p.max);
       scene.push({ prim: 'cube', color: p.color, glow: 0.5, alpha: Math.max(0.05, Math.min(0.95, p.life / p.max)), m: M4.trs(p.x, p.y, p.z, p.spin || 0, p.spin || 0, 0, s, s, s) });
     }
+    roundTick(px, py, pz, scene, clock);
     R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, far: opts.low ? 140 : 230 });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 

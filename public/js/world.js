@@ -55,7 +55,9 @@ export const SKIES = {
   night: { name: 'Night', top: '#0b1030', bottom: '#2a3570', fog: '#223066', sun: [0.3, 0.8, -0.4], light: 0.55, amb: 0.42 },
   space: { name: 'Space', top: '#05060f', bottom: '#1b1440', fog: '#120f2e', sun: [0.5, 0.7, 0.2], light: 0.9, amb: 0.45 },
 };
-export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just chill)' };
+export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just chill)', race: 'Minigame: Race (needs a Goal)', tag: 'Minigame: Tag', koth: 'Minigame: King of the Hill (Goal blocks are the hill)', lava: 'Minigame: Rising Lava' };
+// Minigame worlds are hangouts with a game: the live server runs rounds of it (see games.js).
+export const GAME_TYPES = ['race', 'tag', 'koth', 'lava'];
 
 export const solidType = (t) => t !== 0 && !BLOCKS[t].entity && !BLOCKS[t].ghost;
 
@@ -153,10 +155,12 @@ export function normalizeWorld(w, { needGoal } = {}) {
   if (info.blocks > MAX_BLOCKS) throw new Error(`Worlds can have up to ${MAX_BLOCKS} blocks. This one has ${info.blocks}.`);
   if (info.spawns !== 1) throw new Error(info.spawns ? 'A world can only have one Spawn block.' : 'Place a Spawn block so players know where to start.');
   const mode = w.mode === 'hangout' ? 'hangout' : 'obby';
-  if ((needGoal ?? mode === 'obby') && !info.goals) throw new Error('Obby worlds need at least one Goal block.');
+  const game = mode === 'hangout' && GAME_TYPES.includes(w.game) ? w.game : undefined;
+  if ((needGoal ?? (mode === 'obby' || game === 'race' || game === 'koth')) && !info.goals) throw new Error(game === 'race' ? 'Race worlds need a Goal block (the finish line).' : game === 'koth' ? 'King of the Hill worlds need Goal blocks (they are the hill).' : 'Obby worlds need at least one Goal block.');
   if (info.coins.length > MAX_COINS) throw new Error(`Worlds can have up to ${MAX_COINS} coins.`);
   const name = cleanText(w.n, 40) || 'My world';
   const world = { v: 1, n: name, mode, sky: SKIES[w.sky] ? w.sky : 'day', b: encodeBlocks(grid) };
+  if (game) world.game = game;
   return { world, grid, info };
 }
 export function worldNameOk(n) { return !isRude(n); }

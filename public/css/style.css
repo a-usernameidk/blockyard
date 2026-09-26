@@ -595,3 +595,11 @@ body[data-view="w3"] .announce, body[data-view="build"] .announce, body[data-vie
 .xp { display: grid; gap: 4px; margin: 6px 0 10px; }
 .xp-bar { display: block; height: 14px; border: 3px solid var(--line); border-radius: 99px; background: var(--bg); overflow: hidden; }
 .xp-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--sun), var(--pink)); }
+/* ---------- minigames ---------- */
+.w3-round { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); max-width: min(620px, calc(100% - 200px)); background: var(--card); color: var(--text); border: 3px solid var(--line); border-radius: 14px; padding: 6px 14px; font-weight: 800; text-align: center; box-shadow: 0 3px 0 var(--line); pointer-events: none; z-index: 4; }
+.w3-round.hot { background: var(--sun); color: var(--ink); }
+@media (max-width: 720px) { .w3-round { top: 44px; max-width: calc(100% - 20px); font-size: 13px; } }
+.w3-tag.it .w3-name { background: #e63946; color: #fff; }
+.w3-tag.it .w3-name::after { content: ' IT'; font-weight: 900; }
+.btn-pink { background: var(--pink); color: #fff; }
+.tag-game { background: var(--pink); color: #fff; }

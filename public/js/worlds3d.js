@@ -187,5 +187,65 @@ export const SKY = make({ id: 'sky', name: 'Sky Gauntlet', mode: 'obby', sky: 'n
   set(85, 30, 64, B.goal); way.push([85.5, 30, 64.5]);
 });
 
-export const WORLDS3D = [PLAZA, SUNNY, TOWER, LAVA, FACTORY, SKY];
+// The Minigame Arena: a lobby in the middle and one area for each game. The live room picks the next
+// game after every round, sends everyone to that area, and back to the lobby when it's over.
+export const ARENA = make({
+  id: 'arena', name: 'Minigame Arena', mode: 'hangout', sky: 'day', game: 'mix',
+  blurb: 'Race, Tag, King of the Hill and Rising Lava, one round after another. Win rounds for coins!',
+  lobby: [64.5, 1, 64.5],
+  areas: {
+    race: { spawn: [11.5, 1, 12.5], box: [4, 4, 112, 20] },
+    tag: { spawn: [26.5, 1, 102.5], box: [8, 84, 44, 120] },
+    koth: { spawn: [88.5, 1, 88.5], box: [84, 84, 120, 120], hill: [101, 5, 101, 103, 5, 103] },
+    lava: { spawn: [88.5, 1, 12.5], box: [84, 8, 120, 44], lavaFrom: 0 },
+  },
+}, ({ box, set, coin, way }) => {
+  // lobby
+  box(52, 0, 52, 76, 0, 76, B.grass); box(56, 0, 56, 72, 0, 72, B.stone); set(64, 0, 64, B.spawn);
+  for (const [x, z, c] of [[56, 56, 4], [72, 56, 6], [56, 72, 9], [72, 72, 7]]) box(x, 1, z, x, 3, z, B.neon, c);
+  // race course (east along z = 11..13)
+  box(8, 0, 8, 15, 0, 16, B.grass); way.push([11.5, 1, 12.5]);
+  const pad = (x0, x1, y, t = B.plastic, c = 0) => { box(x0, y, 11, x1, y, 13, t, c); way.push([(x0 + x1 + 1) / 2, y + 1, 12.5]); };
+  pad(18, 20, 0, B.plastic, 5); pad(23, 25, 1, B.plastic, 6); pad(28, 30, 2, B.plastic, 7); pad(33, 35, 2, B.plastic, 8);
+  box(36, 2, 11, 47, 2, 13, B.beltE); way.push([47.5, 3, 12.5]);
+  box(48, 2, 11, 52, 2, 13, B.stone); box(50, 2, 11, 52, 2, 13, B.bounce); way.push([49, 3, 12.5]);
+  box(56, 6, 10, 60, 6, 14, B.grass); set(58, 6, 12, B.checkpoint); way.push([58.5, 7, 12.5]);
+  box(61, 6, 11, 70, 6, 13, B.ice); way.push([70.5, 7, 12.5]); coin(66, 7, 12);
+  pad(73, 75, 5, B.plastic, 9); pad(78, 80, 4, B.plastic, 10); pad(83, 85, 3, B.grass); set(84, 3, 12, B.checkpoint);
+  box(86, 3, 12, 96, 3, 12, B.crumble); way.push([96.5, 4, 12.5]);
+  box(97, 3, 9, 104, 3, 15, B.grass); set(102, 4, 12, B.goal); way.push([102.5, 4, 12.5]);
+  // tag arena: a walled field with things to run around and over
+  box(8, 0, 84, 44, 0, 120, B.grass);
+  for (let x = 8; x <= 44; x++) { set(x, 1, 84, B.wood); set(x, 1, 120, B.wood); }
+  for (let z = 84; z <= 120; z++) { set(8, 1, z, B.wood); set(44, 1, z, B.wood); }
+  for (const [x, z] of [[16, 92], [34, 92], [16, 112], [34, 112], [25, 96], [25, 108]]) box(x, 1, z, x + 1, 3, z + 1, B.stone);
+  box(20, 1, 100, 30, 1, 100, B.brick); box(20, 1, 105, 30, 1, 105, B.brick);
+  box(23, 1, 101, 27, 2, 104, B.plastic, 9); box(24, 3, 102, 26, 3, 103, B.plastic, 11);
+  for (const [x, z] of [[12, 88], [40, 88], [12, 116], [40, 116]]) set(x, 0, z, B.bounce);
+  box(14, 4, 86, 18, 4, 88, B.plastic, 6); box(34, 4, 116, 38, 4, 118, B.plastic, 6);
+  // king of the hill: a stepped pyramid with a glowing top
+  box(84, 0, 84, 120, 0, 120, B.sand);
+  box(94, 1, 94, 110, 1, 110, B.stone); box(96, 2, 96, 108, 2, 108, B.stone); box(98, 3, 98, 106, 3, 106, B.brick); box(100, 4, 100, 104, 4, 104, B.brick);
+  box(101, 5, 101, 103, 5, 103, B.goal);
+  for (const [x, z] of [[88, 100], [116, 104], [100, 116], [104, 88]]) set(x, 0, z, B.bounce);
+  // rising lava: a tower to climb around (and a few crumbly steps), the lava comes up from the floor
+  box(84, 0, 8, 120, 0, 44, B.stone);
+  const ring = [];
+  for (const x of [95, 99, 103]) ring.push([x, 31]);
+  for (const z of [31, 27, 23]) ring.push([107, z]);
+  for (const x of [107, 103, 99]) ring.push([x, 19]);
+  for (const z of [19, 23, 27]) ring.push([95, z]);
+  let y = 1;
+  for (let i = 1; i <= 26; i++) {
+    const [x, z] = ring[i % 12];
+    box(x, y, z, x + 1, y, z + 1, i % 7 === 0 ? B.crumble : B.plastic, [5, 6, 7, 8, 9, 10, 11][i % 7]);
+    y++;
+  }
+  box(98, 0, 22, 105, y, 29, B.stone);
+  box(99, y + 1, 23, 104, y + 1, 28, B.neon, 6);
+  // stepping stones out on the lava floor
+  for (const [x, z, h] of [[88, 36, 1], [90, 40, 2], [114, 36, 1], [116, 40, 2], [114, 12, 1], [88, 20, 1]]) box(x, 1, z, x + 1, h, z + 1, B.plastic, 4);
+});
+
+export const WORLDS3D = [PLAZA, ARENA, SUNNY, TOWER, LAVA, FACTORY, SKY];
 export const builtinWorld = (id) => WORLDS3D.find((w) => w.id === id) || null;

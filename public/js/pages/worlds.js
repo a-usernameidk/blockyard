@@ -5,9 +5,10 @@ import { progress, OBBIES } from '../progress.js';
 import { WORLDS3D, builtinWorld } from '../worlds3d.js';
 import { SKIES } from '../world.js';
 import { drawWorldThumb, thumbOfWorld } from '../thumb3d.js';
-import { setWallet, friendsNow, checkFriends, openFriends } from './account.js';
+import { setWallet, friendsNow, checkFriends, openFriends, refreshWallet } from './account.js';
 import { manageUser } from './admin.js';
 import { levelOf } from '../cosmetics.js';
+import { gameConfig, GAMES } from '../games.js';
 import { openReport } from './play.js';
 
 let game = null;
@@ -36,12 +37,12 @@ $('#announce-x').addEventListener('click', () => { store.set('announce-hidden', 
 
 /* ---------------- cards ---------------- */
 const builtinThumbs = new Map();
-export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, done }) {
+export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, done, game }) {
   const cv = el('canvas', { class: 'thumb3d', 'aria-hidden': 'true' });
   requestAnimationFrame(() => drawWorldThumb(cv, thumb, sky));
   const n = online.worlds[id] || 0;
   const meta = el('div', { class: 'card-meta' },
-    el('span', { class: 'tag tag-3d' }, mode === 'hangout' ? 'Hangout' : 'Obby'),
+    el('span', { class: 'tag tag-3d' + (game ? ' tag-game' : '') }, game === 'mix' ? 'Minigames' : game ? GAMES[game].name : mode === 'hangout' ? 'Hangout' : 'Obby'),
     n ? el('span', { class: 'tag tag-live' }, `${n} playing`) : null,
     reward ? el('span', { class: 'tag tag-pay' }, done ? 'Paid out' : `Pays ${reward} coins`) : null,
     plays != null ? el('span', { class: 'tag' }, plural(plays, 'visit')) : null,
@@ -55,7 +56,7 @@ export function builtinCards() {
   return WORLDS3D.map((w) => {
     if (!builtinThumbs.has(w.id)) builtinThumbs.set(w.id, thumbOfWorld(w.get().world));
     const done = progress.level('w:' + w.id);
-    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won });
+    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game });
   });
 }
 export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, reward: g.reward, thumb: g.thumb, plays: g.plays, likes: g.likes });
@@ -134,7 +135,7 @@ async function showWorld(id) {
   const done = progress.level('w:' + id);
   page.replaceChildren(
     el('div', { class: 'world-hero' }, cv, el('div', { class: 'world-info' },
-      el('p', { class: 'detail-kicker' }, w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
+      el('p', { class: 'detail-kicker' }, w.world.game ? `Minigame: ${GAMES[w.world.game].name}` : w.id === 'arena' ? 'Minigames' : w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
       el('h1', {}, w.name),
       w.blurb ? el('p', { class: 'lede' }, w.blurb) : null,
       el('div', { class: 'card-meta' },
@@ -194,6 +195,8 @@ async function enterWorld(id, code) {
   game = startWorld(root, {
     world: w.world, title: w.name, by: w.by, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0 } : { name: 'You' }, low,
     onManage: (name) => manageUser(name),
+    game: (() => { try { return gameConfig(w.world, w.builtin ? builtinWorld(id) : null); } catch (e) { return null; } })(),
+    onPrize: () => refreshWallet(),
     onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },
     room: multi ? async () => { if (first) { const f = first; first = null; return f; } return api.joinRoom(joined ? { code: joined } : { world: id }); } : null,
     soloNote: !session.user ? 'You are playing solo. Log in to see other players and chat.' : !session.rooms ? 'Multiplayer is off on this server, so you are playing solo.' : null,

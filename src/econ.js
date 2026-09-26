@@ -50,7 +50,7 @@ export const seedStock = (db) => LIMITED.map((l) => db.prepare('INSERT OR IGNORE
 export function coinStmts(db, uid, delta, why) {
   const log = db.prepare('INSERT INTO ledger (user_id, delta, why, at) VALUES (?, ?, ?, ?)').bind(uid, delta, why, Date.now());
   // coins earned by playing (runs, quests, the daily bonus) also count as XP
-  const xp = /^(run|quest|bonus)/.test(why) ? delta : 0;
+  const xp = /^(run|quest|bonus|game)/.test(why) ? delta : 0;
   if (delta >= 0) return [db.prepare('INSERT INTO wallets (user_id, coins, xp) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET coins = coins + excluded.coins, xp = xp + excluded.xp').bind(uid, delta, xp), log];
   return [
     db.prepare('UPDATE wallets SET coins = coins + ? WHERE user_id = ?').bind(delta, uid),
@@ -183,6 +183,7 @@ export const QUESTS = {
   daily: { text: "Beat today's daily challenge", goal: 1 },
   coins: { text: 'Grab 25 coins in levels and obbies', goal: 25 },
   player: { text: 'Beat a level or obby another player made', goal: 1 },
+  game: { text: 'Win a minigame round (Minigame Arena)', goal: 1 },
 };
 const QUEST_REWARD = 40, QUEST_ALL = 60;
 export const STREAK = [20, 30, 40, 50, 60, 80, 150];

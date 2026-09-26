@@ -8,7 +8,9 @@ import { TILES, THEMES, FORMS, SPEED_NAMES, LIMITS, cleanText, normalizeLevel } 
 import { runReplay } from '../public/js/replay.js';
 import { runReplay3d } from '../public/js/physics3d.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
-import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb } from '../public/js/world.js';
+import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES } from '../public/js/world.js';
+import { GAMES, ROUND, PRIZE, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
+import { coinStmts, questBumps } from './econ.js';
 
 const MAX_PLAYERS = 16;
 const CHAT_MAX = 200;
@@ -25,6 +27,8 @@ export class Room {
     this.pos = new Map();  // socket id -> last position message
     this.doc = null;       // edit rooms: the level or world being built
     this.dirty = false;
+    this.game = undefined; // play rooms with minigames: their setup (null = no minigames here)
+    this.round = null;     // the minigame round going on right now
   }
 
   async fetch(request) {
@@ -71,9 +75,10 @@ export class Room {
     }
     await this.loadLog();
     const players = live.map((ws) => pub(att(ws), this.pos));
-    send(server, { t: 'hello', you: id, players, chat: this.log.slice(-30), doc: me.kind === 'edit' ? this.docOut() : undefined, code: me.code, world: me.world });
+    if (me.kind === 'play') await this.loadGame(me.world);
+    send(server, { t: 'hello', you: id, players, chat: this.log.slice(-30), doc: me.kind === 'edit' ? this.docOut() : undefined, code: me.code, world: me.world, round: this.game ? this.roundOut() : undefined });
     this.broadcast({ t: 'join', player: pub(me, this.pos) }, server);
-    if (me.kind === 'play') this.presence(me, true);
+    if (me.kind === 'play') { this.presence(me, true); this.tick(); }
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -83,6 +88,7 @@ export class Room {
     let msg;
     try { msg = JSON.parse(raw); } catch (e) { return; }
     if (!msg || typeof msg !== 'object') return;
+    if (me.kind === 'play' && this.game === undefined) await this.loadGame(me.world); // the room napped: set minigames up again
     const lim = this.limits(me.id);
     switch (msg.t) {
       case 'st': { // where I am: position, facing, animation
@@ -93,6 +99,7 @@ export class Room {
         // remember it on the socket now and then so a waking room knows where everyone is
         if (!lim.saved || Date.now() - lim.saved > 1500) { lim.saved = Date.now(); ws.serializeAttachment({ ...me, ...st }); }
         this.broadcast({ t: 'st', id: me.id, ...st }, ws);
+        if (this.round) this.watch(me, st);
         // keep the server list fresh while people play
         if (me.code && (!this.touched || Date.now() - this.touched > 120e3)) { this.touched = Date.now(); this.presence(me, true); }
         break;
@@ -163,6 +170,8 @@ export class Room {
         break;
       }
       case 'ping': send(ws, { t: 'pong', at: msg.at }); break;
+      case 'fin': case 'tag': case 'out': this.gameMsg(me, msg); break;
+      case 'hb': this.tick(); break;
     }
   }
 
@@ -176,11 +185,12 @@ export class Room {
     this.pos.delete(me.id);
     this.rate.delete(me.id);
     this.broadcast({ t: 'leave', id: me.id }, ws);
-    if (me.kind === 'play') await this.presence(me, false, ws);
+    if (me.kind === 'play') { await this.presence(me, false, ws); this.tick(); }
     if (me.kind === 'edit' && this.alive(ws).length === 0) await this.flush();
   }
   async alarm() {
     this.saveAt = 0;
+    if (this.round) this.tick();
     await this.flush();
   }
 
@@ -224,6 +234,140 @@ export class Room {
     } catch (e) { /* the room still works without the counts */ }
   }
 
+  /* ---------- minigames ---------- */
+  async loadGame(worldId) {
+    if (this.game !== undefined) return;
+    this.game = null;
+    try {
+      const b = builtinWorld(worldId);
+      if (b) this.game = b.game ? gameConfig(null, b) : null;
+      else if (worldId && this.env.DB) {
+        const row = await this.env.DB.prepare("SELECT data FROM games WHERE id = ? AND kind = '3d'").bind(worldId).first();
+        if (row) this.game = gameConfig(JSON.parse(row.data));
+      }
+    } catch (e) { this.game = null; }
+    if (this.game) this.round = { phase: 'wait', n: 0 };
+  }
+  players() { return this.alive().map(att).filter((a) => a.kind === 'play'); }
+  roundOut(extra) {
+    const R = this.round;
+    if (!R) return null;
+    return { phase: R.phase, mode: R.mode, left: R.ends ? Math.max(0, R.ends - Date.now()) : 0, it: R.it ? [...R.it] : [], alive: R.alive ? [...R.alive] : [], fin: R.fin || [],
+      scores: R.scores ? Object.fromEntries([...R.scores].map(([k, v]) => [k, Math.round(v * 10) / 10])) : {}, lava: R.lava, results: R.results, need: ROUND.minPlayers, ...extra };
+  }
+  sendRound(extra) {
+    this.broadcast({ t: 'round', ...this.roundOut(extra) });
+    // wake up when this part of the round is over, even if nobody is moving
+    const R = this.round;
+    if (R && R.ends && R.ends !== this.alarmFor) { this.alarmFor = R.ends; this.state.storage.setAlarm(R.ends + 30).catch(() => {}); }
+  }
+  // Moves the round along. Called whenever something happens (players send positions many times a second).
+  tick() {
+    const R = this.round;
+    if (!R || !this.game) return;
+    const now = Date.now(), here = this.players(), n = here.length;
+    if (R.phase === 'wait') {
+      if (n >= ROUND.minPlayers) { R.mode = this.game.modes[R.n++ % this.game.modes.length]; R.phase = 'intro'; R.ends = now + ROUND.wait * 1000; R.results = null; this.sendRound(); }
+      return;
+    }
+    if (R.phase === 'intro') {
+      if (n < ROUND.minPlayers) { R.phase = 'wait'; R.ends = 0; this.sendRound(); return; }
+      if (now < R.ends) return;
+      // go! everyone here right now is in the round
+      R.phase = 'play'; R.start = now; R.ends = now + GAMES[R.mode].secs * 1000;
+      R.ids = new Set(here.map((a) => a.id)); R.names = Object.fromEntries(here.map((a) => [a.id, { name: a.name, uid: a.uid }]));
+      R.alive = new Set(R.ids); R.fin = []; R.scores = new Map(); R.seen = new Map(); R.startCount = R.ids.size;
+      R.it = new Set();
+      if (R.mode === 'tag') { const list = [...R.ids]; const k = n >= 6 ? 2 : 1; while (R.it.size < k) R.it.add(list[Math.floor(Math.random() * list.length)]); R.firstIt = new Set(R.it); }
+      R.lava = R.mode === 'lava' ? lavaLevel(this.game.areas.lava, 0) : undefined;
+      this.sendRound();
+      return;
+    }
+    if (R.phase === 'play') {
+      const ids = new Set(here.map((a) => a.id));
+      for (const id of [...R.ids]) if (!ids.has(id)) { R.ids.delete(id); R.alive.delete(id); R.it.delete(id); }
+      if (R.mode === 'lava') {
+        const lv = lavaLevel(this.game.areas.lava, (now - R.start) / 1000);
+        if (lv !== R.lava) { R.lava = lv; this.sendRound(); }
+      }
+      const free = [...R.ids].filter((id) => !R.it.has(id));
+      const over = now >= R.ends || R.ids.size === 0
+        || (R.mode === 'race' && R.fin.length >= R.ids.size)
+        || (R.mode === 'tag' && (free.length === 0 || R.it.size === 0))
+        || (R.mode === 'lava' && R.alive.size <= (R.startCount > 1 ? 1 : 0));
+      if (over) this.endRound();
+      return;
+    }
+    if (R.phase === 'results' && now >= R.ends) {
+      if (n >= ROUND.minPlayers) { R.mode = this.game.modes[R.n++ % this.game.modes.length]; R.phase = 'intro'; R.ends = now + ROUND.wait * 1000; }
+      else { R.phase = 'wait'; R.ends = 0; }
+      R.results = null; this.sendRound();
+    }
+  }
+  // Keeps score from where players are (King of the Hill, Rising Lava).
+  watch(me, st) {
+    const R = this.round;
+    if (!R || R.phase !== 'play' || !R.ids.has(me.id)) { this.tick(); return; }
+    const now = Date.now();
+    if (R.mode === 'koth') {
+      const last = R.seen.get(me.id) || now; R.seen.set(me.id, now);
+      if (onHill(this.game.areas.koth, st.p[0], st.p[1], st.p[2])) R.scores.set(me.id, (R.scores.get(me.id) || 0) + Math.min(0.5, (now - last) / 1000));
+      if (!R.lastScores || now - R.lastScores > 1000) { R.lastScores = now; this.sendRound(); }
+    } else if (R.mode === 'lava' && R.alive.has(me.id) && R.lava != null && st.p[1] < R.lava - 0.6 && inBox(this.game.areas.lava, st.p[0], st.p[2])) {
+      R.alive.delete(me.id); this.sendRound({ ev: { out: me.id } });
+    }
+    this.tick();
+  }
+  gameMsg(me, msg) {
+    const R = this.round;
+    if (!R || R.phase !== 'play' || !R.ids.has(me.id)) return;
+    if (msg.t === 'fin' && R.mode === 'race' && !R.fin.includes(me.id)) { R.fin.push(me.id); this.sendRound({ ev: { fin: me.id } }); }
+    else if (msg.t === 'out' && R.mode === 'lava' && R.alive.has(me.id)) { R.alive.delete(me.id); this.sendRound({ ev: { out: me.id } }); }
+    else if (msg.t === 'tag' && R.mode === 'tag' && R.it.has(me.id) && R.ids.has(msg.id) && !R.it.has(msg.id)) {
+      const a = this.posOf(me.id), b = this.posOf(msg.id);
+      if (a && b && Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < ROUND.tagReach + 1.2) { R.it.add(msg.id); this.sendRound({ ev: { tag: msg.id, by: me.id } }); }
+    }
+    this.tick();
+  }
+  posOf(id) {
+    const st = this.pos.get(id);
+    if (st) return st.p;
+    const a = this.state.getWebSockets().map(att).find((x) => x && x.id === id);
+    return a && a.p;
+  }
+  endRound() {
+    const R = this.round, mode = R.mode, name = (id) => (R.names[id] || {}).name || '?';
+    const count = Object.keys(R.names).length;
+    let winners = []; // [id, place, prize]
+    if (mode === 'race') winners = R.fin.slice(0, 3).map((id, i) => [id, i + 1, [PRIZE.first, PRIZE.second, PRIZE.third][i]]);
+    else if (mode === 'tag') {
+      const free = [...R.ids].filter((id) => !R.it.has(id));
+      winners = (free.length ? free : [...R.firstIt].filter((id) => R.ids.has(id))).map((id) => [id, 1, PRIZE.win]);
+    } else if (mode === 'koth') winners = [...R.scores].filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id], i) => [id, i + 1, i ? PRIZE.second : PRIZE.first]);
+    else if (mode === 'lava') winners = [...R.alive].filter((id) => R.ids.has(id)).map((id, _, all) => [id, 1, all.length === 1 ? PRIZE.first : PRIZE.win]);
+    if (count < ROUND.minPlayers) winners = winners.map(([id, pl]) => [id, pl, 0]);
+    R.phase = 'results'; R.ends = Date.now() + ROUND.results * 1000;
+    R.results = winners.map(([id, place, coins]) => ({ id, name: name(id), place, coins, score: R.scores.get(id) }));
+    this.sendRound();
+    this.award(mode, winners.filter((w) => w[2] > 0).map(([id, , coins]) => ({ id, uid: R.names[id].uid, coins })));
+  }
+  async award(mode, list) {
+    const db = this.env.DB;
+    if (!db || !list.length) return;
+    const day = Date.now() - (Date.now() % 86400e3);
+    for (const w of list) {
+      try {
+        const got = await db.prepare("SELECT COALESCE(SUM(delta), 0) AS n FROM ledger WHERE user_id = ? AND why LIKE 'game%' AND at >= ?").bind(w.uid, day).first();
+        const coins = Math.min(w.coins, Math.max(0, PRIZE.dailyCap - got.n));
+        const stmts = [...questBumps(db, w.uid, { game: 1 })];
+        if (coins) stmts.push(...coinStmts(db, w.uid, coins, 'game ' + mode));
+        if (stmts.length) await db.batch(stmts);
+        const ws = this.alive().find((x) => { const a = att(x); return a && a.id === w.id; });
+        if (ws) send(ws, { t: 'prize', coins, capped: coins < w.coins });
+      } catch (e) { /* the round still counts, just no coins */ }
+    }
+  }
+
   /* ---------- building together ---------- */
   async loadDoc(projectId) {
     if (this.doc && this.doc.id === projectId) return;
@@ -233,7 +377,7 @@ export class Room {
     if (row.kind === '3d') {
       let grid;
       try { grid = decodeBlocks(String(data.b || '')); } catch (e) { grid = new Grid(); }
-      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day' }, grid };
+      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '' }, grid };
     } else {
       const lv = { n: row.name, style: 'adventure', theme: 'meadow', form: 'hopper', speed: '~', w: 48, h: 12, d: '', ...data };
       this.doc = { id: row.id, kind: '2d', meta: { n: cleanText(lv.n, LIMITS.name) || row.name, style: lv.style === 'rush' ? 'rush' : 'adventure', theme: THEMES.includes(lv.theme) ? lv.theme : 'meadow', form: FORMS.includes(lv.form) ? lv.form : 'hopper', speed: Object.hasOwn(SPEED_NAMES, lv.speed) ? lv.speed : '~' }, w: lv.w | 0, h: lv.h | 0, a: String(lv.d || '').split('') };
@@ -243,7 +387,7 @@ export class Room {
   docOut() {
     const d = this.doc;
     if (!d) return null;
-    if (d.kind === '3d') return { kind: '3d', v: 1, ...d.meta, b: encodeBlocks(d.grid) };
+    if (d.kind === '3d') { const { game, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), b: encodeBlocks(d.grid) }; }
     return { kind: '2d', ...d.meta, w: d.w, h: d.h, d: d.a.join('') };
   }
   // Checks one change, applies it, and returns the version to send to everyone (or null).
@@ -256,6 +400,7 @@ export class Room {
       if (d.kind === '3d') {
         if (op.f.mode === 'obby' || op.f.mode === 'hangout') f.mode = op.f.mode;
         if (Object.hasOwn(SKIES, op.f.sky)) f.sky = op.f.sky;
+        if (op.f.game === '' || GAME_TYPES.includes(op.f.game)) f.game = op.f.game;
       } else {
         if (op.f.style === 'rush' || op.f.style === 'adventure') f.style = op.f.style;
         if (THEMES.includes(op.f.theme)) f.theme = op.f.theme;
