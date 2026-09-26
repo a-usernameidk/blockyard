@@ -4,19 +4,12 @@
   "name": "blockyard",
   "main": "src/worker.js",
   "compatibility_date": "2026-06-01",
-  "assets": {
-    "directory": "./public",
-    "binding": "ASSETS"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "blockyard-db"
-    }
-  ],
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "d1_databases": [ { "binding": "DB", "database_name": "blockyard-db" } ],
+  // Live rooms: 3D servers with chat, and building together. Works on the free plan.
+  "durable_objects": { "bindings": [ { "name": "ROOMS", "class_name": "Room" } ] },
+  "migrations": [ { "tag": "rooms-v1", "new_sqlite_classes": ["Room"] } ],
   // Who gets the Admin button. Change it here, not in the dashboard.
-  "vars": {
-    "ADMIN_USERNAME": "SALT"
-  },
+  "vars": { "ADMIN_USERNAME": "SALT" },
   "observability": { "enabled": true }
 }

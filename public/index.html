@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Blockyard</title>
-<meta name="description" content="Play block games, build your own levels, and share them with friends.">
+<meta name="description" content="Play block games in 2D and 3D, hang out with friends, build your own levels and worlds together, and trade closet items.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='3' width='26' height='26' rx='6' fill='%23ffd23f' stroke='%231d2340' stroke-width='3'/%3E%3Crect x='3' y='21' width='26' height='8' rx='3' fill='%23f0a500'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,16 +14,17 @@
 <body>
 <header class="top">
   <a class="logo" href="#/" data-go="#/"><canvas class="logo-pip" id="logo-pip" width="44" height="44" aria-hidden="true"></canvas><span class="wordmark" aria-label="Blockyard"><b>B</b><b>l</b><b>o</b><b>c</b><b>k</b><b>y</b><b>a</b><b>r</b><b>d</b></span></a>
-  <nav class="nav">
-    <button class="btn nav-btn" data-go="#/" data-nav="home">Play</button>
-    <button class="btn nav-btn" data-go="#/discover" data-nav="discover">Discover</button>
-    <button class="btn nav-btn btn-sun" data-go="#/create" data-nav="create">Build</button>
-    <button class="btn nav-btn" data-go="#/3d" data-nav="3d">3D <span class="beta">beta</span></button>
+  <nav class="nav" aria-label="Main">
+    <button class="btn nav-btn" data-go="#/" data-nav="home">Home</button>
+    <button class="btn nav-btn" data-go="#/play" data-nav="play">Play</button>
+    <button class="btn nav-btn" data-go="#/worlds" data-nav="worlds">Worlds <span class="live-dot" id="nav-online" hidden></span></button>
+    <button class="btn nav-btn" data-go="#/create" data-nav="create">Create</button>
+    <button class="btn nav-btn" data-go="#/closet" data-nav="closet">Closet</button>
   </nav>
   <div class="me">
     <button class="btn icon-btn" id="mute" aria-pressed="false" aria-label="Sound effects"></button>
     <button class="btn icon-btn" id="music" aria-pressed="false" aria-label="Music"></button>
-    <button class="btn coin-chip" id="coin-chip" data-go="#/shop" title="Pip's Closet"><span id="coin-icon"></span><span id="coin-count">0</span></button>
+    <button class="btn coin-chip" id="coin-chip" data-go="#/closet" title="Your coins"><span id="coin-icon"></span><span id="coin-count">0</span></button>
     <button class="btn me-btn" id="me-btn"><span class="dot" id="me-dot"></span><span id="me-name">Log in</span></button>
   </div>
 </header>
@@ -35,38 +36,36 @@
     <canvas id="title-canvas" aria-hidden="true"></canvas>
     <div class="title-copy">
       <p class="big-logo" aria-label="Blockyard"><b>B</b><b>l</b><b>o</b><b>c</b><b>k</b><b>y</b><b>a</b><b>r</b><b>d</b></p>
-      <p class="tagline">Run it. Build it. Send it to a friend.</p>
+      <p class="tagline">Play it. Build it with friends. Hang out in 3D.</p>
       <div class="row">
-        <button class="btn btn-big btn-grass" id="hero-play">Play</button>
-        <button class="btn btn-big btn-sun" data-go="#/create">Build a level</button>
-        <button class="btn btn-big" data-go="#/discover">Discover</button>
+        <button class="btn btn-big btn-grass" data-go="#/w/plaza">Enter the Plaza</button>
+        <button class="btn btn-big btn-sun" id="hero-play">Play levels</button>
+        <button class="btn btn-big" data-go="#/create">Create</button>
       </div>
     </div>
   </div>
+  <div class="tiles" id="home-tiles"></div>
+  <div class="section-head"><h2>Popular worlds</h2><button class="btn" data-go="#/worlds">All worlds</button></div>
+  <div class="grid" id="home-worlds"></div>
+  <div id="home-online" hidden>
+    <div class="section-head"><h2>New player levels</h2><button class="btn" data-go="#/discover">See all</button></div>
+    <div class="grid" id="home-new"></div>
+  </div>
+</section>
 
+<!-- ============ PLAY (2D) ============ -->
+<section id="view-levels" class="view" hidden>
+  <div class="page-head"><div><h1>Play</h1><p class="lede">Built-in levels earn stars and coins. Endless and the daily challenge pay coins too.</p></div></div>
   <div class="modes">
     <button class="mode" data-go="#/endless"><canvas class="mode-art" id="art-endless" aria-hidden="true"></canvas><span class="mode-name">Endless Rush</span><span class="mode-sub" id="sub-endless">How far can you go?</span></button>
     <button class="mode" data-go="#/daily"><canvas class="mode-art" id="art-daily" aria-hidden="true"></canvas><span class="mode-name">Daily challenge</span><span class="mode-sub" id="sub-daily">A new course every day</span></button>
-    <button class="mode" data-go="#/shop"><canvas class="mode-art" id="art-shop" aria-hidden="true"></canvas><span class="mode-name">Pip's Closet</span><span class="mode-sub" id="sub-shop">Hats, colors and trails</span></button>
+    <button class="mode" data-go="#/discover"><canvas class="mode-art" id="art-shop" aria-hidden="true"></canvas><span class="mode-name">Player levels</span><span class="mode-sub">Levels other people made</span></button>
   </div>
-
   <div class="section-head"><h2>Levels</h2><span class="small" id="map-count"></span></div>
   <div class="map" id="map"></div>
   <div class="map-detail" id="map-detail"></div>
-
-  <div class="section-head"><h2>3D test zone</h2></div>
-  <div class="grid" id="three-grid"></div>
-
-  <div id="home-online" hidden>
-    <div class="section-head"><h2>New on Discover</h2><button class="btn" data-go="#/discover">See all</button></div>
-    <div class="grid" id="home-new"></div>
-  </div>
-
-  <h2>Your levels</h2>
-  <div id="mine-wrap"></div>
-
   <div class="import">
-    <label for="import-input">Got a code from a friend?</label>
+    <label for="import-input">Got a level code from a friend?</label>
     <div class="row">
       <input id="import-input" placeholder="Paste the link or code" autocomplete="off">
       <button class="btn btn-sun" id="import-btn">Play it</button>
@@ -75,15 +74,13 @@
   </div>
 </section>
 
-<!-- ============ DISCOVER ============ -->
+<!-- ============ DISCOVER (2D player levels) ============ -->
 <section id="view-discover" class="view" hidden>
-  <div class="section-head">
-    <h2>Discover</h2>
-  </div>
+  <div class="page-head"><div><h1>Player levels</h1><p class="lede">2D levels made by Blockyard players. Levels marked with a coin pay real coins the first time you beat them.</p></div></div>
   <div id="disc-offline" class="panel-note" hidden>
     <h3>Online games aren't turned on here</h3>
-    <p>Discover shows levels that other people published. It works when Blockyard runs on Cloudflare with its database. You can still play the built-in games, build levels, and send share codes to friends.</p>
-    <button class="btn btn-sun" data-go="#/create">Build a level</button>
+    <p>Player levels need the online version of Blockyard, running on Cloudflare. You can still play the built-in levels and build your own.</p>
+    <button class="btn btn-sun" data-go="#/create">Create something</button>
   </div>
   <div id="disc-main" hidden>
     <div class="disc-controls">
@@ -91,6 +88,7 @@
         <button class="chip" data-sort="new" aria-pressed="true">Newest</button>
         <button class="chip" data-sort="top" aria-pressed="false">Most played</button>
         <button class="chip" data-sort="liked" aria-pressed="false">Most liked</button>
+        <button class="chip" data-sort="reward" aria-pressed="false">Pays coins</button>
       </div>
       <select id="disc-style" aria-label="Style">
         <option value="">All styles</option>
@@ -106,7 +104,7 @@
   </div>
 </section>
 
-<!-- ============ PLAY ============ -->
+<!-- ============ PLAY A 2D LEVEL ============ -->
 <section id="view-play" class="view" hidden>
   <div class="bar">
     <button class="btn" id="play-back">Back</button>
@@ -150,19 +148,21 @@
   <p class="hint hint-keys" id="play-hint"></p>
 </section>
 
-<!-- ============ EDITOR ============ -->
+<!-- ============ 2D EDITOR ============ -->
 <section id="view-edit" class="view" hidden>
   <div class="bar ed-bar">
+    <button class="btn" id="ed-back">Back</button>
     <input id="ed-name" maxlength="40" aria-label="Level name">
     <div class="row">
-      <button class="btn" id="ed-new">New</button>
       <button class="btn btn-grass" id="ed-test">Test</button>
-      <button class="btn" id="ed-save">Save</button>
-      <button class="btn" id="ed-share">Share</button>
       <span class="proof" id="ed-proof" data-ok="false">Not beaten yet</span>
       <button class="btn btn-sun" id="ed-publish">Publish</button>
+      <button class="btn" id="ed-share">Share code</button>
+      <button class="btn" id="ed-friends" hidden>Friends</button>
+      <button class="btn" id="ed-save" hidden>Save</button>
     </div>
   </div>
+  <p class="ed-status" id="ed-status"></p>
   <div class="ed-settings">
     <label>Style <select id="ed-style"><option value="adventure">Adventure</option><option value="rush">Rush</option></select></label>
     <label>Theme <select id="ed-theme"></select></label>
@@ -198,58 +198,86 @@
   </div>
   <canvas id="ed-minimap" class="minimap" aria-label="Whole level. Click or drag to jump around."></canvas>
   <p class="msg" id="ed-msg"></p>
-  <p class="hint">Click or drag to place. Right-click erases. The strip under the level shows the whole thing: click it to jump there. Mouse wheel scrolls, Ctrl + wheel zooms. Keys: B brush, F box fill, E erase, I pick, Ctrl+Z undo. Your level autosaves as you go.</p>
+  <div class="ed-team" id="ed-team" hidden>
+    <ol class="w3-log" id="ed-log"></ol>
+    <form class="w3-chat-form" id="ed-chat"><input id="ed-chat-in" maxlength="200" placeholder="Chat with your team" aria-label="Chat message" autocomplete="off"><button class="btn" type="submit">Send</button></form>
+  </div>
+  <p class="hint">Click or drag to place. Right-click erases. The strip under the level shows the whole thing: click it to jump there. Mouse wheel scrolls, Ctrl + wheel zooms. Keys: B brush, F box fill, E erase, I pick, Ctrl+Z undo. Your level saves by itself.</p>
 </section>
 
-<!-- ============ 3D BETA ============ -->
-<section id="view-3d" class="view" hidden>
-  <div class="bar">
-    <button class="btn" data-go="#/">Back</button>
-    <div class="bar-title"><h2 id="t3-title">3D beta</h2><span class="by">An early test of 3D obbies</span></div>
-    <div class="hud"><span id="hud3-time"></span><span id="hud3-deaths"></span></div>
-    <div class="row">
-      <button class="btn" id="t3-sky">Sky Obby</button>
-      <button class="btn btn-sun" id="t3-random">New random obby</button>
+<!-- ============ WORLDS (3D) ============ -->
+<section id="view-worlds" class="view" hidden>
+  <div class="page-head">
+    <div><h1>Worlds</h1><p class="lede">3D places to hang out and obbies to beat. Log in to see other players and chat.</p></div>
+    <form class="join-code" id="join-form"><label for="join-code">Got a server code?</label><div class="row"><input id="join-code" placeholder="Server code" maxlength="12" autocomplete="off"><button class="btn btn-sun" type="submit">Join</button></div></form>
+  </div>
+  <h2>Blockyard worlds</h2>
+  <div class="grid" id="worlds-builtin"></div>
+  <div class="section-head"><h2>Player worlds</h2>
+    <div class="chips" role="group" aria-label="Sort">
+      <button class="chip" data-wsort="top" aria-pressed="true">Popular</button>
+      <button class="chip" data-wsort="new" aria-pressed="false">Newest</button>
+      <button class="chip" data-wsort="reward" aria-pressed="false">Pays coins</button>
     </div>
   </div>
-  <div class="stage stage3d" id="stage3d">
-    <div class="c3d-slot" id="c3d-slot"></div>
-    <div class="toast3" id="toast3" hidden></div>
-    <div class="fade3" id="fade3"></div>
-    <div class="overlay" id="win3" hidden>
-      <div class="panel">
-        <h2>Obby cleared!</h2>
-        <p id="win3-stats"></p>
-        <div class="row">
-          <button class="btn btn-grass" id="win3-again">Play again</button>
-          <button class="btn btn-sun" id="win3-random">Try a random obby</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="touch touch3" id="touch3">
-    <button class="tbtn" data-k3="tLeft" data-icon="turn-left" aria-label="Turn left"></button>
-    <button class="tbtn" data-k3="tUp" data-icon="up" aria-label="Walk forward"></button>
-    <button class="tbtn" data-k3="tDown" data-icon="down" aria-label="Walk back"></button>
-    <button class="tbtn" data-k3="tRight" data-icon="turn-right" aria-label="Turn right"></button>
-    <button class="tbtn tbtn-jump" data-k3="jump">Jump</button>
-  </div>
-  <p class="hint hint-keys">W A S D or arrow keys to move, Q and E or left and right arrows to turn, Space to jump. Drag to look around, scroll to zoom. R respawns.</p>
+  <div class="grid" id="worlds-grid"></div>
+  <p class="msg" id="worlds-msg"></p>
+  <div class="row center"><button class="btn" id="worlds-more" hidden>Load more</button></div>
 </section>
-<!-- ============ PIP'S CLOSET ============ -->
-<section id="view-shop" class="view" hidden>
-  <div class="section-head"><h2>Pip's Closet</h2><span class="wallet" id="shop-wallet"></span></div>
-  <div class="closet">
-    <div class="closet-preview"><canvas id="closet-canvas" aria-label="Pip wearing your outfit"></canvas><p class="small" id="closet-caption"></p></div>
-    <div class="closet-items">
-      <div class="tabs shop-tabs" id="shop-tabs" role="tablist" aria-label="Item types"></div>
-      <div class="items" id="shop-items"></div>
-    </div>
+
+<!-- ============ ONE WORLD ============ -->
+<section id="view-world" class="view" hidden>
+  <div id="world-page"></div>
+</section>
+
+<!-- ============ IN A 3D WORLD ============ -->
+<section id="view-w3" class="view" hidden>
+  <div id="w3-root"></div>
+</section>
+
+<!-- ============ 3D BUILDER ============ -->
+<section id="view-build" class="view" hidden>
+  <div id="b3-root"></div>
+</section>
+
+<!-- ============ CREATE ============ -->
+<section id="view-create" class="view" hidden>
+  <div class="page-head">
+    <div><h1>Create</h1><p class="lede">Build 2D levels and 3D worlds. Add friends to a project and build together, live.</p></div>
+    <div class="row"><button class="btn btn-big btn-sun" id="new-2d">New 2D level</button><button class="btn btn-big btn-grass" id="new-3d">New 3D world</button></div>
   </div>
-  <div class="section-head"><h2>Achievements</h2><span class="small" id="ach-count"></span></div>
-  <div class="achs" id="ach-list"></div>
-  <h2>Stats</h2>
-  <div class="stats" id="stats-list"></div>
+  <p class="note-bar" id="create-guest" hidden>You're a guest, so your projects save in this browser only. <button class="linkish" type="button" id="create-login">Log in</button> to save them online, build with friends, and publish.</p>
+  <h2>Your projects</h2>
+  <div class="grid" id="proj-mine"></div>
+  <div id="proj-shared-wrap" hidden><h2>Shared with you</h2><div class="grid" id="proj-shared"></div></div>
+  <div id="proj-pub-wrap" hidden><h2>Published</h2><div class="pub-list" id="proj-pub"></div></div>
+</section>
+
+<!-- ============ CLOSET ============ -->
+<section id="view-closet" class="view" hidden>
+  <div class="page-head"><div><h1>Pip's Closet</h1><p class="lede" id="closet-lede">Everything is worth coins. Limited items run out, then the only way to get one is a trade.</p></div><span class="wallet" id="shop-wallet"></span></div>
+  <div class="tabs page-tabs" id="closet-tabs" role="tablist" aria-label="Closet">
+    <button class="tab" role="tab" data-ctab="shop">Shop</button>
+    <button class="tab" role="tab" data-ctab="mine">My stuff</button>
+    <button class="tab" role="tab" data-ctab="trades">Trades <span class="count" id="trade-count" hidden></span></button>
+    <button class="tab" role="tab" data-ctab="badges">Badges</button>
+  </div>
+  <div class="closet" id="closet-main">
+    <div class="closet-preview"><canvas id="closet-canvas" aria-label="Pip wearing your outfit"></canvas><div class="small" id="closet-caption"></div></div>
+    <div class="closet-body" id="closet-body"></div>
+  </div>
+  <div id="closet-trades" hidden></div>
+  <div id="closet-badges" hidden>
+    <div class="section-head"><h2>Badges</h2><span class="small" id="ach-count"></span></div>
+    <div class="achs" id="ach-list"></div>
+    <h2>Stats</h2>
+    <div class="stats" id="stats-list"></div>
+  </div>
+</section>
+
+<!-- ============ PROFILE ============ -->
+<section id="view-profile" class="view" hidden>
+  <div id="profile-page"></div>
 </section>
 
 <!-- ============ DAILY ============ -->
@@ -272,16 +300,22 @@
 
 <!-- ============ ADMIN ============ -->
 <section id="view-admin" class="view" hidden>
-  <div class="section-head"><h2>Admin</h2><button class="btn" id="admin-refresh">Refresh</button></div>
-  <p class="lede">Reported and hidden levels come first. A level hides itself after 3 people report it. Banning someone logs them out and hides all their levels.</p>
-  <div class="row admin-users">
-    <input id="admin-user-q" placeholder="Find a player by name" autocomplete="off">
-    <button class="btn" id="admin-user-find">Find</button>
+  <div class="page-head"><div><h1>Admin</h1><p class="lede">Reports come first. A level hides itself after 3 reports. Banning someone logs them out, kicks them from every server and hides their games.</p></div><button class="btn" id="admin-refresh">Refresh</button></div>
+  <div class="tabs page-tabs" id="admin-tabs" role="tablist">
+    <button class="tab" role="tab" data-atab="chat">Chat reports</button>
+    <button class="tab" role="tab" data-atab="games">Games</button>
+    <button class="tab" role="tab" data-atab="users">Players</button>
   </div>
-  <div class="admin-list" id="admin-users"></div>
-  <h2>Levels</h2>
   <p class="msg" id="admin-msg"></p>
-  <div class="admin-list" id="admin-games"></div>
+  <div id="admin-chat" class="admin-list"></div>
+  <div id="admin-games-wrap" hidden><div class="admin-list" id="admin-games"></div></div>
+  <div id="admin-users-wrap" hidden>
+    <div class="row admin-users">
+      <input id="admin-user-q" placeholder="Find a player by name" autocomplete="off">
+      <button class="btn" id="admin-user-find">Find</button>
+    </div>
+    <div class="admin-list" id="admin-users"></div>
+  </div>
 </section>
 </main>
 
@@ -297,7 +331,7 @@
     <input id="share-link" readonly>
     <label for="share-code">Code</label>
     <textarea id="share-code" rows="3" readonly></textarea>
-    <p class="msg">Friends can open the link, or paste the code on the Games page.</p>
+    <p class="msg">Friends can open the link, or paste the code on the Play page.</p>
     <div class="row">
       <button class="btn btn-sun" id="share-copy">Copy link</button>
       <button class="btn" id="share-copy-code">Copy code</button>
@@ -308,17 +342,23 @@
 
 <div class="modal" id="publish-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pub-h">
   <div class="panel">
-    <h2 id="pub-h">Publish to Discover</h2>
+    <h2 id="pub-h">Publish</h2>
     <div id="pub-offline" hidden>
-      <p id="pub-offline-text">Publishing needs the online version of Blockyard, running on Cloudflare. Here you can use Share to send a code instead.</p>
+      <p id="pub-offline-text"></p>
       <div class="row"><button class="btn btn-sun" id="pub-offline-go" hidden></button><button class="btn" data-close>Close</button></div>
     </div>
     <form id="pub-form" hidden>
-      <label for="pub-name">Level name</label>
+      <label for="pub-name">Name</label>
       <input id="pub-name" maxlength="40" required>
       <label for="pub-desc">Description (optional)</label>
       <input id="pub-desc" maxlength="140">
-      <p class="small">Everyone can see and play published levels. Don't put your real name or school in them.</p>
+      <label for="pub-vis">Who can play it?</label>
+      <select id="pub-vis">
+        <option value="public">Everyone (shows up in the lists)</option>
+        <option value="unlisted">Anyone with the link</option>
+        <option value="private">Only me and my project friends</option>
+      </select>
+      <p class="small">Don't put your real name or school in it.</p>
       <p class="small" id="pub-who"></p>
       <p class="msg" id="pub-msg"></p>
       <div class="row">
@@ -328,14 +368,25 @@
       </div>
     </form>
     <div id="pub-done" hidden>
-      <p>Published. It's on Discover now.</p>
-      <label for="pub-link">Link to your level</label>
+      <p id="pub-done-text">Published!</p>
+      <label for="pub-link">Link</label>
       <input id="pub-link" readonly>
       <div class="row">
         <button class="btn btn-sun" id="pub-copy">Copy link</button>
         <button class="btn" data-close>Done</button>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="friends-modal" hidden role="dialog" aria-modal="true" aria-labelledby="fr-h">
+  <div class="panel">
+    <h2 id="fr-h">Build together</h2>
+    <p class="small" id="fr-note">Friends you add can open this project and build with you live. Up to 8.</p>
+    <ul class="fr-list" id="fr-list"></ul>
+    <form class="row" id="fr-form"><input id="fr-name" maxlength="16" placeholder="Their username" autocomplete="off" aria-label="Username"><button class="btn btn-sun" type="submit">Add</button></form>
+    <p class="msg" id="fr-msg"></p>
+    <div class="row"><button class="btn" data-close>Done</button></div>
   </div>
 </div>
 
@@ -361,7 +412,7 @@
         </div>
         <label for="acct-pw" id="acct-pw-label">Password</label>
         <input id="acct-pw" type="password" maxlength="72" autocomplete="current-password" required>
-        <p class="small" id="acct-hint">Guests save progress in this browser. With an account it follows you to any computer.</p>
+        <p class="small" id="acct-hint"></p>
         <p class="msg" id="acct-msg"></p>
         <div class="row"><button class="btn btn-sun" type="submit" id="acct-go">Log in</button><button class="btn" type="button" data-close>Cancel</button></div>
       </form>
@@ -369,10 +420,12 @@
     <div id="acct-in" hidden>
       <p class="acct-who"><canvas id="acct-pip" aria-hidden="true"></canvas><span><b id="acct-user"></b><br><span class="small" id="acct-sum"></span></span></p>
       <div class="row">
-        <button class="btn" id="acct-closet" data-go="#/shop">Pip's Closet</button>
+        <button class="btn" id="acct-profile">My profile</button>
+        <button class="btn" data-go="#/closet">Closet</button>
         <button class="btn" id="acct-admin" data-go="#/admin" hidden>Admin</button>
         <button class="btn btn-sun" id="acct-logout">Log out</button>
       </div>
+      <p class="small">Graphics in 3D: <button class="linkish" id="acct-gfx" type="button"></button></p>
       <p class="small">Want your account gone? <button class="linkish" id="acct-delete" type="button">Delete my account</button></p>
       <p class="msg" id="acct-in-msg"></p>
     </div>
@@ -390,7 +443,7 @@
 
 <div class="modal" id="report-modal" hidden role="dialog" aria-modal="true" aria-labelledby="rep-h">
   <form class="panel" id="rep-form">
-    <h2 id="rep-h">Report this level</h2>
+    <h2 id="rep-h">Report this game</h2>
     <label for="rep-reason">What's wrong?</label>
     <select id="rep-reason">
       <option value="rude">Rude or mean words</option>
@@ -411,6 +464,7 @@
   <div class="panel">
     <h2 id="ask-h"></h2>
     <p id="ask-text"></p>
+    <div id="ask-extra"></div>
     <div class="row" id="ask-buttons"></div>
   </div>
 </div>
@@ -418,7 +472,7 @@
 <div class="modal" id="crash-modal" hidden role="alertdialog" aria-modal="true" aria-labelledby="crash-h">
   <div class="panel">
     <h2 id="crash-h">Something broke</h2>
-    <p>The game hit an error and stopped. Your levels are saved. Reloading usually fixes it.</p>
+    <p>The game hit an error and stopped. Your stuff is saved. Reloading usually fixes it.</p>
     <p class="small" id="crash-detail"></p>
     <div class="row"><button class="btn btn-sun" id="crash-reload">Reload</button><button class="btn" data-close>Keep going</button></div>
   </div>

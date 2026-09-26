@@ -167,7 +167,7 @@ function resize(nw, nh) {
       a.push('#XL'.includes(edge) ? edge : '.');
     }
   }
-  ED.a = a; ED.lv.w = nw; ED.lv.h = nh;
+  ED.a = a; ED.lv.w = nw; ED.lv.h = nh; ED.sizeChanged = true;
   if (!a.includes('S')) setMsg('The Start block got cut off. Place a new one, or press Undo.');
   sizeView(); clampScroll(); draw(); autosave();
 }
@@ -280,6 +280,14 @@ function draw() {
     ctx.strokeStyle = '#ff5d8f'; ctx.lineWidth = 3 / s;
     ctx.strokeRect(ED.hover.x * T + 1, ED.hover.y * T + 1, T - 2, T - 2);
   }
+  if (ED.cursors) for (const c of ED.cursors.values()) {
+    ctx.strokeStyle = c.color || '#3a86ff'; ctx.lineWidth = 3 / s;
+    ctx.strokeRect(c.x * T + 2, c.y * T + 2, T - 4, T - 4);
+    ctx.font = `800 ${12 / s}px Nunito, system-ui, sans-serif`; ctx.textAlign = 'left';
+    const tw = ctx.measureText(c.name).width;
+    ctx.fillStyle = c.color || '#3a86ff'; ctx.fillRect(c.x * T, c.y * T - 16 / s, tw + 8 / s, 15 / s);
+    ctx.fillStyle = '#fff'; ctx.fillText(c.name, c.x * T + 4 / s, c.y * T - 4 / s);
+  }
   ctx.restore();
   drawMinimap();
   // coordinates readout
@@ -324,6 +332,7 @@ function pushUndo() {
   ED.redo = [];
 }
 function applySnap(s) {
+  if (s.w !== ED.lv.w || s.h !== ED.lv.h) ED.sizeChanged = true;
   ED.a = s.d.split(''); ED.lv.w = s.w; ED.lv.h = s.h;
   fillSizeSelect($('#ed-width'), WIDTHS, s.w); fillSizeSelect($('#ed-height'), HEIGHTS, s.h);
   sizeView(); clampScroll(); draw(); autosave();
@@ -370,10 +379,12 @@ canvas.addEventListener('pointermove', (e) => {
   const moved = !ED.hover || !cell || cell.x !== ED.hover.x || cell.y !== ED.hover.y;
   ED.hover = cell;
   const st = ED.stroke;
+  if (moved) sendCursor();
   if (st && cell) {
     if (st.box) st.cur = cell;
     else { paintLine(st.last, cell, st.erase ? '.' : ED.tool); st.last = cell; }
     draw();
+    if (collab && !st.box && Date.now() - (ED.lastSync || 0) > 120) { ED.lastSync = Date.now(); syncOut(); }
   } else if (moved) draw();
 });
 function endStroke() {
@@ -435,9 +446,79 @@ const changeFns = new Set();
 export function onEditorChange(fn) { changeFns.add(fn); }
 function autosave() {
   for (const fn of changeFns) fn();
+  syncOut();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { if (ED.lv) store.set('draft', currentLevel()); }, 400);
+  saveTimer = setTimeout(() => { if (ED.lv && !collab) store.set('draft', currentLevel()); }, 400);
 }
 export function getDraft() { return store.get('draft', null); }
+
+/* ---------------- building together ---------------- */
+// collab: { send(op, n), cursor(cell) }. Changes go out as small "ops"; ops from friends come in through applyRemote.
+let collab = null, base = null, baseMeta = null, seq = 0;
+const pending = new Map(); // cell -> seq of my change the server hasn't confirmed yet
+const metaOf = () => ({ n: ($('#ed-name').value.trim() || 'My level').slice(0, LIMITS.name), style: ED.lv.style, theme: ED.lv.theme, form: ED.lv.form || 'hopper', speed: ED.lv.speed || '~' });
+export function attachCollab(c) { collab = c; base = ED.a.slice(); baseMeta = metaOf(); pending.clear(); ED.cursors = new Map(); }
+export function detachCollab() { collab = null; base = null; pending.clear(); ED.cursors = new Map(); draw(); }
+export function isCollab() { return !!collab; }
+function syncOut() {
+  if (!collab || !ED.lv) return;
+  if (base.length !== ED.a.length || ED.lv.w * ED.lv.h !== base.length || ED.sizeChanged) {
+    ED.sizeChanged = false;
+    const n = ++seq;
+    collab.send({ k: 'full', w: ED.lv.w, h: ED.lv.h, d: ED.a.join('') }, n);
+    base = ED.a.slice(); pending.clear();
+  } else {
+    const ch = [];
+    for (let i = 0; i < ED.a.length; i++) if (ED.a[i] !== base[i]) { ch.push([i, ED.a[i]]); base[i] = ED.a[i]; }
+    if (ch.length) { const n = ++seq; for (const [i] of ch) pending.set(i, n); collab.send({ k: 'cells', ch }, n); }
+  }
+  const m = metaOf(), f = {};
+  for (const k in m) if (m[k] !== baseMeta[k]) f[k] = m[k];
+  if (Object.keys(f).length) { baseMeta = m; collab.send({ k: 'meta', f }, ++seq); }
+}
+// op from the room. mine: it's my own change coming back (the server confirming it).
+export function applyRemote(op, { mine = false, n = 0 } = {}) {
+  if (!ED.lv || !collab) return;
+  if (op.k === 'cells') {
+    for (const [i, c] of op.ch) {
+      if (i < 0 || i >= ED.a.length) continue;
+      const p = pending.get(i);
+      if (mine) { if (p !== undefined && p <= n) pending.delete(i); continue; }
+      if (p !== undefined) continue;
+      ED.a[i] = c; base[i] = c;
+    }
+  } else if (op.k === 'full') {
+    if (mine) return;
+    ED.a = op.d.split(''); ED.lv.w = op.w; ED.lv.h = op.h; base = ED.a.slice(); pending.clear();
+    fillSizeSelect($('#ed-width'), WIDTHS, op.w); fillSizeSelect($('#ed-height'), HEIGHTS, op.h);
+    sizeView(); clampScroll();
+  } else if (op.k === 'meta') {
+    if (mine) return;
+    Object.assign(ED.lv, op.f);
+    if (op.f.n != null && document.activeElement !== $('#ed-name')) $('#ed-name').value = op.f.n;
+    if (op.f.style) $('#ed-style').value = op.f.style;
+    if (op.f.theme) $('#ed-theme').value = op.f.theme;
+    if (op.f.form) $('#ed-form').value = op.f.form;
+    if (op.f.speed) $('#ed-speed').value = op.f.speed;
+    if (op.f.style) syncStyle();
+    baseMeta = { ...baseMeta, ...op.f };
+  }
+  draw();
+  for (const fn of changeFns) fn();
+}
+// Load the room's copy of the level (when joining a live session).
+export function loadShared(doc) {
+  const lv = { ...ED.lv, n: doc.n, style: doc.style, theme: doc.theme, form: doc.form, speed: doc.speed, w: doc.w, h: doc.h, d: doc.d };
+  const c = collab;
+  openEditor(lv);
+  collab = c; base = ED.a.slice(); baseMeta = metaOf(); pending.clear();
+}
+export function showCursor(id, cell, name, color) {
+  if (!ED.cursors) ED.cursors = new Map();
+  if (!cell) ED.cursors.delete(id); else ED.cursors.set(id, { ...cell, name, color });
+  draw();
+}
+let curT = 0;
+function sendCursor() { if (collab && ED.hover && Date.now() - curT > 150) { curT = Date.now(); collab.cursor(ED.hover); } }
 
 initSelects();

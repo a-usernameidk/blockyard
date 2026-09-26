@@ -43,6 +43,11 @@ const SOUNDS = {
   checkpoint: () => { tone(523, 0.1, { type: 'triangle', vol: 0.08 }); tone(784, 0.18, { type: 'triangle', vol: 0.08, delay: 0.1 }); },
   die: () => tone(300, 0.35, { type: 'sawtooth', slide: -250, vol: 0.07 }),
   win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.18, { type: 'triangle', vol: 0.08, delay: i * 0.11 })),
+  chat: () => tone(880, 0.05, { type: 'sine', vol: 0.05 }),
+  speed: () => tone(400, 0.2, { slide: 700, type: 'square', vol: 0.04 }),
+  place: () => tone(260, 0.05, { type: 'square', vol: 0.05, slide: 60 }),
+  break: () => tone(180, 0.07, { type: 'sawtooth', vol: 0.04, slide: -80 }),
+  join: () => { tone(660, 0.07, { type: 'sine', vol: 0.05 }); tone(990, 0.1, { type: 'sine', vol: 0.05, delay: 0.07 }); },
 };
 
 export function sfx(name) { const s = SOUNDS[name]; if (s) s(); }
@@ -59,6 +64,11 @@ const SONGS = {
     bpm: 112,
     lead: [7, null, 10, null, 12, null, 10, 7, 5, null, 7, null, 3, null, null, null, 7, null, 10, null, 12, null, 15, 14, 12, null, 10, null, 7, null, null, null],
     bass: [-12, null, null, null, -5, null, null, null, -9, null, null, null, -7, null, null, null],
+  },
+  chill: {
+    bpm: 92,
+    lead: [12, null, null, 15, null, 19, null, null, 17, null, 15, null, 12, null, null, null, 10, null, null, 12, null, 15, null, null, 14, null, 12, null, 10, null, null, null],
+    bass: [-12, null, null, null, -8, null, null, null, -10, null, null, null, -5, null, null, null],
   },
   rush: {
     bpm: 150,

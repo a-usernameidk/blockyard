@@ -1,23 +1,27 @@
-// Blockyard backend: a Cloudflare Worker with a D1 database.
-// Accounts, synced progress, published levels (checked by replaying the creator's run),
-// the daily challenge leaderboard, plays, likes, reports and admin tools.
+// Blockyard backend: a Cloudflare Worker with a D1 database and a Durable Object for live rooms.
+// Accounts, coins and items, trading, published levels and worlds, projects you build with friends,
+// multiplayer servers with chat, the daily challenge, and admin tools.
 // Everything that is not /api/... is a normal file from the public folder.
 //
-// Settings (Cloudflare > your Worker > Settings > Variables and Secrets):
-//   ADMIN_USERNAME    your Blockyard username. That account gets the Admin page. Comma-separate for more than one.
-//   SALT              any long random text. Makes stored passwords and visitor IDs harder to crack. Set it once, never change it.
-//   MAX_VERIFY_STEPS  optional. How long a winning run can be, in 1/120ths of a second (default 14400 = 2 minutes).
+// Settings (in wrangler.jsonc "vars", or Cloudflare > your Worker > Settings > Variables and Secrets):
+//   ADMIN_USERNAME       your Blockyard username. That account gets the Admin page. Comma-separate for more than one.
+//   SALT (secret)        any long random text. Makes stored passwords harder to crack. Set it once, never change it.
+//   MAX_VERIFY_STEPS     optional. Longest 2D run the server checks, in 1/120ths of a second (default 14400 = 2 minutes).
+//   MAX_VERIFY_STEPS_3D  optional. Longest 3D run, in 1/60ths of a second (default 18000 = 5 minutes).
 
 import { normalizeLevel, toWire, cleanText, isRude, LIMITS } from '../public/js/format.js';
-import { runReplay } from '../public/js/replay.js';
+import { builtinWorld } from '../public/js/worlds3d.js';
 import { dailyCourse, todayUTC } from '../public/js/endless.js';
+import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex } from './util.js';
+import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet } from './econ.js';
+export { Room } from './room.js';
 
 const PAGE = 24;
-const DAY = 86400e3;
 const SESSION_DAYS = 60;
-const LIMITS_PER = { publishHour: 5, publishDay: 20, reportsDay: 20, loginFails: 10, signupsDay: 5 };
+const LIMITS_PER = { publishHour: 5, publishDay: 20, reportsDay: 20, loginFails: 10, signupsDay: 5, projects: 60, collaborators: 8, privateServers: 5 };
 const HIDE_AFTER_REPORTS = 3;
-const HATS = ['none', 'cap', 'bow', 'sprout', 'party', 'beanie', 'headphones', 'horns', 'tophat', 'propeller', 'crown', 'halo', 'wizard'];
+const ROOM_SIZE = 16;
+const VIS = ['public', 'unlisted', 'private'];
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS games (
@@ -44,6 +48,33 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS daily (date TEXT NOT NULL, user_id TEXT NOT NULL, progress REAL NOT NULL, won INTEGER NOT NULL DEFAULT 0,
     at INTEGER NOT NULL, PRIMARY KEY (date, user_id))`,
   'CREATE INDEX IF NOT EXISTS daily_rank ON daily (date, progress DESC, at)',
+  // projects: levels and worlds saved on the server, which friends can build together
+  `CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL,
+    game_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+  'CREATE INDEX IF NOT EXISTS projects_owner ON projects (owner_id, updated_at DESC)',
+  'CREATE TABLE IF NOT EXISTS collabs (project_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (project_id, user_id))',
+  'CREATE INDEX IF NOT EXISTS collabs_user ON collabs (user_id)',
+  // live servers and who is where
+  `CREATE TABLE IF NOT EXISTS servers (code TEXT PRIMARY KEY, world TEXT NOT NULL, private INTEGER NOT NULL DEFAULT 0, owner_id TEXT,
+    players INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+  'CREATE INDEX IF NOT EXISTS servers_world ON servers (world, private, updated)',
+  'CREATE TABLE IF NOT EXISTS presence (user_id TEXT PRIMARY KEY, world TEXT NOT NULL, code TEXT NOT NULL, at INTEGER NOT NULL)',
+  `CREATE TABLE IF NOT EXISTS chat_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, reporter TEXT NOT NULL, reporter_name TEXT NOT NULL,
+    target_id TEXT NOT NULL, target TEXT NOT NULL, room TEXT NOT NULL, reason TEXT NOT NULL, messages TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open', at INTEGER NOT NULL)`,
+  'CREATE INDEX IF NOT EXISTS chat_reports_open ON chat_reports (status, at)',
+  ...ECON_SCHEMA,
+];
+// columns added after the first version
+const COLUMNS = [
+  'ALTER TABLE games ADD COLUMN user_id TEXT',
+  "ALTER TABLE games ADD COLUMN kind TEXT NOT NULL DEFAULT '2d'",
+  "ALTER TABLE games ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'",
+  'ALTER TABLE games ADD COLUMN reward INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE games ADD COLUMN project_id TEXT',
+  'ALTER TABLE games ADD COLUMN thumb TEXT',
+  "ALTER TABLE users ADD COLUMN look TEXT NOT NULL DEFAULT '{}'",
+  'ALTER TABLE users ADD COLUMN econ INTEGER NOT NULL DEFAULT 0',
 ];
 
 // Tables are created automatically the first time the Worker runs.
@@ -52,9 +83,12 @@ function ensureSchema(db) {
   if (!ready) {
     ready = (async () => {
       await db.batch(SCHEMA.map((s) => db.prepare(s)));
-      // columns added after the first version
-      try { await db.prepare('ALTER TABLE games ADD COLUMN user_id TEXT').run(); } catch (e) { /* already there */ }
-      await db.prepare('CREATE INDEX IF NOT EXISTS games_user ON games (user_id, created_at)').run();
+      for (const c of COLUMNS) { try { await db.prepare(c).run(); } catch (e) { /* already there */ } }
+      await db.batch([
+        db.prepare('CREATE INDEX IF NOT EXISTS games_user ON games (user_id, created_at)'),
+        db.prepare('CREATE INDEX IF NOT EXISTS games_list ON games (kind, visibility, hidden, created_at DESC)'),
+        ...seedStock(db),
+      ]);
     })().catch((e) => { ready = null; throw e; });
   }
   return ready;
@@ -65,6 +99,7 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     try {
+      if (url.pathname === '/api/room') return await connectRoom(request, env, url);
       return await handle(request, env, url);
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message }, e.status);
@@ -74,16 +109,10 @@ export default {
   },
 };
 
-class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
-const fail = (status, msg) => { throw new HttpError(status, msg); };
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
-}
-
 async function handle(request, env, url) {
   const path = url.pathname.slice(4); // strip "/api"
   const method = request.method;
-  if (path === '/health') return json({ ok: true, db: !!env.DB, accounts: true });
+  if (path === '/health') return json({ ok: true, db: !!env.DB, accounts: true, rooms: !!env.ROOMS });
   if (!env.DB) fail(503, 'The database is not connected yet. Check the D1 binding named DB.');
   await ensureSchema(env.DB);
   const db = env.DB;
@@ -100,7 +129,15 @@ async function handle(request, env, url) {
   if (path === '/me/progress' && method === 'PUT') return saveProgress(ctx, await body(request));
   if (path === '/me/games' && method === 'GET') return myGames(ctx);
 
-  // levels
+  // coins, shop, trades, rewards
+  const e = await econRoute(ctx, path, method);
+  if (e) return e;
+
+  // players
+  if (path === '/users' && method === 'GET') return findUsers(ctx);
+  if ((m = path.match(/^\/users\/([A-Za-z0-9_]{3,16})$/)) && method === 'GET') return profile(ctx, m[1]);
+
+  // published levels and worlds
   if (path === '/games' && method === 'GET') return listGames(ctx);
   if (path === '/games' && method === 'POST') return publish(ctx, await body(request));
   if ((m = path.match(/^\/games\/([A-Za-z0-9]{8})$/))) {
@@ -109,6 +146,23 @@ async function handle(request, env, url) {
     if (method === 'DELETE') return deleteGame(ctx, m[1]);
   }
   if ((m = path.match(/^\/games\/([A-Za-z0-9]{8})\/(play|like|report)$/)) && method === 'POST') return gameAction(ctx, m[1], m[2]);
+
+  // projects (building, alone or together)
+  if (path === '/projects' && method === 'GET') return listProjects(ctx);
+  if (path === '/projects' && method === 'POST') return newProject(ctx, await body(request));
+  if ((m = path.match(/^\/projects\/([A-Za-z0-9]{10})$/))) {
+    if (method === 'GET') return getProject(ctx, m[1]);
+    if (method === 'PUT') return saveProject(ctx, m[1], await body(request));
+    if (method === 'DELETE') return deleteProject(ctx, m[1]);
+  }
+  if ((m = path.match(/^\/projects\/([A-Za-z0-9]{10})\/collab$/)) && method === 'POST') return collab(ctx, m[1], await body(request));
+
+  // multiplayer
+  if (path === '/online' && method === 'GET') return online(ctx);
+  if (path === '/servers' && method === 'GET') return listServers(ctx);
+  if (path === '/servers' && method === 'POST') return privateServer(ctx, await body(request));
+  if (path === '/rooms/join' && method === 'POST') return joinPlay(ctx, await body(request));
+  if (path === '/rooms/edit' && method === 'POST') return joinEdit(ctx, await body(request));
 
   // daily challenge
   if (path === '/daily' && method === 'GET') return getDaily(ctx);
@@ -119,21 +173,6 @@ async function handle(request, env, url) {
 }
 
 /* ---------------- helpers ---------------- */
-async function body(request) {
-  const text = await request.text();
-  if (text.length > 200000) fail(413, 'That is too big to send.');
-  try { return JSON.parse(text || '{}'); } catch (e) { fail(400, 'The server could not read that request.'); }
-}
-const enc = (s) => new TextEncoder().encode(s);
-const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-async function sha256(text) { return hex(await crypto.subtle.digest('SHA-256', enc(text))); }
-function randomId(n) {
-  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  const bytes = crypto.getRandomValues(new Uint8Array(n));
-  let out = '';
-  for (const b of bytes) out += abc[b % abc.length];
-  return out;
-}
 // An anonymous ID per visitor (a scrambled IP address), used only to stop spam.
 async function visitorId(request, env) {
   return (await sha256((request.headers.get('CF-Connecting-IP') || 'local') + '|' + (env.SALT || 'blockyard'))).slice(0, 32);
@@ -157,18 +196,7 @@ async function addEvent(db, kind, who) {
     db.prepare('DELETE FROM events WHERE at < ?').bind(now - 2 * DAY),
   ]);
 }
-const maxSteps = (env) => Math.max(1200, Math.min(120000, parseInt(env.MAX_VERIFY_STEPS || '14400', 10) || 14400));
-const isAdmin = (env, user) => !!user && (env.ADMIN_USERNAME || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean).includes(user.name.toLowerCase());
-function needUser(ctx) {
-  if (!ctx.user) fail(401, 'Log in first. It only takes a username and a password.');
-  return ctx.user;
-}
-function looks(progressText) {
-  try {
-    const p = JSON.parse(progressText || '{}').equip || {};
-    return { color: /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : '#ff6b35', hat: HATS.includes(p.hat) ? p.hat : 'none' };
-  } catch (e) { return { color: '#ff6b35', hat: 'none' }; }
-}
+const lookOf = (text) => { try { const l = JSON.parse(text || '{}'); return { color: /^#[0-9a-f]{6}$/i.test(l.color) ? l.color : DEFAULT_LOOK.color, hat: String(l.hat || 'none').slice(0, 20), trail: String(l.trail || 'none').slice(0, 20) }; } catch (e) { return { ...DEFAULT_LOOK }; } };
 
 /* ---------------- accounts ---------------- */
 async function sessionUser(db, request, env) {
@@ -192,6 +220,11 @@ function checkName(name) {
 function checkPassword(pw) {
   if (typeof pw !== 'string' || pw.length < 6 || pw.length > 72) fail(400, 'Passwords need 6 to 72 characters.');
 }
+async function account(ctx, u, extra = {}) {
+  const { db, env } = ctx;
+  if (!u.econ) await migrateUser(db, u.id, u.progress);
+  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u) }, progress: JSON.parse(u.progress || '{}'), ...(await accountExtras(db, u.id)) };
+}
 async function signup(ctx, input) {
   const { db, env, ip } = ctx;
   checkName(input.name); checkPassword(input.password);
@@ -200,12 +233,17 @@ async function signup(ctx, input) {
   if (taken) fail(409, 'That username is taken. Try another one.');
   const id = randomId(12), salt = randomId(16), recovery = randomId(4) + '-' + randomId(4) + '-' + randomId(4);
   let progress = '{}';
-  if (input.progress && typeof input.progress === 'object') { const t = JSON.stringify(input.progress); if (t.length < 64000) progress = t; }
-  await db.prepare('INSERT INTO users (id, name, name_lower, pw_hash, pw_salt, rec_hash, progress, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, input.name, input.name.toLowerCase(), await hashPassword(input.password, salt, env), salt, await sha256(recovery.toUpperCase() + (env.SALT || '')), progress, Date.now()).run();
+  if (input.progress && typeof input.progress === 'object') {
+    // guest progress comes along (stars on the map, stats), but coins only come from checked runs
+    const p = { ...input.progress, coins: 0, owned: [] };
+    const t = JSON.stringify(p); if (t.length < 64000) progress = t;
+  }
+  const look = input.progress && input.progress.equip ? JSON.stringify(cleanLook(input.progress.equip, {})) : '{}';
+  await db.prepare('INSERT INTO users (id, name, name_lower, pw_hash, pw_salt, rec_hash, progress, created_at, look, econ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)')
+    .bind(id, input.name, input.name.toLowerCase(), await hashPassword(input.password, salt, env), salt, await sha256(recovery.toUpperCase() + (env.SALT || '')), progress, Date.now(), look).run();
   await addEvent(db, 'signup', ip);
   const token = await newSession(db, id);
-  return json({ token, recovery, user: { id, name: input.name, admin: isAdmin(env, { name: input.name }) }, progress: JSON.parse(progress) }, 201);
+  return json(await account(ctx, { id, name: input.name, progress, econ: 1 }, { token, recovery }), 201);
 }
 async function tooManyFails(ctx) {
   if (await countEvents(ctx.db, 'fail', ctx.ip, Date.now() - 15 * 60e3) >= LIMITS_PER.loginFails) fail(429, 'Too many wrong tries. Wait 15 minutes and try again.');
@@ -220,7 +258,7 @@ async function login(ctx, input) {
   }
   if (u.banned) fail(403, 'This account is banned.');
   const token = await newSession(db, u.id);
-  return json({ token, user: { id: u.id, name: u.name, admin: isAdmin(env, u) }, progress: JSON.parse(u.progress || '{}') });
+  return json(await account(ctx, u, { token }));
 }
 async function recover(ctx, input) {
   const { db, env, ip } = ctx;
@@ -239,7 +277,7 @@ async function recover(ctx, input) {
     db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(u.id),
   ]);
   const token = await newSession(db, u.id);
-  return json({ token, recovery, user: { id: u.id, name: u.name, admin: isAdmin(env, u) }, progress: JSON.parse(u.progress || '{}') });
+  return json(await account(ctx, u, { token, recovery }));
 }
 async function logout(ctx) {
   if (ctx.user) await ctx.db.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256(ctx.user.token)).run();
@@ -247,8 +285,8 @@ async function logout(ctx) {
 }
 async function me(ctx) {
   const user = needUser(ctx);
-  const u = await ctx.db.prepare('SELECT progress FROM users WHERE id = ?').bind(user.id).first();
-  return json({ user: { id: user.id, name: user.name, admin: user.admin }, progress: JSON.parse(u.progress || '{}') });
+  const u = await ctx.db.prepare('SELECT id, name, progress, econ FROM users WHERE id = ?').bind(user.id).first();
+  return json(await account(ctx, u));
 }
 async function saveProgress(ctx, input) {
   const user = needUser(ctx);
@@ -263,85 +301,150 @@ async function deleteMe(ctx) {
   const { db } = ctx;
   const { results } = await db.prepare('SELECT id FROM games WHERE user_id = ?').bind(user.id).all();
   for (const g of results) await removeGame(db, g.id);
+  const owned = await db.prepare('SELECT id FROM projects WHERE owner_id = ?').bind(user.id).all();
+  const stmts = owned.results.flatMap((p) => [db.prepare('DELETE FROM collabs WHERE project_id = ?').bind(p.id), db.prepare('DELETE FROM projects WHERE id = ?').bind(p.id)]);
   await db.batch([
-    db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id),
-    db.prepare('DELETE FROM daily WHERE user_id = ?').bind(user.id),
+    ...stmts,
+    ...['sessions', 'daily', 'wallets', 'inventory', 'level_progress', 'claims', 'collabs', 'presence'].map((t) => db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(user.id)),
+    db.prepare("UPDATE trades SET status = 'cancelled' WHERE status = 'open' AND (from_id = ? OR to_id = ?)").bind(user.id, user.id),
     db.prepare('DELETE FROM users WHERE id = ?').bind(user.id),
   ]);
   return json({ ok: true });
 }
 
-/* ---------------- levels ---------------- */
-function checkFields(input, env) {
+/* ---------------- players ---------------- */
+async function findUsers(ctx) {
+  needUser(ctx);
+  const q = (ctx.url.searchParams.get('q') || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 16);
+  if (!q) return json({ users: [] });
+  const { results } = await ctx.db.prepare('SELECT name, look FROM users WHERE name_lower LIKE ? AND banned = 0 ORDER BY name_lower LIMIT 10').bind(q + '%').all();
+  return json({ users: results.map((u) => ({ name: u.name, look: lookOf(u.look) })) });
+}
+async function profile(ctx, name) {
+  const { db } = ctx;
+  const u = await db.prepare('SELECT id, name, created_at, banned FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
+  if (!u || u.banned) fail(404, 'No player with that name.');
+  const [items, games, here] = await Promise.all([
+    publicItems(db, u.id),
+    db.prepare("SELECT * FROM games WHERE user_id = ? AND hidden = 0 AND visibility = 'public' ORDER BY created_at DESC LIMIT 24").bind(u.id).all(),
+    db.prepare('SELECT p.world, p.code, s.private FROM presence p JOIN servers s ON s.code = p.code WHERE p.user_id = ? AND p.at > ?').bind(u.id, Date.now() - 6 * 3600e3).first(),
+  ]);
+  const playing = here ? { world: here.world, code: here.private ? null : here.code, name: worldName(here.world) } : null;
+  return json({ name: u.name, since: u.created_at, ...items, games: games.results.map(row), playing });
+}
+const worldName = (id) => { const b = builtinWorld(id); return b ? b.name : null; };
+
+/* ---------------- levels and worlds ---------------- */
+function checkLevel(input) {
   let level;
   try { level = normalizeLevel(input.level); } catch (e) { fail(400, e.message); }
+  return level;
+}
+async function checkFields(ctx, input) {
+  const { env } = ctx;
+  const kind = input.kind === '3d' ? '3d' : '2d';
   const desc = cleanText(input.desc, LIMITS.desc);
-  if (isRude(level.n) || isRude(desc)) fail(400, 'Something in the name or description has a blocked word.');
-  // The creator has to have beaten it: replay their run and see if it reaches the goal.
-  let run;
-  try { run = runReplay(level, String(input.replay || ''), { maxSteps: maxSteps(env) }); } catch (e) { fail(400, e.message); }
-  if (!run.won) fail(400, "Your recorded run didn't reach the goal. Beat your level in Test, then publish right away.");
-  return { level, desc, run };
+  const visibility = VIS.includes(input.visibility) ? input.visibility : 'public';
+  if (kind === '2d') {
+    const level = checkLevel(input);
+    if (isRude(level.n) || isRude(desc)) fail(400, 'Something in the name or description has a blocked word.');
+    // The creator has to have beaten it: replay their run and see if it reaches the goal.
+    const run = await verify(env, { type: '2d', level, replay: String(input.replay || ''), opts: { maxSteps: maxSteps(env) } });
+    if (!run.won) fail(400, "Your recorded run didn't reach the goal. Beat your level in Test, then publish right away.");
+    return { kind, desc, visibility, name: level.n, style: level.style, theme: level.theme, w: level.w, h: level.h, data: toWire(level) };
+  }
+  // the heavy part (checking every block, replaying the run) happens in a Durable Object
+  const w = await verify(env, { type: 'publish3d', world: input.world, replay: String(input.replay || ''), opts: { maxSteps: maxSteps3d(env) } });
+  if (isRude(w.world.n) || isRude(desc)) fail(400, 'Something in the name or description has a blocked word.');
+  if (w.world.mode === 'obby' && !(w.run && w.run.won)) fail(400, "Your recorded run didn't reach the goal. Beat your obby in Test, then publish right away.");
+  return { kind, desc, visibility, name: w.world.n, style: w.world.mode, theme: w.world.sky, w: w.blocks, h: w.coins, data: w.world, thumb: w.thumb };
 }
 function row(g) {
-  return { id: g.id, name: g.name, creator: g.creator, descr: g.descr, style: g.style, theme: g.theme, plays: g.plays, likes: g.likes, created_at: g.created_at, level: JSON.parse(g.data) };
+  return {
+    id: g.id, kind: g.kind || '2d', name: g.name, creator: g.creator, descr: g.descr, style: g.style, theme: g.theme, plays: g.plays, likes: g.likes,
+    created_at: g.created_at, visibility: g.visibility || 'public', reward: g.reward || 0, level: (g.kind || '2d') === '2d' ? JSON.parse(g.data) : undefined,
+    world: g.kind === '3d' && g.withWorld ? JSON.parse(g.data) : undefined, blocks: g.kind === '3d' ? g.w : undefined,
+    coins: g.kind === '3d' ? g.h : undefined, thumb: g.kind === '3d' ? g.thumb || '' : undefined,
+  };
 }
 async function listGames(ctx) {
   const { db, url } = ctx;
-  const sort = { new: 'created_at DESC', top: 'plays DESC, created_at DESC', liked: 'likes DESC, created_at DESC' }[url.searchParams.get('sort')] || 'created_at DESC';
+  const kind = url.searchParams.get('kind') === '3d' ? '3d' : '2d';
+  const sort = { new: 'created_at DESC', top: 'plays DESC, created_at DESC', liked: 'likes DESC, created_at DESC', reward: 'reward DESC, plays DESC' }[url.searchParams.get('sort')] || 'created_at DESC';
   const style = url.searchParams.get('style');
   const q = (url.searchParams.get('q') || '').trim().slice(0, 40);
   const creator = (url.searchParams.get('creator') || '').trim().slice(0, 20);
   const page = Math.max(0, Math.min(200, parseInt(url.searchParams.get('page') || '0', 10) || 0));
-  const where = ['hidden = 0'], args = [];
-  if (style === 'rush' || style === 'adventure') { where.push('style = ?'); args.push(style); }
+  const where = ['hidden = 0', "visibility = 'public'", 'kind = ?'], args = [kind];
+  if (['rush', 'adventure', 'obby', 'hangout'].includes(style)) { where.push('style = ?'); args.push(style); }
+  if (url.searchParams.get('rewarding') === '1') where.push('reward > 0');
   if (creator) { where.push('creator = ? COLLATE NOCASE'); args.push(creator); }
   if (q) {
     const like = '%' + q.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
     where.push("(name LIKE ? ESCAPE '\\' OR creator LIKE ? ESCAPE '\\')"); args.push(like, like);
   }
-  const { results } = await db.prepare(`SELECT * FROM games WHERE ${where.join(' AND ')} ORDER BY ${sort} LIMIT ? OFFSET ?`).bind(...args, PAGE + 1, page * PAGE).all();
+  const cols = kind === '3d' ? 'id, kind, name, creator, descr, style, theme, plays, likes, created_at, visibility, reward, w, h, thumb' : '*';
+  const { results } = await db.prepare(`SELECT ${cols} FROM games WHERE ${where.join(' AND ')} ORDER BY ${sort} LIMIT ? OFFSET ?`).bind(...args, PAGE + 1, page * PAGE).all();
   return json({ games: results.slice(0, PAGE).map(row), more: results.length > PAGE });
 }
 async function myGames(ctx) {
   const user = needUser(ctx);
   const { results } = await ctx.db.prepare('SELECT * FROM games WHERE user_id = ? ORDER BY created_at DESC LIMIT 100').bind(user.id).all();
-  return json({ games: results.map((g) => ({ ...row(g), hidden: !!g.hidden })) });
+  return json({ games: results.map((g) => ({ ...row({ ...g, withWorld: false }), hidden: !!g.hidden, project: g.project_id })) });
+}
+async function canSeeGame(ctx, g) {
+  if ((g.visibility || 'public') !== 'private') return true;
+  const u = ctx.user;
+  if (!u) return false;
+  if (u.admin || g.user_id === u.id) return true;
+  if (!g.project_id) return false;
+  return !!(await projectAccess(ctx.db, g.project_id, u));
 }
 async function getGame(ctx, id) {
   const g = await ctx.db.prepare('SELECT * FROM games WHERE id = ? AND hidden = 0').bind(id).first();
-  if (!g) fail(404, 'That level was not found. It may have been removed.');
-  return json({ game: row(g) });
+  if (!g || !(await canSeeGame(ctx, g))) fail(404, 'That game was not found. It may have been removed, or it is private.');
+  return json({ game: row({ ...g, withWorld: true }) });
 }
 async function publish(ctx, input) {
   const user = needUser(ctx);
-  const { db, env, ip } = ctx;
+  const { db, ip } = ctx;
   const now = Date.now();
   const hour = await db.prepare('SELECT COUNT(*) AS n FROM games WHERE user_id = ? AND created_at > ?').bind(user.id, now - 3600e3).first();
-  if (hour.n >= LIMITS_PER.publishHour) fail(429, `You can publish ${LIMITS_PER.publishHour} levels an hour. Take a break and try again later.`);
+  if (hour.n >= LIMITS_PER.publishHour) fail(429, `You can publish ${LIMITS_PER.publishHour} games an hour. Take a break and try again later.`);
   const day = await db.prepare('SELECT COUNT(*) AS n FROM games WHERE user_id = ? AND created_at > ?').bind(user.id, now - DAY).first();
-  if (day.n >= LIMITS_PER.publishDay) fail(429, `You can publish ${LIMITS_PER.publishDay} levels a day. Try again tomorrow.`);
-  const { level, desc } = checkFields(input, env);
+  if (day.n >= LIMITS_PER.publishDay) fail(429, `You can publish ${LIMITS_PER.publishDay} games a day. Try again tomorrow.`);
+  const f = await checkFields(ctx, input);
+  let project = null;
+  if (input.project) { const p = await projectAccess(db, String(input.project), user); if (p) project = p.row.id; }
   const id = randomId(8);
-  await db.prepare(`INSERT INTO games (id, name, creator, descr, style, theme, w, h, data, edit_hash, creator_hash, user_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`)
-    .bind(id, level.n, user.name, desc, level.style, level.theme, level.w, level.h, JSON.stringify(toWire(level)), ip, user.id, now, now).run();
+  const stmts = [db.prepare(`INSERT INTO games (id, name, creator, descr, style, theme, w, h, data, edit_hash, creator_hash, user_id, created_at, updated_at, kind, visibility, project_id, thumb)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, f.name, user.name, f.desc, f.style, f.theme, f.w, f.h, JSON.stringify(f.data), ip, user.id, now, now, f.kind, f.visibility, project, f.thumb || null)];
+  if (project) stmts.push(db.prepare('UPDATE projects SET game_id = ? WHERE id = ?').bind(id, project));
+  await db.batch(stmts);
   return json({ id }, 201);
 }
-// Owner = the account that published it, or (for levels from before accounts) the secret edit key.
+// Who can change a published game: whoever published it, an admin, a collaborator on its project,
+// or (for levels from before accounts) the browser with the secret edit key.
 async function ownGame(ctx, id) {
-  const g = await ctx.db.prepare('SELECT id, user_id, edit_hash FROM games WHERE id = ?').bind(id).first();
-  if (!g) fail(404, 'That level was not found. It may have been removed.');
+  const g = await ctx.db.prepare('SELECT id, user_id, edit_hash, project_id, kind FROM games WHERE id = ?').bind(id).first();
+  if (!g) fail(404, 'That game was not found. It may have been removed.');
   if (ctx.user && (g.user_id === ctx.user.id || ctx.user.admin)) return g;
+  if (ctx.user && g.project_id && await projectAccess(ctx.db, g.project_id, ctx.user)) return g;
   const key = ctx.request.headers.get('x-edit-key');
   if (key && g.edit_hash && g.edit_hash === await sha256(key)) return g;
-  fail(403, "You can only change levels you published.");
+  fail(403, 'You can only change games you published.');
 }
 async function updateGame(ctx, id, input) {
-  await ownGame(ctx, id);
-  const { level, desc } = checkFields(input, ctx.env);
-  await ctx.db.prepare('UPDATE games SET name = ?, descr = ?, style = ?, theme = ?, w = ?, h = ?, data = ?, updated_at = ? WHERE id = ?')
-    .bind(level.n, desc, level.style, level.theme, level.w, level.h, JSON.stringify(toWire(level)), Date.now(), id).run();
+  const g = await ownGame(ctx, id);
+  if (input.only === 'visibility') {
+    if (!VIS.includes(input.visibility)) fail(400, 'Pick public, unlisted or private.');
+    await ctx.db.prepare('UPDATE games SET visibility = ? WHERE id = ?').bind(input.visibility, id).run();
+    return json({ ok: true, id });
+  }
+  const f = await checkFields(ctx, { ...input, kind: g.kind || '2d' });
+  await ctx.db.prepare('UPDATE games SET name = ?, descr = ?, style = ?, theme = ?, w = ?, h = ?, data = ?, visibility = ?, thumb = ?, updated_at = ? WHERE id = ?')
+    .bind(f.name, f.desc, f.style, f.theme, f.w, f.h, JSON.stringify(f.data), f.visibility, f.thumb || null, Date.now(), id).run();
   return json({ ok: true, id });
 }
 async function deleteGame(ctx, id) {
@@ -350,12 +453,15 @@ async function deleteGame(ctx, id) {
   return json({ ok: true });
 }
 function removeGame(db, id) {
-  return db.batch(['games WHERE id', 'likes WHERE game_id', 'plays WHERE game_id', 'reports WHERE game_id'].map((t) => db.prepare(`DELETE FROM ${t} = ?`).bind(id)));
+  return db.batch([
+    ...['games WHERE id', 'likes WHERE game_id', 'plays WHERE game_id', 'reports WHERE game_id'].map((t) => db.prepare(`DELETE FROM ${t} = ?`).bind(id)),
+    db.prepare('UPDATE projects SET game_id = NULL WHERE game_id = ?').bind(id),
+  ]);
 }
 async function gameAction(ctx, id, action) {
   const { db } = ctx;
-  const game = await db.prepare('SELECT id FROM games WHERE id = ? AND hidden = 0').bind(id).first();
-  if (!game) fail(404, 'That level was not found. It may have been removed.');
+  const game = await db.prepare('SELECT id, visibility, user_id, project_id FROM games WHERE id = ? AND hidden = 0').bind(id).first();
+  if (!game || !(await canSeeGame(ctx, game))) fail(404, 'That game was not found. It may have been removed.');
   if (action === 'play') {
     const r = await db.prepare('INSERT OR IGNORE INTO plays (game_id, who, at) VALUES (?, ?, ?)').bind(id, ctx.ip, Date.now()).run();
     if (r.meta.changes) await db.prepare('UPDATE games SET plays = plays + 1 WHERE id = ?').bind(id).run();
@@ -379,18 +485,207 @@ async function gameAction(ctx, id, action) {
   return json({ ok: true });
 }
 
+/* ---------------- projects ---------------- */
+// Returns { row, role } when this player may open the project, otherwise null.
+async function projectAccess(db, id, user) {
+  if (!user) return null;
+  const row = await db.prepare('SELECT * FROM projects WHERE id = ?').bind(id).first();
+  if (!row) return null;
+  if (row.owner_id === user.id) return { row, role: 'owner' };
+  const c = await db.prepare('SELECT 1 FROM collabs WHERE project_id = ? AND user_id = ?').bind(id, user.id).first();
+  if (c) return { row, role: 'collab' };
+  if (user.admin) return { row, role: 'admin' };
+  return null;
+}
+function projectData(kind, data) {
+  if (!data || typeof data !== 'object') fail(400, 'Project data is broken.');
+  const text = JSON.stringify(data);
+  if (text.length > 400000) fail(413, 'That project is too big.');
+  if (kind === '2d') {
+    const w = data.w | 0, h = data.h | 0;
+    if (w < 16 || w > 400 || h < 10 || h > 40 || typeof data.d !== 'string' || data.d.length !== w * h) fail(400, 'Level data is broken.');
+  } else if (typeof data.b !== 'string') fail(400, 'World data is broken.');
+  return text;
+}
+async function listProjects(ctx) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  const [mine, shared] = await Promise.all([
+    db.prepare(`SELECT p.id, p.kind, p.name, p.game_id, p.updated_at, (SELECT COUNT(*) FROM collabs c WHERE c.project_id = p.id) AS friends
+      FROM projects p WHERE p.owner_id = ? ORDER BY p.updated_at DESC LIMIT 100`).bind(user.id).all(),
+    db.prepare(`SELECT p.id, p.kind, p.name, p.game_id, p.updated_at, u.name AS owner FROM collabs c JOIN projects p ON p.id = c.project_id
+      JOIN users u ON u.id = p.owner_id WHERE c.user_id = ? ORDER BY p.updated_at DESC LIMIT 100`).bind(user.id).all(),
+  ]);
+  return json({ mine: mine.results, shared: shared.results });
+}
+async function newProject(ctx, input) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  const kind = input.kind === '3d' ? '3d' : '2d';
+  const n = await db.prepare('SELECT COUNT(*) AS n FROM projects WHERE owner_id = ?').bind(user.id).first();
+  if (n.n >= LIMITS_PER.projects) fail(429, `You can keep ${LIMITS_PER.projects} projects. Delete an old one first.`);
+  const text = projectData(kind, input.data);
+  const name = cleanText(input.name || (input.data && input.data.n), 40) || (kind === '3d' ? 'My world' : 'My level');
+  const id = randomId(10), now = Date.now();
+  await db.prepare('INSERT INTO projects (id, owner_id, kind, name, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, user.id, kind, name, text, now, now).run();
+  return json({ project: { id, kind, name, owner: user.name, role: 'owner', data: JSON.parse(text), collaborators: [], updated_at: now } }, 201);
+}
+async function getProject(ctx, id) {
+  const user = needUser(ctx);
+  const a = await projectAccess(ctx.db, id, user);
+  if (!a) fail(404, 'That project was not found, or it is not shared with you.');
+  const [owner, c] = await Promise.all([
+    ctx.db.prepare('SELECT name FROM users WHERE id = ?').bind(a.row.owner_id).first(),
+    ctx.db.prepare('SELECT u.name FROM collabs c JOIN users u ON u.id = c.user_id WHERE c.project_id = ? ORDER BY u.name_lower').bind(id).all(),
+  ]);
+  const r = a.row;
+  return json({ project: { id: r.id, kind: r.kind, name: r.name, data: JSON.parse(r.data), game: r.game_id, owner: owner ? owner.name : '?', role: a.role, collaborators: c.results.map((x) => x.name), updated_at: r.updated_at } });
+}
+async function saveProject(ctx, id, input) {
+  const user = needUser(ctx);
+  const a = await projectAccess(ctx.db, id, user);
+  if (!a) fail(404, 'That project was not found, or it is not shared with you.');
+  const text = input.data ? projectData(a.row.kind, input.data) : a.row.data;
+  const name = cleanText(input.name || (input.data && input.data.n), 40) || a.row.name;
+  await ctx.db.prepare('UPDATE projects SET data = ?, name = ?, updated_at = ? WHERE id = ?').bind(text, name, Date.now(), id).run();
+  return json({ ok: true });
+}
+async function deleteProject(ctx, id) {
+  const user = needUser(ctx);
+  const a = await projectAccess(ctx.db, id, user);
+  if (!a || (a.role !== 'owner' && a.role !== 'admin')) fail(403, 'Only the owner can delete a project.');
+  await ctx.db.batch([ctx.db.prepare('DELETE FROM collabs WHERE project_id = ?').bind(id), ctx.db.prepare('DELETE FROM projects WHERE id = ?').bind(id)]);
+  return json({ ok: true });
+}
+async function collab(ctx, id, input) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  const a = await projectAccess(db, id, user);
+  if (!a) fail(404, 'That project was not found.');
+  if (input.action === 'leave') {
+    await db.prepare('DELETE FROM collabs WHERE project_id = ? AND user_id = ?').bind(id, user.id).run();
+    return json({ ok: true });
+  }
+  if (a.role !== 'owner') fail(403, 'Only the owner can change who builds here.');
+  const u = await db.prepare('SELECT id, name, banned FROM users WHERE name_lower = ?').bind(String(input.name || '').toLowerCase()).first();
+  if (!u || u.banned) fail(404, 'No player with that name.');
+  if (u.id === user.id) fail(400, "You're the owner already.");
+  if (input.action === 'add') {
+    const n = await db.prepare('SELECT COUNT(*) AS n FROM collabs WHERE project_id = ?').bind(id).first();
+    if (n.n >= LIMITS_PER.collaborators) fail(429, `Up to ${LIMITS_PER.collaborators} friends can build on one project.`);
+    await db.prepare('INSERT OR IGNORE INTO collabs (project_id, user_id) VALUES (?, ?)').bind(id, u.id).run();
+  } else if (input.action === 'remove') {
+    await db.prepare('DELETE FROM collabs WHERE project_id = ? AND user_id = ?').bind(id, u.id).run();
+    if (ctx.env.ROOMS) await ctx.env.ROOMS.get(ctx.env.ROOMS.idFromName('e:' + id)).fetch(`https://room/kick?uid=${u.id}&why=${encodeURIComponent('The owner removed you from this project.')}`).catch(() => {});
+  } else fail(400, 'Unknown action.');
+  const c = await db.prepare('SELECT u.name FROM collabs c JOIN users u ON u.id = c.user_id WHERE c.project_id = ? ORDER BY u.name_lower').bind(id).all();
+  return json({ collaborators: c.results.map((x) => x.name) });
+}
+
+/* ---------------- multiplayer ---------------- */
+// Is this a world people can join? Built-in ids, or a published 3D game.
+async function worldInfo(ctx, id) {
+  const b = builtinWorld(id);
+  if (b) return { id, name: b.name, mode: b.mode, builtin: true };
+  if (!/^[A-Za-z0-9]{8}$/.test(id)) fail(404, 'That world was not found.');
+  const g = await ctx.db.prepare("SELECT id, name, style, visibility, user_id, project_id FROM games WHERE id = ? AND kind = '3d' AND hidden = 0").bind(id).first();
+  if (!g || !(await canSeeGame(ctx, g))) fail(404, 'That world was not found. It may have been removed, or it is private.');
+  return { id, name: g.name, mode: g.style, builtin: false };
+}
+const FRESH = 10 * 60e3;
+async function online(ctx) {
+  const { results } = await ctx.db.prepare('SELECT world, SUM(players) AS n FROM servers WHERE updated > ? AND players > 0 GROUP BY world').bind(Date.now() - FRESH).all();
+  const worlds = {};
+  let total = 0;
+  for (const r of results) { worlds[r.world] = r.n; total += r.n; }
+  return json({ worlds, total });
+}
+async function listServers(ctx) {
+  const world = String(ctx.url.searchParams.get('world') || '');
+  await worldInfo(ctx, world);
+  const { results } = await ctx.db.prepare('SELECT code, players FROM servers WHERE world = ? AND private = 0 AND updated > ? AND players > 0 ORDER BY players DESC LIMIT 30').bind(world, Date.now() - FRESH).all();
+  let mine = [];
+  if (ctx.user) mine = (await ctx.db.prepare('SELECT code, players FROM servers WHERE world = ? AND private = 1 AND owner_id = ? ORDER BY created_at DESC').bind(world, ctx.user.id).all()).results;
+  return json({ servers: results, mine, size: ROOM_SIZE });
+}
+async function privateServer(ctx, input) {
+  const user = needUser(ctx);
+  const w = await worldInfo(ctx, String(input.world || ''));
+  const n = await ctx.db.prepare('SELECT COUNT(*) AS n FROM servers WHERE owner_id = ? AND private = 1').bind(user.id).first();
+  if (n.n >= LIMITS_PER.privateServers) {
+    // recycle the oldest one
+    await ctx.db.prepare('DELETE FROM servers WHERE code = (SELECT code FROM servers WHERE owner_id = ? AND private = 1 ORDER BY created_at ASC LIMIT 1)').bind(user.id).run();
+  }
+  const code = randomId(8), now = Date.now();
+  await ctx.db.prepare('INSERT INTO servers (code, world, private, owner_id, players, updated, created_at) VALUES (?, ?, 1, ?, 0, ?, ?)').bind(code, w.id, user.id, now, now).run();
+  return json({ code, world: w.id }, 201);
+}
+async function joinPlay(ctx, input) {
+  const user = needUser(ctx);
+  const { db, env } = ctx;
+  if (!env.ROOMS) fail(503, 'Multiplayer is off. The Durable Object binding named ROOMS is missing from wrangler.jsonc.');
+  let code = input.code ? String(input.code).trim() : '', world, priv = false;
+  const now = Date.now();
+  if (code) {
+    const s = await db.prepare('SELECT code, world, private FROM servers WHERE code = ?').bind(code).first();
+    if (!s) fail(404, "That server code doesn't work. It may have been closed.");
+    world = await worldInfo(ctx, s.world); priv = !!s.private;
+  } else {
+    world = await worldInfo(ctx, String(input.world || ''));
+    const s = await db.prepare('SELECT code FROM servers WHERE world = ? AND private = 0 AND players < ? AND updated > ? ORDER BY players DESC, created_at ASC LIMIT 1').bind(world.id, ROOM_SIZE, now - FRESH).first();
+    if (s) code = s.code;
+    else {
+      code = randomId(8);
+      await db.batch([
+        db.prepare('INSERT INTO servers (code, world, private, players, updated, created_at) VALUES (?, ?, 0, 0, ?, ?)').bind(code, world.id, now, now),
+        db.prepare('DELETE FROM servers WHERE private = 0 AND players = 0 AND updated < ?').bind(now - DAY),
+      ]);
+    }
+  }
+  await db.prepare('UPDATE servers SET updated = ? WHERE code = ?').bind(now, code).run();
+  const u = await db.prepare('SELECT look FROM users WHERE id = ?').bind(user.id).first();
+  const w = await getWallet(db, user.id);
+  const look = cleanLook(lookOf(u && u.look), w.items);
+  const ticket = await signTicket(env, { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, a: user.admin, w: world.id, c: code, x: now + 60e3 });
+  return json({ ticket, code, world, private: priv });
+}
+async function joinEdit(ctx, input) {
+  const user = needUser(ctx);
+  const { db, env } = ctx;
+  if (!env.ROOMS) fail(503, 'Building together is off. The Durable Object binding named ROOMS is missing from wrangler.jsonc.');
+  const a = await projectAccess(db, String(input.project || ''), user);
+  if (!a) fail(404, 'That project was not found, or it is not shared with you.');
+  const u = await db.prepare('SELECT look FROM users WHERE id = ?').bind(user.id).first();
+  const ticket = await signTicket(env, { k: 'edit', r: 'e:' + a.row.id, u: user.id, n: user.name, l: lookOf(u && u.look), a: user.admin, p: a.row.id, x: Date.now() + 60e3 });
+  return json({ ticket });
+}
+// The WebSocket itself. The ticket says who you are and which room, so no database is needed here.
+async function connectRoom(request, env, url) {
+  if (request.headers.get('Upgrade') !== 'websocket') fail(426, 'This address is for WebSockets.');
+  if (!env.ROOMS) fail(503, 'Multiplayer is off.');
+  const p = await readTicket(env, url.searchParams.get('t'));
+  if (!p) fail(401, 'That ticket expired. Join again.');
+  const headers = new Headers(request.headers);
+  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, admin: !!p.a, world: p.w, code: p.c, project: p.p }));
+  return env.ROOMS.get(env.ROOMS.idFromName(p.r)).fetch(new Request(request, { headers }));
+}
+async function kickEverywhere(env, db, uid, why) {
+  if (!env.ROOMS) return;
+  const { results } = await db.prepare('SELECT code FROM presence WHERE user_id = ?').bind(uid).all();
+  await Promise.all(results.map((r) => env.ROOMS.get(env.ROOMS.idFromName('p:' + r.code)).fetch(`https://room/kick?uid=${uid}&why=${encodeURIComponent(why)}`).catch(() => {})));
+}
+
 /* ---------------- daily challenge ---------------- */
 function validDate(d) {
-  const today = todayUTC();
-  const ok = [todayUTC(new Date(Date.now() - DAY)), today, todayUTC(new Date(Date.now() + DAY))];
+  const ok = [todayUTC(new Date(Date.now() - DAY)), todayUTC(), todayUTC(new Date(Date.now() + DAY))];
   return ok.includes(d) ? d : null;
 }
 async function getDaily(ctx) {
   const { db, url, user } = ctx;
   const date = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get('date') || '') ? url.searchParams.get('date') : todayUTC();
-  const { results } = await db.prepare(`SELECT d.progress, d.won, d.at, u.name, u.progress AS p FROM daily d JOIN users u ON u.id = d.user_id
+  const { results } = await db.prepare(`SELECT d.progress, d.won, d.at, u.name, u.look FROM daily d JOIN users u ON u.id = d.user_id
     WHERE d.date = ? AND u.banned = 0 ORDER BY d.progress DESC, d.at ASC LIMIT 25`).bind(date).all();
-  const top = results.map((r, i) => ({ rank: i + 1, name: r.name, progress: r.progress, won: !!r.won, ...looks(r.p) }));
+  const top = results.map((r, i) => ({ rank: i + 1, name: r.name, progress: r.progress, won: !!r.won, ...lookOf(r.look) }));
   let mine = null;
   if (user) {
     const r = await db.prepare('SELECT progress, won, at FROM daily WHERE date = ? AND user_id = ?').bind(date, user.id).first();
@@ -404,18 +699,32 @@ async function getDaily(ctx) {
 }
 async function postDaily(ctx, input) {
   const user = needUser(ctx);
+  const { db, env } = ctx;
   const date = validDate(String(input.date || ''));
   if (!date) fail(400, "That daily challenge isn't open anymore.");
-  let run;
-  try { run = runReplay(dailyCourse(date), String(input.replay || ''), { maxSteps: maxSteps(ctx.env), stopOnDeath: true }); } catch (e) { fail(400, e.message); }
+  const run = await verify(env, { type: '2d', raw: true, level: dailyCourse(date), replay: String(input.replay || ''), opts: { maxSteps: maxSteps(env), stopOnDeath: true } });
   const progress = run.won ? 1 : Math.round(run.progress * 1000) / 1000;
-  await ctx.db.prepare(`INSERT INTO daily (date, user_id, progress, won, at) VALUES (?, ?, ?, ?, ?)
+  const before = await db.prepare('SELECT won FROM daily WHERE date = ? AND user_id = ?').bind(date, user.id).first();
+  const stmts = [db.prepare(`INSERT INTO daily (date, user_id, progress, won, at) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT (date, user_id) DO UPDATE SET progress = excluded.progress, won = excluded.won, at = excluded.at WHERE excluded.progress > daily.progress`)
-    .bind(date, user.id, progress, run.won ? 1 : 0, Date.now()).run();
-  return json({ ok: true, progress, won: run.won });
+    .bind(date, user.id, progress, run.won ? 1 : 0, Date.now())];
+  const earned = run.won && !(before && before.won) ? REWARD.dailyWin : 0;
+  if (earned) stmts.push(...coinStmts(db, user.id, earned, 'run daily'));
+  await db.batch(stmts);
+  return json({ ok: true, progress, won: run.won, earned, wallet: earned ? await getWallet(db, user.id) : undefined });
 }
 
 /* ---------------- admin ---------------- */
+async function banUser(ctx, u) {
+  const { db, env } = ctx;
+  await db.batch([
+    db.prepare('UPDATE users SET banned = 1 WHERE id = ?').bind(u.id),
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(u.id),
+    db.prepare('UPDATE games SET hidden = 1 WHERE user_id = ?').bind(u.id),
+    db.prepare("UPDATE trades SET status = 'cancelled' WHERE status = 'open' AND (from_id = ? OR to_id = ?)").bind(u.id, u.id),
+  ]);
+  await kickEverywhere(env, db, u.id, 'This account was banned.');
+}
 async function admin(ctx, path, method) {
   const { db, env, user } = ctx;
   if (!env.ADMIN_USERNAME) fail(503, 'Admin is off. Add a variable called ADMIN_USERNAME with your username in the Worker settings.');
@@ -430,33 +739,60 @@ async function admin(ctx, path, method) {
   }
   if (path === '/users' && method === 'GET') {
     const q = (ctx.url.searchParams.get('q') || '').toLowerCase().slice(0, 16);
-    const { results } = await db.prepare(`SELECT u.name, u.banned, u.created_at, (SELECT COUNT(*) FROM games g WHERE g.user_id = u.id) AS games
+    const { results } = await db.prepare(`SELECT u.name, u.banned, u.created_at, (SELECT COUNT(*) FROM games g WHERE g.user_id = u.id) AS games,
+      (SELECT coins FROM wallets w WHERE w.user_id = u.id) AS coins
       FROM users u WHERE u.name_lower LIKE ? ORDER BY u.created_at DESC LIMIT 50`).bind('%' + q.replace(/[\\%_]/g, '') + '%').all();
-    return json({ users: results.map((u) => ({ ...u, banned: !!u.banned })) });
+    return json({ users: results.map((u) => ({ ...u, coins: u.coins || 0, banned: !!u.banned })) });
   }
-  let m = path.match(/^\/games\/([A-Za-z0-9]{8})$/);
+  if (path === '/chat' && method === 'GET') {
+    const { results } = await db.prepare("SELECT * FROM chat_reports WHERE status = 'open' ORDER BY at DESC LIMIT 100").all();
+    return json({ reports: results.map((r) => ({ id: r.id, reporter: r.reporter_name, target: r.target, reason: r.reason, room: r.room, at: r.at, messages: JSON.parse(r.messages || '[]') })) });
+  }
+  let m = path.match(/^\/chat\/(\d+)$/);
   if (m && method === 'POST') {
     const { action } = await body(ctx.request);
+    const r = await db.prepare('SELECT * FROM chat_reports WHERE id = ?').bind(Number(m[1])).first();
+    if (!r) fail(404, 'That report is gone.');
+    if (action === 'ban') {
+      const u = await db.prepare('SELECT id, name FROM users WHERE id = ?').bind(r.target_id).first();
+      if (u && isAdmin(env, u)) fail(400, "You can't ban an admin.");
+      if (u) await banUser(ctx, u);
+      await db.prepare("UPDATE chat_reports SET status = 'done' WHERE target_id = ? AND status = 'open'").bind(r.target_id).run();
+    } else if (action === 'dismiss') {
+      await db.prepare("UPDATE chat_reports SET status = 'dismissed' WHERE id = ?").bind(r.id).run();
+    } else fail(400, 'Unknown action.');
+    return json({ ok: true });
+  }
+  m = path.match(/^\/games\/([A-Za-z0-9]{8})$/);
+  if (m && method === 'POST') {
+    const input = await body(ctx.request);
+    const { action } = input;
     if (action === 'hide') await db.prepare('UPDATE games SET hidden = 1 WHERE id = ?').bind(m[1]).run();
     else if (action === 'show') await db.prepare('UPDATE games SET hidden = 0 WHERE id = ?').bind(m[1]).run();
     else if (action === 'clear') await db.batch([db.prepare('UPDATE games SET reports = 0, hidden = 0 WHERE id = ?').bind(m[1]), db.prepare('DELETE FROM reports WHERE game_id = ?').bind(m[1])]);
     else if (action === 'delete') await removeGame(db, m[1]);
-    else fail(400, 'Unknown action.');
+    else if (action === 'reward') {
+      const amount = Math.floor(Number(input.amount) || 0);
+      if (amount < 0 || amount > 1000) fail(400, 'Rewards can be 0 to 1000 coins.');
+      await db.prepare('UPDATE games SET reward = ? WHERE id = ?').bind(amount, m[1]).run();
+    } else fail(400, 'Unknown action.');
     return json({ ok: true });
   }
   m = path.match(/^\/users\/([A-Za-z0-9_]{3,16})$/);
   if (m && method === 'POST') {
-    const { action } = await body(ctx.request);
+    const input = await body(ctx.request);
+    const { action } = input;
     const u = await db.prepare('SELECT id, name FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
     if (!u) fail(404, 'No user with that name.');
+    if (action === 'grant') {
+      const amount = Math.floor(Number(input.amount) || 0);
+      if (!amount || Math.abs(amount) > 100000) fail(400, 'Pick an amount between -100000 and 100000.');
+      try { await db.batch(coinStmts(db, u.id, amount, 'admin ' + user.name)); } catch (e) { fail(400, "They don't have that many coins to take away."); }
+      return json({ ok: true, wallet: await getWallet(db, u.id) });
+    }
     if (isAdmin(env, u)) fail(400, "You can't ban an admin.");
-    if (action === 'ban') {
-      await db.batch([
-        db.prepare('UPDATE users SET banned = 1 WHERE id = ?').bind(u.id),
-        db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(u.id),
-        db.prepare('UPDATE games SET hidden = 1 WHERE user_id = ?').bind(u.id),
-      ]);
-    } else if (action === 'unban') {
+    if (action === 'ban') await banUser(ctx, u);
+    else if (action === 'unban') {
       await db.batch([
         db.prepare('UPDATE users SET banned = 0 WHERE id = ?').bind(u.id),
         db.prepare('UPDATE games SET hidden = 0 WHERE user_id = ? AND reports < ?').bind(u.id, HIDE_AFTER_REPORTS),

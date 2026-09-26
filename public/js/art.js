@@ -153,6 +153,19 @@ export function drawHat(ctx, hat, s, t = 0, look = 1, lw = 2) {
       ctx.lineWidth = lw * 1.2; ctx.strokeStyle = '#ffe66d'; ctx.stroke();
       break;
     }
+    case 'viking':
+      ctx.beginPath(); ctx.moveTo(-h * 0.9, top + s * 0.1); ctx.quadraticCurveTo(0, top - s * 0.45, h * 0.9, top + s * 0.1); ctx.closePath(); fill('#a3abc2');
+      ctx.beginPath(); ctx.rect(-h * 0.92, top + s * 0.02, s * 0.92, s * 0.1); fill('#c98b4f');
+      for (const d of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(d * h * 0.7, top - s * 0.02); ctx.quadraticCurveTo(d * h * 1.25, top - s * 0.1, d * h * 1.2, top - s * 0.42);
+        ctx.quadraticCurveTo(d * h * 1.0, top - s * 0.18, d * h * 0.55, top - s * 0.14); ctx.closePath(); fill('#f4f0e0');
+      }
+      break;
+    case 'chef':
+      ctx.beginPath(); ctx.rect(-h * 0.55, top - s * 0.12, h * 1.1, s * 0.2); fill('#ffffff');
+      ctx.beginPath(); ctx.arc(-h * 0.35, top - s * 0.24, s * 0.16, 0, Math.PI * 2); ctx.arc(h * 0.35, top - s * 0.24, s * 0.16, 0, Math.PI * 2); fill('#ffffff');
+      ctx.beginPath(); ctx.arc(0, top - s * 0.34, s * 0.19, 0, Math.PI * 2); fill('#ffffff');
+      break;
     case 'wizard':
       ctx.beginPath(); ctx.moveTo(-h * 0.95, top + s * 0.08); ctx.lineTo(h * 0.95, top + s * 0.08); ctx.lineTo(h * 0.35, top - s * 0.05);
       ctx.quadraticCurveTo(h * 0.2, top - s * 0.55, -look * h * 0.7, top - s * 0.62); ctx.quadraticCurveTo(-h * 0.1, top - s * 0.3, -h * 0.35, top - s * 0.05); ctx.closePath(); fill('#5a3fd6');

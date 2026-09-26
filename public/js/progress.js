@@ -1,36 +1,43 @@
-// Your progress: stars, coins, best runs, stats, achievements and closet items.
-// Guests keep it in this browser. With an account it also syncs to the server.
+// Your progress: stars, best runs, stats, badges, and your closet.
+// Guests keep it in this browser. With an account, coins and items live on the server
+// (they only change through checked runs, the shop and trades), and the rest syncs.
 import { store } from './api.js';
 import { SHOP, FREE, itemKey } from './cosmetics.js';
 import { WORLDS, BUILTIN } from './levels.js';
 
+// Badges. They used to pay coins; now coins only come from runs the server checks.
 export const ACHIEVEMENTS = [
-  { id: 'first', name: 'First steps', text: 'Beat any level', reward: 20 },
-  { id: 'world1', name: 'World 1 clear', text: 'Beat every level in World 1', reward: 100 },
-  { id: 'world2', name: 'World 2 clear', text: 'Beat every level in World 2', reward: 150 },
-  { id: 'stars10', name: 'Star collector', text: 'Earn 10 stars', reward: 40 },
-  { id: 'stars30', name: 'Star hoarder', text: 'Earn 30 stars', reward: 100 },
-  { id: 'allstars', name: 'Perfectionist', text: 'Earn every star', reward: 300 },
-  { id: 'flawless', name: 'Flawless party', text: 'Beat Portal Party without dying', reward: 150 },
-  { id: 'coins500', name: 'Piggy bank', text: 'Grab 500 coins in levels', reward: 50 },
-  { id: 'jumps1000', name: 'Bouncy', text: 'Jump 1000 times', reward: 40 },
-  { id: 'stomp25', name: 'Stomper', text: 'Stomp 25 walkers', reward: 40 },
-  { id: 'portals100', name: 'Shape shifter', text: 'Go through 100 portals', reward: 40 },
-  { id: 'die100', name: 'Never give up', text: 'Respawn 100 times', reward: 30 },
-  { id: 'endless250', name: 'Long run', text: 'Reach 250 m in Endless Rush', reward: 40 },
-  { id: 'endless1000', name: 'Marathon', text: 'Reach 1000 m in Endless Rush', reward: 150 },
-  { id: 'daily1', name: 'Daily player', text: 'Finish a daily challenge', reward: 30 },
-  { id: 'daily5', name: 'Regular', text: 'Finish 5 daily challenges', reward: 100 },
-  { id: 'builder', name: 'Builder', text: 'Save a level you made', reward: 20 },
-  { id: 'proven', name: 'Proven', text: 'Beat your own level in Test', reward: 20 },
-  { id: 'publisher', name: 'Published', text: 'Publish a level to Discover', reward: 50 },
-  { id: 'shopper', name: 'Fresh look', text: 'Buy something in the closet', reward: 20 },
+  { id: 'first', name: 'First steps', text: 'Beat any level' },
+  { id: 'world1', name: 'World 1 clear', text: 'Beat every level in World 1' },
+  { id: 'world2', name: 'World 2 clear', text: 'Beat every level in World 2' },
+  { id: 'stars10', name: 'Star collector', text: 'Earn 10 stars' },
+  { id: 'stars30', name: 'Star hoarder', text: 'Earn 30 stars' },
+  { id: 'allstars', name: 'Perfectionist', text: 'Earn every star' },
+  { id: 'flawless', name: 'Flawless party', text: 'Beat Portal Party without dying' },
+  { id: 'coins500', name: 'Piggy bank', text: 'Grab 500 coins in levels' },
+  { id: 'jumps1000', name: 'Bouncy', text: 'Jump 1000 times' },
+  { id: 'stomp25', name: 'Stomper', text: 'Stomp 25 walkers' },
+  { id: 'portals100', name: 'Shape shifter', text: 'Go through 100 portals' },
+  { id: 'die100', name: 'Never give up', text: 'Respawn 100 times' },
+  { id: 'endless250', name: 'Long run', text: 'Reach 250 m in Endless Rush' },
+  { id: 'endless1000', name: 'Marathon', text: 'Reach 1000 m in Endless Rush' },
+  { id: 'daily1', name: 'Daily player', text: 'Finish a daily challenge' },
+  { id: 'daily5', name: 'Regular', text: 'Finish 5 daily challenges' },
+  { id: 'obby1', name: 'Obby climber', text: 'Beat a 3D obby' },
+  { id: 'obbyall', name: 'Obby master', text: 'Beat every built-in 3D obby' },
+  { id: 'social', name: 'Hello there', text: 'Chat in a 3D server' },
+  { id: 'trader', name: 'Trader', text: 'Finish a trade' },
+  { id: 'builder', name: 'Builder', text: 'Save a level or world you made' },
+  { id: 'proven', name: 'Proven', text: 'Beat your own level in Test' },
+  { id: 'publisher', name: 'Published', text: 'Publish a level or world' },
+  { id: 'teamwork', name: 'Teamwork', text: 'Build with a friend' },
+  { id: 'shopper', name: 'Fresh look', text: 'Buy something in the closet' },
 ];
-
+export const OBBIES = ['sunny', 'tower', 'lava'];
 const STAR_REWARD = 10;
 const blank = () => ({
-  v: 1, coins: 0, levels: {}, owned: FREE.slice(), equip: { color: '#ff6b35', hat: 'none', trail: 'none' }, ach: {},
-  stats: { wins: 0, jumps: 0, stomps: 0, portals: 0, deaths: 0, coins: 0, endlessBest: 0, dailies: 0, saved: 0, proven: 0, published: 0, bought: 0 },
+  v: 2, coins: 0, levels: {}, owned: FREE.slice(), equip: { color: '#ff6b35', hat: 'none', trail: 'none' }, ach: {},
+  stats: { wins: 0, jumps: 0, stomps: 0, portals: 0, deaths: 0, coins: 0, endlessBest: 0, dailies: 0, saved: 0, proven: 0, published: 0, bought: 0, obbies: 0, chats: 0, trades: 0, team: 0 },
   daily: {}, updated: 0,
 });
 function clean(p) {
@@ -50,7 +57,8 @@ function clean(p) {
 
 let key = 'progress:guest';
 let data = clean(store.get(key, null));
-// Bring over best runs saved by the older version of Blockyard.
+let wallet = null; // accounts only: { coins, items: { key: qty }, look }
+// Bring over best runs saved by the first version of Blockyard.
 if (!store.get(key, null)) {
   for (const lv of BUILTIN) {
     const b = store.get('best:' + lv.id, null);
@@ -65,15 +73,15 @@ let pendingAch = [];
 
 function save() {
   data.updated = Date.now();
-  store.set(key, data);
+  // the server owns coins and items for accounts, so don't keep stale copies
+  store.set(key, wallet ? { ...data, coins: 0, owned: FREE.slice() } : data);
   for (const fn of listeners) fn(data);
 }
 
-export function merge(a, b, addCoins = false) {
+export function merge(a, b) {
   a = clean(a); b = clean(b);
   const newer = (a.updated || 0) >= (b.updated || 0) ? a : b;
   const out = clean(newer);
-  out.coins = addCoins ? a.coins + b.coins : newer.coins;
   for (const id of new Set([...Object.keys(a.levels), ...Object.keys(b.levels)])) {
     const x = a.levels[id] || {}, y = b.levels[id] || {};
     const times = [x.time, y.time].filter((t) => typeof t === 'number');
@@ -94,32 +102,66 @@ export function merge(a, b, addCoins = false) {
   return out;
 }
 
+/* ---------- runs a guest finished: sent to the server when they make an account ---------- */
+const PROOFS = 'proofs';
+export const proofs = {
+  list() { return store.get(PROOFS, []); },
+  add(p) { const l = this.list().filter((x) => !(x.kind === p.kind && x.id === p.id && x.replay === p.replay)); l.push({ ...p, at: Date.now() }); store.set(PROOFS, l.slice(-40)); },
+  clear() { store.set(PROOFS, []); },
+};
+
 export const progress = {
   get data() { return data; },
+  get wallet() { return wallet; },
+  get account() { return !!wallet; },
   onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-  // Switch between the guest save and an account save.
-  use(userId, serverData) {
+  // Switch between the guest save and an account save. res: what the server sent (/me, login, signup).
+  use(userId, res) {
     key = userId ? 'progress:u:' + userId : 'progress:guest';
     const local = store.get(key, null);
-    data = serverData ? merge(serverData, local) : clean(local);
+    data = res && res.progress ? merge(res.progress, local) : clean(local);
+    wallet = null;
+    if (userId && res) this.setAccount(res); else save();
+  },
+  setAccount(res) {
+    if (res.wallet) this.setWallet(res.wallet, false);
+    // stars the server has seen you earn
+    for (const [id, l] of Object.entries(res.levels || {})) {
+      const e = data.levels[id] || (data.levels[id] = { won: false, progress: 0, time: null, stars: [0, 0, 0], coins: 0 });
+      if (l.stars & 1) { e.won = true; e.progress = 1; }
+      e.stars = [0, 1, 2].map((i) => ((e.stars || [])[i] || (l.stars & (1 << i)) ? 1 : 0));
+      e.coins = Math.max(e.coins || 0, l.coins || 0);
+      if (typeof l.best === 'number' && (e.time == null || l.best < e.time)) e.time = l.best;
+    }
+    for (const b of Object.keys(res.badges || {})) if (!data.ach[b]) data.ach[b] = Date.now();
     save();
   },
+  setWallet(w, notify = true) {
+    wallet = w;
+    data.coins = w.coins;
+    data.owned = [...new Set([...FREE, ...Object.keys(w.items).map((k) => k.slice(k.indexOf(':') + 1))])];
+    data.equip = { ...data.equip, ...w.look };
+    if (notify) save();
+  },
+  itemsOwned() { return wallet ? wallet.items : null; },
   guestHasProgress() {
     const g = clean(store.get('progress:guest', null));
-    return g.coins > 0 || Object.keys(g.levels).length > 0 || g.owned.length > FREE.length;
+    return Object.keys(g.levels).length > 0 || proofs.list().length > 0;
   },
   clearGuest() { store.set('progress:guest', blank()); },
   absorbGuest() {
-    data = merge(data, store.get('progress:guest', null), true);
+    data = merge(data, store.get('progress:guest', null));
     store.set('progress:guest', blank());
+    if (wallet) this.setWallet(wallet, false);
     save();
   },
   level(id) { return data.levels[id] || null; },
   stars(id) { const l = data.levels[id]; return l && l.stars ? l.stars : [0, 0, 0]; },
-  totalStars() { return Object.values(data.levels).reduce((n, l) => n + (l.stars || []).reduce((a, b) => a + (b ? 1 : 0), 0), 0); },
+  totalStars() { return BUILTIN.reduce((n, lv) => n + this.stars(lv.id).reduce((a, b) => a + (b ? 1 : 0), 0), 0); },
   maxStars() { return BUILTIN.length * 3; },
 
-  // Called when a run ends. meta: { builtin, par, rush }
+  // Called when a 2D run ends. meta: { builtin, par, rush }. Coins here are a guess for guests;
+  // for accounts the server's answer replaces it.
   finish(id, r, meta = {}) {
     const e = data.levels[id] || (data.levels[id] = { won: false, progress: 0, time: null, stars: [0, 0, 0], coins: 0 });
     const out = { newBest: false, stars: e.stars.slice(), newStars: [], coinsEarned: 0 };
@@ -132,18 +174,33 @@ export const progress = {
         got.forEach((g, i) => { if (g && !e.stars[i]) { e.stars[i] = 1; out.newStars.push(i); out.coinsEarned += STAR_REWARD; } });
         if (r.coins > e.coins) { out.coinsEarned += r.coins - e.coins; e.coins = r.coins; }
         if (id === 'b-party' && r.deaths === 0) grant('flawless');
+        if (!wallet && out.coinsEarned && r.replay) proofs.add({ kind: 'level', id, replay: r.replay });
       }
       out.stars = e.stars.slice();
     } else if (r.progress > e.progress + 0.001) { out.newBest = true; e.progress = r.progress; }
-    data.coins += out.coinsEarned;
+    if (!wallet) data.coins += out.coinsEarned;
     checkAll(); save();
     return out;
+  },
+  // A 3D obby cleared (built-in ones pay coins).
+  finishWorld(id, r) {
+    const k = 'w:' + id;
+    const e = data.levels[k] || (data.levels[k] = { won: false, progress: 0, time: null, stars: [0, 0, 0], coins: 0 });
+    const first = !e.won;
+    e.won = true; e.progress = 1;
+    if (e.time == null || r.time < e.time) e.time = Math.round(r.time * 10) / 10;
+    if (r.deaths === 0) e.stars[1] = 1;
+    e.stars[0] = 1;
+    e.coins = Math.max(e.coins || 0, r.coins);
+    if (first) data.stats.obbies++;
+    checkAll(); save();
+    return { first };
   },
   endless(distance, coins) {
     const best = data.stats.endlessBest;
     const earned = coins + Math.floor(distance / 25);
     data.stats.endlessBest = Math.max(best, distance);
-    data.coins += earned;
+    if (!wallet) data.coins += earned;
     checkAll(); save();
     return { newBest: distance > best, earned, best: data.stats.endlessBest };
   },
@@ -152,7 +209,7 @@ export const progress = {
     d.attempts++;
     const out = { newBest: pct > d.best + 0.001, earned: 0 };
     d.best = Math.max(d.best, pct);
-    if (won && !d.won) { d.won = true; data.stats.dailies++; out.earned = 30; data.coins += 30; }
+    if (won && !d.won) { d.won = true; data.stats.dailies++; out.earned = wallet ? 30 : 0; }
     checkAll(); save();
     return out;
   },
@@ -161,27 +218,19 @@ export const progress = {
   achieve(id) { grant(id); save(); },
   takeNewAchievements() { const a = pendingAch; pendingAch = []; return a; },
 
-  owns(kind, id) { return FREE.includes(id) || data.owned.includes(itemKey(kind, id)); },
+  owns(kind, id) {
+    if (FREE.includes(id)) return true;
+    if (wallet) return (wallet.items[itemKey(kind, id)] || 0) > 0;
+    return data.owned.includes(itemKey(kind, id)) || data.owned.includes(id);
+  },
   canUnlock(item) {
     if (!item.need) return true;
     if (item.need.stars) return this.totalStars() >= item.need.stars;
     if (item.need.ach) return !!data.ach[item.need.ach];
     return false;
   },
-  buy(kind, id) {
-    const item = SHOP[kind].find((i) => i.id === id);
-    if (!item || this.owns(kind, id)) return 'owned';
-    if (item.need) { if (!this.canUnlock(item)) return 'locked'; }
-    else if (data.coins < item.price) return 'poor';
-    else data.coins -= item.price;
-    data.owned.push(itemKey(kind, id));
-    data.stats.bought++;
-    grant('shopper');
-    data.equip[kind] = id;
-    save();
-    return 'ok';
-  },
-  equip(kind, id) { if (this.owns(kind, id)) { data.equip[kind] = id; save(); } },
+  // guests can still change into things they own in this browser
+  equipLocal(kind, id) { if (this.owns(kind, id)) { data.equip[kind] = id; save(); } },
 };
 
 function grant(id) {
@@ -189,7 +238,6 @@ function grant(id) {
   const a = ACHIEVEMENTS.find((x) => x.id === id);
   if (!a) return;
   data.ach[id] = Date.now();
-  data.coins += a.reward;
   pendingAch.push(a);
 }
 
@@ -213,4 +261,10 @@ function checkAll() {
   if (s.saved >= 1) grant('builder');
   if (s.proven >= 1) grant('proven');
   if (s.published >= 1) grant('publisher');
+  if (s.bought >= 1) grant('shopper');
+  if (s.chats >= 1) grant('social');
+  if (s.trades >= 1) grant('trader');
+  if (s.team >= 1) grant('teamwork');
+  if (OBBIES.some((id) => won('w:' + id))) grant('obby1');
+  if (OBBIES.every((id) => won('w:' + id))) grant('obbyall');
 }

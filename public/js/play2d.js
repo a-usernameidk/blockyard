@@ -163,7 +163,7 @@ function confetti() {
 }
 function showToast(text) { toast = { text, life: 1.4 }; }
 
-const TRAIL_COLORS = { sparkle: ['#ffffff', '#ffd23f'], bubbles: ['#bfefff'], hearts: ['#ff5d8f'], notes: ['#1d2340'], fire: ['#ff5a1f', '#ffb02e', '#ffd23f'], stars: ['#ffd23f', '#fff6c9'] };
+const TRAIL_COLORS = { sparkle: ['#ffffff', '#ffd23f'], bubbles: ['#bfefff'], hearts: ['#ff5d8f'], notes: ['#1d2340'], fire: ['#ff5a1f', '#ffb02e', '#ffd23f'], stars: ['#ffd23f', '#fff6c9'], lightning: ['#7cc8ff', '#ffffff', '#ffe66d'] };
 function spawnTrail(dt) {
   const kind = look.trail, p = G.p;
   if (!kind || kind === 'none' || G.dead || kind === 'rainbow') return;
@@ -240,6 +240,7 @@ function drawCosmetic(c) {
   } else if (c.kind === 'bubbles') { ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, s, 0, Math.PI * 2); ctx.stroke(); }
   else if (c.kind === 'hearts') { ctx.beginPath(); ctx.moveTo(0, s); ctx.bezierCurveTo(-s * 1.6, -s * 0.4, -s * 0.5, -s * 1.5, 0, -s * 0.4); ctx.bezierCurveTo(s * 0.5, -s * 1.5, s * 1.6, -s * 0.4, 0, s); ctx.fill(); }
   else if (c.kind === 'notes') { ctx.beginPath(); ctx.ellipse(0, s, s * 0.7, s * 0.5, -0.4, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(s * 0.4, -s * 1.2, 1.8, s * 2.2); }
+  else if (c.kind === 'lightning') { ctx.rotate(c.rot * 0.3); ctx.beginPath(); ctx.moveTo(-s * 0.3, -s * 1.4); ctx.lineTo(s * 0.5, -s * 0.2); ctx.lineTo(0, -s * 0.1); ctx.lineTo(s * 0.3, s * 1.4); ctx.lineTo(-s * 0.5, s * 0.1); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill(); }
   else { ctx.fillRect(-s / 2, -s / 2, s, s); }
   ctx.restore();
   ctx.globalAlpha = 1;
@@ -361,7 +362,7 @@ function showEnd() {
   let title = 'Level cleared!', stats = '', againLabel = 'Play again';
   if (opts.mode === 'endless') {
     const dist = Math.floor(G.p.x / T);
-    const r = opts.onRunOver ? opts.onRunOver({ distance: dist, coins: G.coins }) : { newBest: false, earned: 0 };
+    const r = opts.onRunOver ? opts.onRunOver({ distance: dist, coins: G.coins, replay }) : { newBest: false, earned: 0 };
     title = r.newBest ? 'New best!' : 'Run over';
     stats = `You made it ${dist} m${r.newBest ? '' : ` (best ${Math.floor(r.best)} m)`}.`;
     if (r.earned) reward.textContent = `+${r.earned} coins`;

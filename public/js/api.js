@@ -29,6 +29,14 @@ export const mine = {
   remove(id) { store.set('games', this.list().filter((g) => g.id !== id)); },
 };
 
+// 3D worlds made by guests (accounts keep them on the server as projects).
+export const myWorlds = {
+  list() { return store.get('worlds', []); },
+  get(id) { return this.list().find((w) => w.id === id) || null; },
+  save(w) { const all = this.list().filter((x) => x.id !== w.id); all.unshift({ ...w, updated: Date.now() }); return store.set('worlds', all.slice(0, 12)); },
+  remove(id) { store.set('worlds', this.list().filter((w) => w.id !== id)); },
+};
+
 export function newId() { return 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
 /* ---------------- online server ---------------- */
@@ -47,10 +55,10 @@ export const auth = {
   set token(t) { store.set('token', t || ''); },
 };
 
-async function request(method, path, body, headers = {}) {
+async function request(method, path, body, headers = {}, wait = 12000) {
   if (auth.token) headers = { authorization: 'Bearer ' + auth.token, ...headers };
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 9000);
+  const timer = setTimeout(() => ctl.abort(), wait);
   try {
     const r = await fetch('/api' + path, {
       method, signal: ctl.signal, cache: 'no-store',
@@ -71,6 +79,7 @@ async function request(method, path, body, headers = {}) {
 }
 
 const enc = encodeURIComponent;
+const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== '' && v != null)).toString();
 export const api = {
   signup: (name, password, progress) => request('POST', '/auth/signup', { name, password, progress }),
   login: (name, password) => request('POST', '/auth/login', { name, password }),
@@ -80,10 +89,13 @@ export const api = {
   deleteMe: () => request('DELETE', '/me'),
   saveProgress: (progress) => request('PUT', '/me/progress', { progress }),
   myGames: () => request('GET', '/me/games'),
-  list: ({ sort = 'new', style = '', q = '', page = 0, creator = '' } = {}) => request('GET', `/games?${new URLSearchParams({ sort, style, q, page, creator })}`),
+  list: ({ kind = '2d', sort = 'new', style = '', q = '', page = 0, creator = '', rewarding = '' } = {}) => request('GET', `/games?${qs({ kind, sort, style, q, page, creator, rewarding })}`),
   get: (id) => request('GET', `/games/${enc(id)}`),
-  publish: (lv, desc, replay) => request('POST', '/games', { level: toWire(lv), desc, replay }),
-  update: (id, lv, desc, replay, editKey) => request('PUT', `/games/${enc(id)}`, { level: toWire(lv), desc, replay }, editKey ? { 'x-edit-key': editKey } : {}),
+  publish: (lv, desc, replay, extra = {}) => request('POST', '/games', { level: toWire(lv), desc, replay, ...extra }),
+  update: (id, lv, desc, replay, editKey, extra = {}) => request('PUT', `/games/${enc(id)}`, { level: toWire(lv), desc, replay, ...extra }, editKey ? { 'x-edit-key': editKey } : {}),
+  publish3d: (world, desc, replay, extra = {}) => request('POST', '/games', { kind: '3d', world, desc, replay, ...extra }),
+  update3d: (id, world, desc, replay, extra = {}) => request('PUT', `/games/${enc(id)}`, { kind: '3d', world, desc, replay, ...extra }),
+  visibility: (id, visibility) => request('PUT', `/games/${enc(id)}`, { only: 'visibility', visibility }),
   remove: (id, editKey) => request('DELETE', `/games/${enc(id)}`, null, editKey ? { 'x-edit-key': editKey } : {}),
   play: (id) => request('POST', `/games/${enc(id)}/play`),
   like: (id) => request('POST', `/games/${enc(id)}/like`),
@@ -91,4 +103,28 @@ export const api = {
   daily: (date) => request('GET', `/daily?date=${enc(date)}`),
   postDaily: (date, replay) => request('POST', '/daily', { date, replay }),
   admin: (method, path, body) => request(method, '/admin' + path, body),
+  // coins, closet, trades
+  look: (look) => request('PUT', '/me/look', look),
+  shop: () => request('GET', '/shop'),
+  buy: (key) => request('POST', '/shop/buy', { key }),
+  sell: (key) => request('POST', '/shop/sell', { key }),
+  finish: (body) => request('POST', '/finish', body, {}, 20000),
+  trades: () => request('GET', '/trades'),
+  offer: (body) => request('POST', '/trades', body),
+  tradeAction: (id, action) => request('POST', `/trades/${enc(id)}`, { action }),
+  users: (q) => request('GET', `/users?${qs({ q })}`),
+  user: (name) => request('GET', `/users/${enc(name)}`),
+  // projects
+  projects: () => request('GET', '/projects'),
+  newProject: (kind, name, data) => request('POST', '/projects', { kind, name, data }),
+  project: (id) => request('GET', `/projects/${enc(id)}`),
+  saveProject: (id, data) => request('PUT', `/projects/${enc(id)}`, { data }),
+  deleteProject: (id) => request('DELETE', `/projects/${enc(id)}`),
+  collab: (id, name, action) => request('POST', `/projects/${enc(id)}/collab`, { name, action }),
+  // live rooms
+  online: () => request('GET', '/online'),
+  servers: (world) => request('GET', `/servers?${qs({ world })}`),
+  privateServer: (world) => request('POST', '/servers', { world }),
+  joinRoom: (body) => request('POST', '/rooms/join', body),
+  editRoom: (project) => request('POST', '/rooms/edit', { project }),
 };
