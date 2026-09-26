@@ -15,7 +15,7 @@ export const GAMES = {
   lava: { name: 'Rising Lava', short: 'Climb! The lava keeps rising. Last one standing wins.', secs: 90 },
 };
 export const GAME_IDS = Object.keys(GAMES);
-export const ROUND = { wait: 12, results: 7, minPlayers: 2, lavaEvery: 4, tagReach: 1.4, hp: 6, safeMs: 1500, swapMs: 400 };
+export const ROUND = { wait: 12, results: 7, minPlayers: 2, lavaEvery: 4, tagReach: 1.4, itWait: 3000, hp: 6, safeMs: 1500, swapMs: 400 };
 // Paintball blasters. Everyone has all four; they trade range for speed, so none is best everywhere.
 //   dmg: paint per hit (6 paint splats someone). every: ms between shots. spread: how wobbly. pellets: shots at once.
 export const WEAPONS = {
@@ -25,6 +25,17 @@ export const WEAPONS = {
   splatter: { name: 'Splatter', dmg: 3, every: 700, range: 13, spread: 0.1, pellets: 6, speed: 38, size: 0.2, info: 'Up close only. 2 hits.' },
 };
 export const WEAPON_IDS = Object.keys(WEAPONS);
+// Bots for private servers of Blockyard's minigame worlds. The server owner's computer drives them.
+export const BOTS = { max: 6, skills: ['easy', 'normal', 'hard', 'insane'] };
+export const BOT_SKILL = {
+  easy: { name: 'Easy', think: 0.6, press: 0.7, aim: 0.25, miss: 0.15 },
+  normal: { name: 'Normal', think: 0.35, press: 0.85, aim: 0.45, miss: 0.06 },
+  hard: { name: 'Hard', think: 0.18, press: 0.95, aim: 0.65, miss: 0.02 },
+  insane: { name: 'Insane', think: 0.08, press: 1, aim: 0.85, miss: 0 },
+};
+export const BOT_NAMES = ['Bolt', 'Sprocket', 'Gizmo', 'Widget', 'Pixel', 'Byte'];
+export const BOT_LOOKS = [['#3a86ff', 'cap'], ['#44c06a', 'sprout'], ['#b06cff', 'wizard'], ['#ffd23f', 'tophat'], ['#ff5d8f', 'bow'], ['#a3abc2', 'headphones']]
+  .map(([color, hat]) => ({ color, hat, trail: 'none', pet: 'none', gear: 'none' }));
 export const PRIZE = { first: 25, second: 15, third: 10, win: 20, dailyCap: 200 };
 
 // Works out where each game happens in a world: { modes, lobby, areas: { race: { spawn, box, hill, lavaFrom } } }

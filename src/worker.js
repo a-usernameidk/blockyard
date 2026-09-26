@@ -11,6 +11,7 @@
 
 import { normalizeLevel, toWire, cleanText, isRude, LIMITS } from '../public/js/format.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
+import { BOTS } from '../public/js/games.js';
 import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
 import { findItem } from '../public/js/cosmetics.js';
@@ -95,6 +96,9 @@ const COLUMNS = [
   'ALTER TABLE users ADD COLUMN warnings INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE users ADD COLUMN signup_ip TEXT',
   'ALTER TABLE users ADD COLUMN good_reports INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE users ADD COLUMN seen INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE servers ADD COLUMN bots INTEGER NOT NULL DEFAULT 0',
+  "ALTER TABLE servers ADD COLUMN bot_skill TEXT NOT NULL DEFAULT 'normal'",
 ];
 
 // Tables are created automatically the first time the Worker runs.
@@ -199,6 +203,7 @@ async function handle(request, env, url) {
   if (path === '/online' && method === 'GET') return online(ctx);
   if (path === '/servers' && method === 'GET') return listServers(ctx);
   if (path === '/servers' && method === 'POST') return privateServer(ctx, await body(request));
+  if ((m = path.match(/^\/servers\/([A-Za-z0-9]{8})$/)) && method === 'PUT') return serverBots(ctx, m[1], await body(request));
   if (path === '/rooms/join' && method === 'POST') return joinPlay(ctx, await body(request));
   if (path === '/rooms/edit' && method === 'POST') return joinEdit(ctx, await body(request));
 
@@ -486,7 +491,7 @@ const MAX_FRIENDS = 100;
 async function friendsList(ctx) {
   const user = needUser(ctx);
   const { db } = ctx;
-  const { results } = await db.prepare(`SELECT f.a, f.b, f.status, u.id, u.name, u.look, p.world, p.code, p.at AS seen
+  const { results } = await db.prepare(`SELECT f.a, f.b, f.status, u.id, u.name, u.look, u.seen AS site, p.world, p.code, p.at AS seen
     FROM friends f JOIN users u ON u.id = CASE WHEN f.a = ? THEN f.b ELSE f.a END
     LEFT JOIN presence p ON p.user_id = u.id
     WHERE (f.a = ? OR f.b = ?) AND u.banned = 0 ORDER BY u.name_lower LIMIT 300`).bind(user.id, user.id, user.id).all();
@@ -500,7 +505,9 @@ async function friendsList(ctx) {
   for (const r of results) {
     if (r.status === 'ok') {
       const on = r.world && r.seen > Date.now() - FRESH;
-      out.friends.push({ name: r.name, look: lookOf(r.look), online: on ? { world: r.world, code: r.code, name: worldName(r.world) || names[r.world] || 'a player world' } : null });
+      // on the site (the page checks in every few seconds) but not in a world
+      const site = !on && r.site > Date.now() - 3 * 60e3;
+      out.friends.push({ name: r.name, look: lookOf(r.look), online: on ? { world: r.world, code: r.code, name: worldName(r.world) || names[r.world] || 'a player world' } : site ? { world: null, code: null, name: null, site: true } : null });
     } else if (r.b === user.id) out.incoming.push({ name: r.name, look: lookOf(r.look) });
     else out.outgoing.push({ name: r.name, look: lookOf(r.look) });
   }
@@ -534,7 +541,7 @@ async function friendAction(ctx, input) {
 
 async function profile(ctx, name) {
   const { db } = ctx;
-  const u = await db.prepare('SELECT id, name, created_at, banned, role FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
+  const u = await db.prepare('SELECT id, name, created_at, banned, role, progress FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
   if (!u || u.banned) fail(404, 'No player with that name.');
   const [items, games, here] = await Promise.all([
     publicItems(db, u.id),
@@ -546,7 +553,11 @@ async function profile(ctx, name) {
     const pub = builtinWorld(here.world) || (await db.prepare("SELECT 1 FROM games WHERE id = ? AND visibility = 'public' AND hidden = 0").bind(here.world).first());
     playing = pub ? { world: here.world, code: here.private ? null : here.code, name: worldName(here.world) } : { world: null, code: null, name: null };
   }
-  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), ...items, games: games.results.map(row), playing });
+  // badges: the ones the server checked, plus the ones saved with their progress
+  let saved = {};
+  try { saved = JSON.parse(u.progress || '{}').ach || {}; } catch (e) { /* none */ }
+  const badges = { ...Object.fromEntries(Object.keys(saved).slice(0, 200).map((k) => [String(k).slice(0, 30), true])), ...items.badges };
+  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), ...items, badges, games: games.results.map(row), playing });
 }
 const worldName = (id) => { const b = builtinWorld(id); return b ? b.name : null; };
 
@@ -841,8 +852,20 @@ async function listServers(ctx) {
   await worldInfo(ctx, world);
   const { results } = await ctx.db.prepare('SELECT code, players FROM servers WHERE world = ? AND private = 0 AND updated > ? AND players > 0 ORDER BY players DESC LIMIT 30').bind(world, Date.now() - FRESH).all();
   let mine = [];
-  if (ctx.user) mine = (await ctx.db.prepare('SELECT code, players FROM servers WHERE world = ? AND private = 1 AND owner_id = ? ORDER BY created_at DESC').bind(world, ctx.user.id).all()).results;
+  if (ctx.user) mine = (await ctx.db.prepare('SELECT code, players, bots, bot_skill AS skill FROM servers WHERE world = ? AND private = 1 AND owner_id = ? ORDER BY created_at DESC').bind(world, ctx.user.id).all()).results;
   return json({ servers: results, mine, size: ROOM_SIZE });
+}
+// Bots in your private server of a Blockyard minigame world: how many and how smart.
+async function serverBots(ctx, code, input) {
+  const user = needUser(ctx);
+  const s = await ctx.db.prepare('SELECT code, world, private, owner_id FROM servers WHERE code = ?').bind(code).first();
+  if (!s || s.owner_id !== user.id || !s.private) fail(404, 'That private server was not found.');
+  const b = builtinWorld(s.world);
+  if (!b || !b.game) fail(400, "Bots only work in Blockyard's minigame worlds.");
+  const n = Math.floor(Number(input.bots) || 0), skill = BOTS.skills.includes(input.skill) ? input.skill : 'normal';
+  if (n < 0 || n > BOTS.max) fail(400, `Pick 0 to ${BOTS.max} bots.`);
+  await ctx.db.prepare('UPDATE servers SET bots = ?, bot_skill = ? WHERE code = ?').bind(n, skill, code).run();
+  return json({ ok: true, code, bots: n, skill });
 }
 async function privateServer(ctx, input) {
   const user = needUser(ctx);

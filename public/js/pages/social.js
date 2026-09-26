@@ -5,6 +5,8 @@ import { api, store } from '../api.js';
 import { progress } from '../progress.js';
 import { findItem, canTrade } from '../cosmetics.js';
 import { itemPreview } from './closet.js';
+import { emojiNodes, emojiButton } from '../emoji.js';
+import { sfx } from '../audio.js';
 import { setWallet, refreshWallet, onSession, setMailCount, friendsNow, checkFriends } from './account.js';
 
 /* ---------------- notification settings ---------------- */
@@ -19,13 +21,13 @@ export const notifyOn = (k) => store.get('notify', {})[k] !== false;
 /* ---------------- pop-ups ---------------- */
 function note(title, text, actions = [], secs = 8) {
   const card = el('div', { class: 'note', role: 'status' },
-    el('b', {}, title), text ? el('p', {}, text) : null,
+    el('b', {}, title), text ? el('p', {}, ...emojiNodes(text, 18)) : null,
     el('div', { class: 'row' }, ...actions.map(([label, fn, cls]) => el('button', { class: 'btn ' + (cls || ''), type: 'button', onclick: () => { card.remove(); fn(); } }, label)),
       el('button', { class: 'btn btn-ghost', type: 'button', 'aria-label': 'Dismiss', onclick: () => card.remove() }, '✕')));
   $('#notes').append(card);
   while ($('#notes').children.length > 3) $('#notes').firstChild.remove();
   setTimeout(() => card.remove(), secs * 1000);
-  if (notifyOn('sound')) import('../audio.js').then((a) => a.sfx && a.sfx('chat')).catch(() => {});
+  if (notifyOn('sound')) sfx('notify');
 }
 
 /* ---------------- checking for new stuff ---------------- */
@@ -88,7 +90,7 @@ async function loadChats() {
     const rest = f ? f.friends.filter((x) => !names.has(x.name.toLowerCase())).map((x) => ({ name: x.name, color: x.look.color, last: '', unread: 0 })) : [];
     const all = [...chats, ...rest];
     box.replaceChildren(...(all.length ? all.map((c) => el('button', { class: 'dm-chat' + (dm.current && dm.current.toLowerCase() === c.name.toLowerCase() ? ' on' : ''), type: 'button', onclick: () => openThread(c.name) },
-      el('span', { class: 'dot', style: `background:${c.color}` }), el('span', { class: 'who' }, el('b', {}, c.name), el('span', { class: 'small' }, c.last ? (c.mine ? 'You: ' : '') + c.last : 'Say hi!')),
+      el('span', { class: 'dot', style: `background:${c.color}` }), el('span', { class: 'who' }, el('b', {}, c.name), el('span', { class: 'small' }, ...(c.last ? [c.mine ? 'You: ' : '', ...emojiNodes(c.last, 16)] : ['Say hi!']))),
       c.unread ? el('span', { class: 'count' }, String(c.unread)) : null))
       : [el('p', { class: 'small' }, 'No friends yet. Add friends from their profile, then you can message them.')]));
   } catch (e) { box.replaceChildren(el('p', { class: 'small' }, e.message)); }
@@ -104,7 +106,9 @@ async function openThread(name, quiet) {
     $('#dm-who').replaceChildren(el('span', { class: 'dot', style: `background:${r.color}` }), el('a', { class: 'linkish', href: '#/u/' + r.name, onclick: () => closeModal($('#dm-modal')) }, r.name),
       el('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { rep.hidden = !rep.hidden; } }, 'Report'), rep);
     const list = $('#dm-msgs');
-    list.replaceChildren(...r.messages.map((m) => el('li', { class: m.me ? 'me' : '' }, el('span', {}, m.text), el('small', {}, timeAgo(m.at)))));
+    const before = list.children.length;
+    list.replaceChildren(...r.messages.map((m) => el('li', { class: m.me ? 'me' : '' }, el('span', {}, ...emojiNodes(m.text, 22)), el('small', {}, timeAgo(m.at)))));
+    if (quiet && before && r.messages.length > before && !r.messages[r.messages.length - 1].me) sfx('chat');
     if (!r.messages.length) list.append(el('li', { class: 'dm-empty' }, r.friends ? `Say hi to ${r.name}!` : `You can only message friends. Add ${r.name} as a friend first.`));
     list.scrollTop = list.scrollHeight;
     $('#dm-form').hidden = !r.friends;
@@ -118,9 +122,10 @@ $('#dm-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = $('#dm-input').value.trim();
   if (!text || !dm.current) return;
-  try { await api.dmSend(dm.current, text); $('#dm-input').value = ''; openThread(dm.current, true); loadChats(); } catch (err) { toast(err.message); }
+  try { await api.dmSend(dm.current, text); $('#dm-input').value = ''; sfx('send'); openThread(dm.current, true); loadChats(); } catch (err) { toast(err.message); sfx('error'); }
 });
-$('#dm-btn').addEventListener('click', () => openDMs());
+$('#dm-btn').addEventListener('click', () => { sfx('open'); openDMs(); });
+$('#dm-form').insertBefore(emojiButton((code) => { const i = $('#dm-input'); i.value = (i.value + ' ' + code).trim().slice(0, 300); i.focus(); }), $('#dm-form button[type=submit]'));
 addEventListener('by:dm', (e) => openDMs(e.detail));
 
 /* ---------------- sending coins ---------------- */
@@ -193,7 +198,7 @@ function drawLive(t) {
   $('#live-ready').hidden = !open && !(t.status === 'invite' && t.invited);
   $('#live-ready').textContent = t.status === 'invite' ? 'Say yes' : t.me.ready ? 'Not ready' : 'Ready';
   $('#live-cancel').textContent = ['invite', 'open'].includes(t.status) ? (t.status === 'invite' && t.invited ? 'No thanks' : 'Cancel trade') : 'Close';
-  if (t.status === 'done' && was && was.status !== 'done') { refreshWallet(); toast('Trade done!', 'toast-ach'); }
+  if (t.status === 'done' && was && was.status !== 'done') { refreshWallet(); toast('Trade done!', 'toast-ach'); sfx('buy'); }
 }
 async function act(action, extra) {
   if (!live.id) return;

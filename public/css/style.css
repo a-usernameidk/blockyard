@@ -716,3 +716,21 @@ body[data-view="w3"] .announce, body[data-view="build"] .announce, body[data-vie
 .node.locked .node-face { filter: grayscale(.8) opacity(.7); }
 .choice input[type=radio] { width: auto; flex: none; margin: 4px 0 0; }
 .check input[type=checkbox] { width: auto; flex: none; }
+/* Pip emojis */
+.pip-emoji { vertical-align: middle; display: inline-block; margin: -3px 1px 0; image-rendering: auto; }
+.emoji-wrap { position: relative; display: inline-flex; }
+.emoji-btn { padding: 2px 6px; min-width: 40px; }
+.emoji-pop { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; width: 300px; max-height: 260px; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, 40px); gap: 4px; padding: 8px; background: var(--card); border: 3px solid var(--line); border-radius: 14px; box-shadow: 0 4px 0 var(--line); }
+.emoji-pop:not(.up) { bottom: auto; top: calc(100% + 6px); }
+.emoji-pop button { width: 40px; height: 40px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.emoji-pop button:hover, .emoji-pop button:focus-visible { background: rgba(255,210,63,.45); }
+.w3-chat-form .emoji-pop { left: 0; right: auto; }
+/* hard badges */
+.hard-tag { margin-left: 8px; font-size: 11px; font-weight: 900; background: #b06cff; color: #fff; border-radius: 6px; padding: 1px 6px; vertical-align: middle; }
+.ach.chosen .hard-tag, .chip-chosen { background: linear-gradient(90deg, #ffd23f, #ff5d8f, #b06cff, #3a86ff); color: #fff; }
+.ach.chosen.got { box-shadow: 0 0 0 3px #ffd23f, 0 5px 0 var(--line); }
+.chip-hard { background: #b06cff; color: #fff; }
+.chip-chosen { border-color: #ffd23f; font-weight: 900; }
+.bot-row { gap: 4px; }
+.bot-row select { padding: 3px 6px; }
+.w3-bots { left: auto; right: 10px; top: 52px; }

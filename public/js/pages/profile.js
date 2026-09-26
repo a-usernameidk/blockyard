@@ -60,7 +60,7 @@ async function showProfile(name) {
         session.user && session.user.admin ? el('div', { class: 'admin-strip row' }, el('b', {}, 'Admin'),
           el('button', { class: 'btn btn-sun', type: 'button', onclick: () => manageUser(u.name) }, me ? 'Give myself coins or items' : 'Coins, items, kick, ban…')) : null)),
     badges.length ? el('h2', {}, 'Badges') : null,
-    badges.length ? el('div', { class: 'chips' }, ...badges.map((b) => el('span', { class: 'chip', title: b.text }, b.name))) : null,
+    badges.length ? el('div', { class: 'chips' }, ...badges.sort((a, b) => (b.chosen ? 2 : b.hard ? 1 : 0) - (a.chosen ? 2 : a.hard ? 1 : 0)).map((b) => el('span', { class: 'chip' + (b.hard ? ' chip-hard' : '') + (b.chosen ? ' chip-chosen' : ''), title: b.text }, b.name))) : null,
     el('h2', {}, 'Closet'),
     items.length ? el('div', { class: 'items' }, ...items.map((i) => el('div', { class: 'item' }, itemPreview(i.f.kind, i.f.item), el('span', { class: 'item-name' }, i.f.item.name), el('span', { class: 'item-price' }, `Worth ${valueOf(i.f.item)}${i.qty > 1 ? ` (x${i.qty})` : ''}`)))) : el('p', { class: 'small' }, 'Nothing to trade yet.'),
     games3d.length ? el('h2', {}, 'Worlds') : null,

@@ -174,6 +174,7 @@ export const api = {
   online: () => request('GET', '/online'),
   servers: (world) => request('GET', `/servers?${qs({ world })}`),
   privateServer: (world) => request('POST', '/servers', { world }),
+  serverBots: (code, bots, skill) => request('PUT', `/servers/${enc(code)}`, { bots, skill }),
   joinRoom: (body) => request('POST', '/rooms/join', body),
   editRoom: (project) => request('POST', '/rooms/edit', { project }),
 };

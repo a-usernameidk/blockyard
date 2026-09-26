@@ -10,6 +10,9 @@ import { store } from './api.js';
 import { GAMES, ROUND, WEAPONS, WEAPON_IDS, onHill, inBox } from './games.js';
 import { GEAR_MODS } from './cosmetics.js';
 import { GFX, GFX_ORDER, gfxMode, setGfx } from './settings.js';
+import { emojiNodes, emojiButton } from './emoji.js';
+import { createBots } from './bots3d.js';
+import { BOTS, BOT_SKILL } from './games.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -75,7 +78,7 @@ export function startWorld(root, opts) {
   const fade = h('div', { class: 'w3-fade' });
   const log = h('ol', { class: 'w3-log', 'aria-live': 'polite' });
   const chatInput = h('input', { class: 'w3-chat-input', maxlength: '200', placeholder: 'Press Enter to chat', 'aria-label': 'Chat message', autocomplete: 'off', enterkeyhint: 'send' });
-  const chatForm = h('form', { class: 'w3-chat-form' }, chatInput, h('button', { class: 'btn', type: 'submit' }, 'Send'));
+  const chatForm = h('form', { class: 'w3-chat-form' }, chatInput, emojiButton((code) => { chatInput.value = (chatInput.value + ' ' + code).trim().slice(0, 200); chatInput.focus(); }), h('button', { class: 'btn', type: 'submit' }, 'Send'));
   const chat = h('div', { class: 'w3-chat' }, log, chatForm);
   const listBtn = h('button', { class: 'btn w3-players-btn', type: 'button', 'aria-expanded': 'false' }, 'Players');
   const list = h('ul', { class: 'w3-list', hidden: true });
@@ -287,7 +290,7 @@ export function startWorld(root, opts) {
   function addLine(who, text, color, sys) {
     const li = h('li', { class: sys === 'big' ? 'sys big' : sys ? 'sys' : '' });
     if (who) li.append(h('b', { style: color ? `color:${color}` : null }, who + ': '));
-    li.append(text);
+    li.append(...(sys ? [text] : emojiNodes(text, 20)));
     log.append(li);
     while (log.children.length > 60) log.firstChild.remove();
     log.scrollTop = log.scrollHeight;
@@ -311,6 +314,7 @@ export function startWorld(root, opts) {
   listBtn.addEventListener('click', () => { list.hidden = !list.hidden; listBtn.setAttribute('aria-expanded', String(!list.hidden)); });
   function closeMenu() { menu.hidden = true; }
   function openMenu(o) {
+    if (String(o.id).startsWith('bot')) { menu.replaceChildren(h('h3', {}, o.name), h('p', { class: 'small' }, "A bot. It's here to practice with. Rounds with bots don't pay coins."), h('button', { class: 'btn w3-menu-x', type: 'button', onclick: closeMenu }, 'Close')); menu.hidden = false; return; }
     const m = isMutedPlayer(o.name);
     const reasons = h('select', { 'aria-label': 'Why are you reporting them?' }, ...[['mean', 'Mean or bullying'], ['spam', 'Spamming'], ['personal', 'Asking for or sharing personal info'], ['cheating', 'Cheating'], ['other', 'Something else']].map(([v, l]) => h('option', { value: v }, l)));
     const reportRow = h('div', { class: 'w3-report', hidden: true }, reasons, h('button', { class: 'btn btn-danger', type: 'button', onclick: () => { if (room) room.send({ t: 'report', id: o.id, reason: reasons.value }); closeMenu(); } }, 'Send report'));
@@ -343,16 +347,21 @@ export function startWorld(root, opts) {
         if (m.code) { inviteBtn.hidden = false; inviteBtn.onclick = () => invite(m.code); }
         lastSent = '';
         if (m.round) onRound(m.round);
+        setupBots(m.bots, m.players.filter((p) => String(p.id).startsWith('bot')).map((p) => p.id));
+        break;
+      case 'botcfg':
+        setupBots({ n: m.n, skill: m.skill, host: m.host === myId, owner: botInfo && botInfo.owner }, Array.from({ length: m.n }, (_, i) => 'bot' + (i + 1)));
+        addLine(null, m.n ? `${m.n} ${BOT_SKILL[m.skill].name} bot${m.n > 1 ? 's' : ''} joined.` : 'The bots left.', null, true);
         break;
       case 'join': addPlayer(m.player); addLine(null, `${m.player.name} joined.`, null, true); sfx('join'); break;
-      case 'leave': { const o = others.get(m.id); if (o) addLine(null, `${o.name} left.`, null, true); removePlayer(m.id); break; }
+      case 'leave': { const o = others.get(m.id); if (o) { addLine(null, `${o.name} left.`, null, true); sfx('leave'); } removePlayer(m.id); break; }
       case 'st': { const o = others.get(m.id); if (o) { o.snaps.push({ t: performance.now(), p: m.p, r: m.r, a: m.a }); if (o.snaps.length > 12) o.snaps.shift(); } break; }
       case 'chat': {
         if (isMutedPlayer(m.n)) break;
         const o = others.get(m.id);
         addLine(m.n, m.m, o && o.look ? o.look.color : m.id === myId ? look.color : null);
-        if (o) { const b = o.tag.querySelector('.w3-bubble'); b.textContent = m.m; b.hidden = false; o.bubbleUntil = performance.now() + 6000; }
-        if (m.id === myId) { myBubble.textContent = m.m; myBubble.hidden = false; myBubbleUntil = performance.now() + 6000; }
+        if (o) { const b = o.tag.querySelector('.w3-bubble'); b.replaceChildren(...emojiNodes(m.m, 20)); b.hidden = false; o.bubbleUntil = performance.now() + 6000; }
+        if (m.id === myId) { myBubble.replaceChildren(...emojiNodes(m.m, 20)); myBubble.hidden = false; myBubbleUntil = performance.now() + 6000; }
         else sfx('chat');
         break;
       }
@@ -393,15 +402,16 @@ export function startWorld(root, opts) {
     e.preventDefault();
     const text = chatInput.value.trim();
     if (!text || !room) { chatInput.blur(); return; }
-    if (!room.send({ t: 'chat', m: text })) addLine(null, "Not connected, that message wasn't sent.", null, true);
+    if (!room.send({ t: 'chat', m: text })) { addLine(null, "Not connected, that message wasn't sent.", null, true); sfx('error'); } else sfx('send');
     chatInput.value = '';
     chatInput.blur();
   });
-  chatInput.addEventListener('focus', () => { clearKeys(); chat.classList.add('open'); });
+  chatInput.addEventListener('focus', () => { clearKeys(); chat.classList.add('open'); sfx('open'); });
   chatInput.addEventListener('blur', () => chat.classList.remove('open'));
   function emote(e) {
     if (!EMOTES.includes(e)) return;
     emoteNow = e; emoteAt = 0;
+    if (opts.onStat && (e === 'dance' || e === 'spin')) opts.onStat(e === 'dance' ? 'dances' : 'spins');
     if (room) room.send({ t: 'emote', e });
   }
 
@@ -418,6 +428,28 @@ export function startWorld(root, opts) {
   stage.append(roundBox);
   if (cfg) roundBox.textContent = opts.room ? 'Connecting to the minigames…' : 'Minigames need other players. Log in and invite a friend!';
   const rs = { phase: null, mode: null, endsLocal: 0, it: new Set(), alive: new Set(), fin: [], scores: {}, lava: null, results: null };
+  /* ----- bots (private servers of Blockyard minigames): the owner's computer runs them ----- */
+  let botMgr = null, botInfo = null;
+  const botBtn = h('button', { class: 'btn', type: 'button', hidden: true, title: 'Bots in your private server' }, 'Bots');
+  bar.insertBefore(botBtn, lockBtn);
+  const botPanel = h('div', { class: 'w3-admin panel w3-bots', hidden: true });
+  stage.append(botPanel);
+  botBtn.addEventListener('click', () => { botPanel.hidden = !botPanel.hidden; botBtn.blur(); if (!botPanel.hidden) drawBotPanel(); });
+  function drawBotPanel() {
+    const n = h('select', { 'aria-label': 'How many bots' }, ...Array.from({ length: BOTS.max + 1 }, (_, i) => h('option', { value: String(i) }, i ? `${i} bot${i > 1 ? 's' : ''}` : 'No bots')));
+    const sk = h('select', { 'aria-label': 'How smart' }, ...BOTS.skills.map((k) => h('option', { value: k }, BOT_SKILL[k].name)));
+    n.value = String(botInfo ? botInfo.n : 0); sk.value = botInfo ? botInfo.skill : 'normal';
+    botPanel.replaceChildren(h('h3', {}, 'Bots'),
+      h('p', { class: 'small' }, 'Practice with bots in your private server. Smarter bots aim better, react faster and mess up less. Rounds with bots don\'t pay coins.'),
+      h('div', { class: 'row' }, n, sk, h('button', { class: 'btn btn-sun', type: 'button', onclick: () => { if (room) room.send({ t: 'botcfg', n: Number(n.value), skill: sk.value }); botPanel.hidden = true; sfx('pop'); } }, 'Apply')));
+  }
+  function setupBots(info, ids) {
+    botInfo = info || null;
+    botBtn.hidden = !(botInfo && botInfo.owner);
+    botMgr = null;
+    if (!botInfo || !botInfo.host || !ids.length || !cfg || !room) return;
+    botMgr = createBots({ world, grid: physGrid, cfg, way: opts.way || [], ids, skill: botInfo.skill, send: (msg) => room && room.send(msg) });
+  }
   let inRound = false, lastTag = 0, roundText = '', frozenUntil = 0, lastCount = -1, kothKing = null, myPaint = 0;
   const nameOf = (id) => (id === myId ? 'You' : (others.get(id) || {}).name || 'Someone');
   const toXYZ = (a, spread) => ({ x: a[0] + (spread ? (Math.random() - 0.5) * spread : 0), y: a[1], z: a[2] + (spread ? (Math.random() - 0.5) * spread : 0) });
@@ -469,7 +501,7 @@ export function startWorld(root, opts) {
       let hit = b.life <= 0 || camSolid(b.x, b.y, b.z);
       const mine = b.by === (myId || 'me');
       if (!hit && !mine && Math.hypot(b.x - S.p.x, b.y - (S.p.y + 0.8), b.z - S.p.z) < 0.75) { hit = true; toast(`${nameOf(b.by)} got you with a snowball!`, 1.4); sfx('land'); }
-      if (!hit && mine) for (const o of others.values()) if (o.pos && Math.hypot(b.x - o.pos[0], b.y - (o.pos[1] + 0.8), b.z - o.pos[2]) < 0.75) { hit = true; toast(`Hit ${o.name}!`, 0.9); break; }
+      if (!hit && mine) for (const o of others.values()) if (o.pos && Math.hypot(b.x - o.pos[0], b.y - (o.pos[1] + 0.8), b.z - o.pos[2]) < 0.75) { hit = true; toast(`Hit ${o.name}!`, 0.9); sfx('hit'); if (opts.onStat) opts.onStat('snowhits'); break; }
       if (hit) { burst(b.x, b.y, b.z, ['#ffffff', '#dff4ff'], 10, 3, 2); snowballs.splice(i, 1); continue; }
       scene.push({ prim: 'sphere', color: [1, 1, 1], m: M4.trs(b.x, b.y, b.z, 0, 0, 0, 0.32, 0.32, 0.32) });
     }
@@ -498,7 +530,7 @@ export function startWorld(root, opts) {
       shots.push({ x: ox, y: oy, z: oz, dx, dy, dz, left: hitT, color, speed: wp.speed, size: wp.size });
       if (hitO && hitT < bestT) { best = hitO; bestT = hitT; }
     }
-    sfx(weapon === 'sniper' ? 'bounce' : 'jump');
+    sfx(weapon === 'sniper' ? 'whoosh' : 'shoot');
     if (weapon === 'splatter' || weapon === 'sniper') cam.pitch = Math.min(1.35, cam.pitch + 0.02); // a little kick
     if (best && room) room.send({ t: 'hit', id: best.id, w: weapon });
   }
@@ -507,8 +539,8 @@ export function startWorld(root, opts) {
     const by = m.by === myId ? look : (others.get(m.by) || {}).look;
     const target = m.id === myId ? [S.p.x, S.p.y, S.p.z] : (others.get(m.id) || {}).pos;
     splash(target, by && by.color, 8);
-    if (m.id === myId) { myPaint = m.n; toast(`Paint on you: ${m.n}/${ROUND.hp}`, 0.9); sfx('land'); }
-    else if (m.by === myId) toast(`Hit ${nameOf(m.id)}! ${m.n}/${ROUND.hp}`, 0.8);
+    if (m.id === myId) { myPaint = m.n; toast(`Paint on you: ${m.n}/${ROUND.hp}`, 0.9); sfx('hit'); }
+    else if (m.by === myId) { toast(`Hit ${nameOf(m.id)}! ${m.n}/${ROUND.hp}`, 0.8); sfx('hit'); }
   }
   const paintSpawn = () => { const a = cfg.areas.paint, l = a.spawns; return l && l.length ? toXYZ(l[Math.floor(Math.random() * l.length)], 1) : toXYZ(a.spawn, 8); };
   function placeAt(at, obbyNow) {
@@ -521,11 +553,19 @@ export function startWorld(root, opts) {
     const a = cfg.areas[mode];
     inRound = true;
     myPaint = 0; frozenUntil = 0;
-    placeAt(mode === 'paint' ? paintSpawn() : toXYZ(a.spawn, mode === 'race' ? 2 : 5), mode === 'race');
+    let at;
+    if (mode === 'paint') at = paintSpawn();
+    else if (mode === 'tag' && a.spawns) {
+      // IT waits in the middle; everyone else gets their own spot around the edges
+      if (rs.it.has(myId)) { at = toXYZ(a.itSpawn || a.spawn, 1); frozenUntil = performance.now() + ROUND.itWait; toast("You're IT! Wait 3 seconds, then go tag everyone!", 2.5); }
+      else { const free = [...rs.alive].filter((id) => !rs.it.has(id)).sort(); const i = Math.max(0, free.indexOf(myId)); at = toXYZ(a.spawns[i % a.spawns.length], 1); }
+    } else at = toXYZ(a.spawn, mode === 'race' ? 2 : 5);
+    placeAt(at, mode === 'race');
     // look toward the goal (race) or the hill
     const g = mode === 'koth' && a.hill ? { x: (a.hill[0] + a.hill[3] + 1) / 2, z: (a.hill[2] + a.hill[5] + 1) / 2 } : mode === 'race' ? goals.find((q) => inBox(a, q.x, q.z)) : null;
     if (g) cam.yaw = Math.atan2(g.x - S.p.x, -(g.z - S.p.z));
-    toast(GAMES[mode].name + ': GO!', 1.6); sfx('checkpoint');
+    if (!(mode === 'tag' && rs.it.has(myId))) toast(GAMES[mode].name + ': GO!', 1.6);
+    sfx('go');
     if (shopOpen) closeShop();
   }
   function backToLobby() { inRound = false; placeAt(toXYZ(cfg.lobby, 4), world.mode !== 'hangout' && !cfg); }
@@ -533,14 +573,14 @@ export function startWorld(root, opts) {
     if (!cfg) return;
     const was = rs.phase;
     if (m.phase === 'play' && m.mode === 'lava' && rs.phase === 'play' && m.lava != null && rs.lava != null && m.lava > rs.lava && inRound) { toast('The lava is rising!', 1); sfx('crumble'); }
-    Object.assign(rs, { phase: m.phase, mode: m.mode, endsLocal: performance.now() + (m.left || 0), it: new Set(m.it || []), alive: new Set(m.alive || []), fin: m.fin || [], scores: m.scores || {}, lava: m.lava, results: m.results, need: m.need });
+    Object.assign(rs, { phase: m.phase, mode: m.mode, endsLocal: performance.now() + (m.left || 0), it: new Set(m.it || []), alive: new Set(m.alive || []), fin: m.fin || [], scores: m.scores || {}, lava: m.lava, results: m.results, need: m.need, practice: !!m.practice });
     if (m.phase === 'play' && was !== 'play' && rs.alive.has(myId)) enterArea(m.mode);
     else if (m.phase !== 'play' && inRound) backToLobby();
     if (m.ev) {
       if (m.ev.tag) {
         // a freshly tagged player freezes for a moment, so they can't tag right back
         if (m.ev.tag === myId) { frozenUntil = performance.now() + 1500; toast("You got tagged! You're IT! (frozen for a sec)", 1.8); sfx('die'); }
-        else { toast(`${nameOf(m.ev.tag)} got tagged!`, 1.6); sfx('bounce'); }
+        else { toast(`${nameOf(m.ev.tag)} got tagged!`, 1.6); sfx('tagged'); }
         const o = m.ev.tag === myId ? { pos: [S.p.x, S.p.y, S.p.z] } : others.get(m.ev.tag);
         if (o && o.pos) burst(o.pos[0], o.pos[1] + 1, o.pos[2], ['#ff5a1f', '#ffd23f', '#ffffff'], 18, 4, 4);
       }
@@ -549,12 +589,16 @@ export function startWorld(root, opts) {
       if (m.ev.splat) {
         const by = m.ev.by === myId ? look : (others.get(m.ev.by) || {}).look;
         splash(m.ev.splat === myId ? [S.p.x, S.p.y, S.p.z] : (others.get(m.ev.splat) || {}).pos, by && by.color, 24);
-        if (m.ev.splat === myId) { myPaint = 0; toast(`SPLAT! ${nameOf(m.ev.by)} got you${m.ev.w ? ` with the ${WEAPONS[m.ev.w].name}` : ''}.`, 1.8); sfx('die'); placeAt(paintSpawn(), false); }
+        if (m.ev.splat === myId) { myPaint = 0; toast(`SPLAT! ${nameOf(m.ev.by)} got you${m.ev.w ? ` with the ${WEAPONS[m.ev.w].name}` : ''}.`, 1.8); sfx('splat'); placeAt(paintSpawn(), false); }
         else toast(m.ev.by === myId ? `You splatted ${nameOf(m.ev.splat)}!` : `${nameOf(m.ev.by)} splatted ${nameOf(m.ev.splat)}!`, 1.6);
-        if (m.ev.by === myId) sfx('coin');
+        if (m.ev.by === myId) { sfx('coin'); if (opts.onStat) opts.onStat('splats'); }
       }
     }
-    if (m.phase === 'results' && was === 'play') sfx('win');
+    if (botMgr) botMgr.round(m, rs, was);
+    if (m.phase === 'results' && was === 'play') {
+      sfx('win');
+      if (opts.onStat && (m.results || []).some((w) => w.id === myId && w.place === 1)) opts.onStat('win_' + rs.mode);
+    }
     // King of the Hill: whoever is winning wears a crown
     const top = m.phase === 'play' && m.mode === 'koth' ? Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0] : null;
     kothKing = top && top[1] >= 1 ? top[0] : null;
@@ -623,20 +667,19 @@ export function startWorld(root, opts) {
   let lastHb = 0;
   function roundTick(px, py, pz, scene, clock) {
     if (!cfg || !rs.phase) return;
-    if (room && online && performance.now() - lastHb > 4000) { lastHb = performance.now(); room.send({ t: 'hb' }); }
     const secs = Math.max(0, Math.ceil((rs.endsLocal - performance.now()) / 1000));
     const clockTxt = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     let t = '';
     if (rs.phase === 'wait') t = `Minigames: waiting for players (${others.size + 1}/${rs.need || 2}). Press Invite to bring a friend!`;
     else if (rs.phase === 'intro') t = `Next: ${GAMES[rs.mode].name} in ${secs}s. ${GAMES[rs.mode].short}`;
-    else if (rs.phase === 'results') t = rs.results && rs.results.length ? 'Winners: ' + rs.results.map((w) => `${w.id === myId ? 'You' : w.name}${w.coins ? ` (+${w.coins})` : ''}`).join(', ') : 'Nobody won that one!';
+    else if (rs.phase === 'results') t = (rs.results && rs.results.length ? 'Winners: ' + rs.results.map((w) => `${w.id === myId ? 'You' : w.name}${w.coins ? ` (+${w.coins})` : ''}`).join(', ') : 'Nobody won that one!') + (rs.practice ? ' (practice round with bots: no coins)' : '');
     else if (!inRound) t = `${GAMES[rs.mode].name} in progress (${clockTxt}). You're watching, you'll join the next round.`;
     else if (rs.mode === 'race') t = `RACE ${clockTxt}. ${rs.fin.includes(myId) ? `You finished #${rs.fin.indexOf(myId) + 1}!` : 'Get to the goal!'}`;
     else if (rs.mode === 'tag') t = `TAG ${clockTxt}. ${rs.it.has(myId) ? "You're IT! Tag the others!" : `Run! ${rs.it.size} ${rs.it.size === 1 ? 'player is' : 'players are'} IT, ${Math.max(0, rs.alive.size - rs.it.size)} still free.`}`;
     else if (rs.mode === 'koth') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `KING OF THE HILL ${clockTxt}. You: ${Math.floor(rs.scores[myId] || 0)}s${top ? `, leader: ${nameOf(top[0])} ${Math.floor(top[1])}s` : ''}`; }
     else if (rs.mode === 'paint') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `PAINTBALL ${clockTxt}. ${WEAPONS[weapon].name}. Splats: ${rs.scores[myId] || 0}${top ? `, leader: ${nameOf(top[0])} ${top[1]}` : ''}. Paint on you: ${myPaint}/${ROUND.hp}`; }
     else if (rs.mode === 'lava') t = `RISING LAVA ${clockTxt}. ${rs.alive.has(myId) ? `${rs.alive.size} left. Keep climbing!` : 'You fell in. Watch the rest!'}`;
-    if (rs.phase === 'intro' && secs <= 3 && secs !== lastCount) { lastCount = secs; if (secs > 0) { toast(String(secs), 0.9); sfx('coin'); } }
+    if (rs.phase === 'intro' && secs <= 3 && secs !== lastCount) { lastCount = secs; if (secs > 0) { toast(String(secs), 0.9); sfx('tick'); } }
     if (rs.phase !== 'intro') lastCount = -1;
     if (t !== roundText) { roundText = t; roundBox.textContent = t; roundBox.hidden = false; }
     roundBox.classList.toggle('hot', rs.phase === 'play' && inRound && (rs.mode !== 'tag' || rs.it.has(myId)));
@@ -667,7 +710,7 @@ export function startWorld(root, opts) {
       if (rs.it.has(myId) && Math.random() < 0.5) spark([px, py, pz]);
       for (const o of others.values()) if (o.pos && rs.it.has(o.id) && Math.random() < 0.5) spark(o.pos);
     }
-    if (rs.mode === 'tag' && inRound && rs.it.has(myId) && room && performance.now() - lastTag > 350) {
+    if (rs.mode === 'tag' && inRound && rs.it.has(myId) && room && performance.now() >= frozenUntil && performance.now() - lastTag > 350) {
       for (const o of others.values()) {
         if (!o.pos || rs.it.has(o.id) || !rs.alive.has(o.id)) continue;
         if (Math.hypot(o.pos[0] - px, o.pos[1] - py, o.pos[2] - pz) < ROUND.tagReach) { room.send({ t: 'tag', id: o.id }); lastTag = performance.now(); break; }
@@ -834,6 +877,13 @@ export function startWorld(root, opts) {
     for (const p of parts) {
       const s = p.size * Math.max(0.3, p.life / p.max);
       scene.push({ prim: 'cube', color: p.color, glow: 0.5, alpha: Math.max(0.05, Math.min(0.95, p.life / p.max)), m: M4.trs(p.x, p.y, p.z, p.spin || 0, p.spin || 0, 0, s, s, s) });
+    }
+    // a little 'still here' so the round keeps going and friends see you online (every 4 s in minigames, 30 s elsewhere)
+    if (room && online && performance.now() - lastHb > (cfg ? 4000 : 30000)) { lastHb = performance.now(); room.send({ t: 'hb' }); }
+    if (botMgr) {
+      const list = [...[...others.values()].filter((o) => o.pos).map((o) => ({ id: o.id, pos: o.pos })), { id: myId, pos: [px, py, pz] }];
+      const l = botMgr.frame(dt, { rs, players: list });
+      if (l) for (const e of l) { const o = others.get(e[0]); if (o) { o.snaps.push({ t: performance.now(), p: [e[1], e[2], e[3]], r: e[4], a: e[5] }); if (o.snaps.length > 12) o.snaps.shift(); } }
     }
     roundTick(px, py, pz, scene, clock);
     shopTick(px, py, pz, scene);

@@ -206,13 +206,25 @@ function lobby({ box, set }, c) {
   box(57, 1, 69, 60, 1, 69, B.wood); box(57, 1, 71, 60, 1, 71, B.wood);
   box(58, 1, 55, 62, 3, 55, B.plastic, 0); box(59, 2, 55, 61, 2, 55, B.neon, c);
 }
-// where each game happens (the lobby is always around 64, 64)
+// the lava tower's steps, in order (bots climb these)
+const LAVA_RING = (() => {
+  const ring = [];
+  for (const x of [95, 99, 103]) ring.push([x, 31]);
+  for (const z of [31, 27, 23]) ring.push([107, z]);
+  for (const x of [107, 103, 99]) ring.push([x, 19]);
+  for (const z of [19, 23, 27]) ring.push([95, z]);
+  const out = [[93.5, 1, 31.5]];
+  for (let i = 1, y = 1; i <= 26; i++, y++) { const [x, z] = ring[i % 12]; out.push([x + 1, y + 1, z + 1]); }
+  return out;
+})();
+// where each game happens (the lobby is always around 64, 64). path: a route bots follow.
 const AREAS = {
   race: { spawn: [11.5, 1, 12.5], box: [4, 4, 112, 20] },
-  tag: { spawn: [26.5, 1, 102.5], box: [8, 84, 44, 120] },
+  // tag: IT starts in the middle (and waits 3 seconds), everyone else starts spread out around the edges
+  tag: { spawn: [26.5, 1, 98.5], box: [8, 84, 44, 120], itSpawn: [26.5, 1, 98.5], spawns: [[11.5, 1, 94.5], [41.5, 1, 94.5], [11.5, 1, 110.5], [41.5, 1, 110.5], [18.5, 1, 98.5], [34.5, 1, 107.5], [20.5, 1, 86.5], [32.5, 1, 118.5]] },
   paint: { spawn: [32.5, 1, 80.5], box: [8, 76, 56, 120], spawns: [[14.5, 1, 82.5], [50.5, 1, 82.5], [14.5, 1, 113.5], [50.5, 1, 113.5], [32.5, 1, 80.5], [32.5, 1, 117.5]] },
-  koth: { spawn: [88.5, 1, 88.5], box: [84, 84, 120, 120], hill: [101, 5, 101, 103, 5, 103] },
-  lava: { spawn: [88.5, 1, 12.5], box: [84, 8, 120, 44], lavaFrom: 0 },
+  koth: { spawn: [88.5, 1, 88.5], box: [84, 84, 120, 120], hill: [101, 5, 101, 103, 5, 103], path: [[95, 2, 95], [97, 3, 97], [99, 4, 99], [100.5, 5, 100.5], [102, 6, 102]] },
+  lava: { spawn: [88.5, 1, 12.5], box: [84, 8, 120, 44], lavaFrom: 0, path: LAVA_RING },
 };
 const MAPS = {
   // a course along z = 11..13 with speed pads at the start and a checkered arch at the finish

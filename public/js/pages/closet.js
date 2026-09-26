@@ -192,6 +192,7 @@ async function buy(key, item) {
     const f = findItem(key);
     await api.look({ [f.kind]: f.id }).then((x) => setWallet(x.wallet)).catch(() => {});
     progress.stat('bought'); progress.flush();
+    import('../audio.js').then((a) => a.sfx('buy')).catch(() => {});
     toast(`New ${f.kind === 'color' ? 'color' : f.kind}: ${item.name}!`);
     if (item.stock) try { shopInfo = await api.shop(); } catch (e) { /* ok */ }
     pick = null; render(); renderWallet();
@@ -302,11 +303,11 @@ function renderBadges() {
   const got = progress.data.ach;
   $('#ach-count').textContent = `${Object.keys(got).filter((k) => ACHIEVEMENTS.some((a) => a.id === k)).length} of ${ACHIEVEMENTS.length}`;
   for (const a of ACHIEVEMENTS) {
-    list.append(el('div', { class: 'ach' + (got[a.id] ? ' got' : '') }, pipBadge(got[a.id]), el('div', {}, el('b', {}, a.name), el('span', { class: 'small' }, a.text))));
+    list.append(el('div', { class: 'ach' + (got[a.id] ? ' got' : '') + (a.hard ? ' hard' : '') + (a.chosen ? ' chosen' : '') }, pipBadge(got[a.id]), el('div', {}, el('b', {}, a.name, a.hard ? el('span', { class: 'hard-tag' }, a.chosen ? 'LEGENDARY' : 'HARD') : null), el('span', { class: 'small' }, a.text))));
   }
   const s = progress.data.stats;
   $('#stats-list').innerHTML = '';
-  for (const [label, v] of [['Levels beaten', s.wins], ['Stars', progress.totalStars()], ['Obbies beaten', s.obbies], ['Jumps', s.jumps], ['Coins grabbed', s.coins], ['Walkers stomped', s.stomps], ['Portals', s.portals], ['Respawns', s.deaths], ['Endless best', `${Math.floor(s.endlessBest)} m`], ['Dailies cleared', s.dailies], ['Trades', s.trades]]) {
+  for (const [label, v] of [['Levels beaten', s.wins], ['Stars', progress.totalStars()], ['Obbies beaten', s.obbies], ['Jumps', s.jumps], ['Coins grabbed', s.coins], ['Walkers stomped', s.stomps], ['Portals', s.portals], ['Respawns', s.deaths], ['Endless best', `${Math.floor(s.endlessBest)} m`], ['Dailies cleared', s.dailies], ['Trades', s.trades], ['Minigame wins', (s.win_race || 0) + (s.win_tag || 0) + (s.win_paint || 0) + (s.win_koth || 0) + (s.win_lava || 0)], ['Paintball splats', s.splats || 0], ['Snowball hits', s.snowhits || 0], ['Dances', s.dances || 0]]) {
     $('#stats-list').append(el('div', { class: 'stat' }, el('span', { class: 'stat-v' }, String(v)), el('span', { class: 'small' }, label)));
   }
 }

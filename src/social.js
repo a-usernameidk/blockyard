@@ -50,6 +50,8 @@ export async function socialRoute(ctx, path, method) {
 /* ---------------- what's new (checked every few seconds) ---------------- */
 async function pulse(ctx) {
   const user = needUser(ctx), { db } = ctx;
+  // you're on the site (friends see "Online"); written at most once a minute
+  await db.prepare('UPDATE users SET seen = ? WHERE id = ? AND seen < ?').bind(Date.now(), user.id, Date.now() - 60e3).run().catch(() => {});
   const since = Math.max(Date.now() - 10 * 60e3, Number(ctx.url.searchParams.get('since')) || 0);
   const [mailN, dmN, tradeN, newDms, newMail, invite, open] = await Promise.all([
     db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(user.id).first(),

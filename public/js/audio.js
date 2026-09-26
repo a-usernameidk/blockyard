@@ -48,6 +48,24 @@ const SOUNDS = {
   place: () => tone(260, 0.05, { type: 'square', vol: 0.05, slide: 60 }),
   break: () => tone(180, 0.07, { type: 'sawtooth', vol: 0.04, slide: -80 }),
   join: () => { tone(660, 0.07, { type: 'sine', vol: 0.05 }); tone(990, 0.1, { type: 'sine', vol: 0.05, delay: 0.07 }); },
+  // chat, menus and pop-ups
+  send: () => tone(620, 0.07, { type: 'sine', slide: 380, vol: 0.05 }),
+  open: () => { tone(440, 0.05, { type: 'triangle', vol: 0.05 }); tone(660, 0.06, { type: 'triangle', vol: 0.05, delay: 0.04 }); },
+  close: () => { tone(660, 0.05, { type: 'triangle', vol: 0.04 }); tone(440, 0.06, { type: 'triangle', vol: 0.04, delay: 0.04 }); },
+  pop: () => tone(900, 0.06, { type: 'sine', slide: 500, vol: 0.06 }),
+  notify: () => { tone(784, 0.08, { type: 'sine', vol: 0.05 }); tone(1047, 0.08, { type: 'sine', vol: 0.05, delay: 0.09 }); tone(1319, 0.12, { type: 'sine', vol: 0.045, delay: 0.18 }); },
+  leave: () => { tone(660, 0.07, { type: 'sine', vol: 0.04 }); tone(440, 0.1, { type: 'sine', vol: 0.04, delay: 0.07 }); },
+  error: () => tone(160, 0.18, { type: 'square', slide: -40, vol: 0.04 }),
+  // games
+  tick: () => tone(1000, 0.04, { type: 'square', vol: 0.04 }),
+  go: () => { tone(523, 0.08, { type: 'square', vol: 0.05 }); tone(1047, 0.25, { type: 'square', vol: 0.05, delay: 0.08 }); },
+  hit: () => tone(240, 0.08, { type: 'square', slide: -120, vol: 0.06 }),
+  splat: () => { tone(180, 0.2, { type: 'sawtooth', slide: -120, vol: 0.06 }); tone(90, 0.25, { type: 'triangle', vol: 0.08, delay: 0.05 }); },
+  shoot: () => tone(700, 0.06, { type: 'square', slide: -400, vol: 0.035 }),
+  tagged: () => { tone(880, 0.06, { type: 'square', vol: 0.05 }); tone(440, 0.12, { type: 'square', vol: 0.05, delay: 0.06 }); },
+  buy: () => [880, 1109, 1319, 1760].forEach((f, i) => tone(f, 0.07, { type: 'triangle', vol: 0.05, delay: i * 0.05 })),
+  badge: () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.14, { type: 'triangle', vol: 0.07, delay: i * 0.09 })),
+  whoosh: () => tone(200, 0.25, { type: 'sawtooth', slide: 900, vol: 0.03 }),
 };
 
 export function sfx(name) { const s = SOUNDS[name]; if (s) s(); }

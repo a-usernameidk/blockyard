@@ -32,7 +32,7 @@ $('#coin-icon').append((() => { const cv = document.createElement('canvas'); con
 let syncTimer = 0;
 progress.onChange(() => {
   renderMe();
-  for (const a of progress.takeNewAchievements()) toast(`New badge: ${a.name}`, 'toast-ach');
+  for (const a of progress.takeNewAchievements()) { toast(`New badge: ${a.name}!`, 'toast-ach'); import('../audio.js').then((x) => x.sfx(a.id === 'chosen' ? 'win' : 'badge')).catch(() => {}); }
   if (session.user && session.online) {
     clearTimeout(syncTimer);
     syncTimer = setTimeout(() => api.saveProgress(progress.data).catch(() => {}), 1500);
@@ -302,7 +302,7 @@ $('#mail-clear').addEventListener('click', async () => { try { await api.mailAct
 let friendData = null;
 export async function checkFriends() {
   if (!session.user) { setFriendCount(0); return; }
-  try { friendData = await api.friends(); setFriendCount(friendData.incoming.length); } catch (e) { /* later */ }
+  try { friendData = await api.friends(); setFriendCount(friendData.incoming.length); progress.peak('friends', friendData.friends.length); } catch (e) { /* later */ }
 }
 function setFriendCount(n) {
   for (const id of ['#me-count', '#friend-count']) { const c = $(id); c.hidden = !n; c.textContent = String(n); }
@@ -322,7 +322,7 @@ function renderFriends() {
     el('h3', {}, d.friends.length ? `Friends (${d.friends.filter((f) => f.online).length} online)` : 'No friends yet'),
     d.friends.length ? null : el('p', { class: 'small' }, 'Type a username above, or press "Add friend" on someone\'s profile. They have to say yes.'),
     ...d.friends.map((f) => el('div', { class: 'friend-row' }, friendDot(f),
-      el('span', { class: 'who' }, el('a', { class: 'linkish', href: '#/u/' + f.name, 'data-go': '#/u/' + f.name }, f.name), el('span', { class: 'small' }, f.online ? `Playing ${f.online.name}` : 'Offline')),
+      el('span', { class: 'who' }, el('a', { class: 'linkish', href: '#/u/' + f.name, 'data-go': '#/u/' + f.name }, f.name), el('span', { class: 'small' }, f.online ? (f.online.site ? 'Online' : `Playing ${f.online.name}`) : 'Offline')),
       f.online && f.online.code ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#friends-list-modal')); go('#/join/' + f.online.code); } }, 'Join') : null,
       el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#friends-list-modal')); dispatchEvent(new CustomEvent('by:dm', { detail: f.name })); } }, 'Message'),
       el('button', { class: 'btn', type: 'button', title: `Unfriend ${f.name}`, onclick: act(f.name, 'remove', `Removed ${f.name}.`) }, 'Remove'))),

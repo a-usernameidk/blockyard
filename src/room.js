@@ -9,7 +9,7 @@ import { runReplay } from '../public/js/replay.js';
 import { runReplay3d } from '../public/js/physics3d.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
 import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES } from '../public/js/world.js';
-import { GAMES, ROUND, PRIZE, WEAPONS, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
+import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
 import { coinStmts, questBumps } from './econ.js';
 
 const MAX_PLAYERS = 16;
@@ -74,10 +74,15 @@ export class Room {
       try { await this.loadDoc(me.project); } catch (e) { send(server, { t: 'error', m: 'Could not open this project.' }); server.close(4004, 'no project'); return new Response(null, { status: 101, webSocket: client }); }
     }
     await this.loadLog();
-    const players = live.map((ws) => pub(att(ws), this.pos));
-    if (me.kind === 'play') await this.loadGame(me.world);
-    send(server, { t: 'hello', you: id, players, chat: this.log.slice(-30), doc: me.kind === 'edit' ? this.docOut() : undefined, code: me.code, world: me.world, round: this.game ? this.roundOut() : undefined });
+    if (me.kind === 'play') { await this.loadGame(me.world); await this.loadBots(me.code, me.world); }
+    // the private server's owner drives its bots
+    const host = me.kind === 'play' && this.game && this.bots.owner && me.uid === this.bots.owner && !this.bots.host;
+    if (host) this.bots.host = id;
+    const players = [...live.map((ws) => pub(att(ws), this.pos)), ...this.botList().map((b) => pub(b, this.pos))];
+    send(server, { t: 'hello', you: id, players, chat: this.log.slice(-30), doc: me.kind === 'edit' ? this.docOut() : undefined, code: me.code, world: me.world, round: this.game ? this.roundOut() : undefined,
+      bots: this.game && this.bots.owner ? { n: this.bots.n, skill: this.bots.skill, owner: me.uid === this.bots.owner, host: host || this.bots.host === id } : undefined });
     this.broadcast({ t: 'join', player: pub(me, this.pos) }, server);
+    if (host) for (const b of this.botList()) this.broadcast({ t: 'join', player: pub(b, this.pos) }, server);
     if (me.kind === 'play') { this.presence(me, true); this.tick(); }
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -89,6 +94,7 @@ export class Room {
     try { msg = JSON.parse(raw); } catch (e) { return; }
     if (!msg || typeof msg !== 'object') return;
     if (me.kind === 'play' && this.game === undefined) await this.loadGame(me.world); // the room napped: set minigames up again
+    if (me.kind === 'play' && !this.bots) await this.loadBots(me.code, me.world, true);
     const lim = this.limits(me.id);
     switch (msg.t) {
       case 'st': { // where I am: position, facing, animation
@@ -101,7 +107,8 @@ export class Room {
         this.broadcast({ t: 'st', id: me.id, ...st }, ws);
         if (this.round) this.watch(me, st);
         // keep the server list fresh while people play
-        if (me.code && (!this.touched || Date.now() - this.touched > 120e3)) { this.touched = Date.now(); this.presence(me, true); }
+        // (each player's own row, so friends see everyone who's here, not just whoever moved last)
+        if (me.code && (!lim.pres || Date.now() - lim.pres > 120e3)) { lim.pres = Date.now(); this.presence(me, true); }
         break;
       }
       case 'chat': {
@@ -181,7 +188,42 @@ export class Room {
       }
       case 'ping': send(ws, { t: 'pong', at: msg.at }); break;
       case 'fin': case 'tag': case 'out': case 'hit': this.gameMsg(me, msg); break;
-      case 'hb': this.tick(); break;
+      case 'bots': { // the owner's computer tells us where its bots are
+        if (!this.bots || me.id !== this.bots.host || !Array.isArray(msg.l)) return;
+        const ids = new Set(this.botList().map((b) => b.id));
+        for (const e of msg.l.slice(0, BOTS.max)) {
+          if (!Array.isArray(e) || !ids.has(e[0])) continue;
+          const p = [e[1], e[2], e[3]].map(Number);
+          if (!p.every(Number.isFinite)) continue;
+          const st = { p: p.map((v, i) => Math.round(Math.max(-40, Math.min(i === 1 ? SY + 40 : SX + 40, v)) * 100) / 100), r: Math.round((Number(e[4]) || 0) * 100) / 100, a: (e[5] | 0) & 255 };
+          this.pos.set(e[0], st);
+          this.broadcast({ t: 'st', id: e[0], ...st }, ws);
+          if (this.round) this.watch({ id: e[0] }, st);
+        }
+        break;
+      }
+      case 'botact': { // a bot finished, got out, tagged or hit someone
+        if (!this.bots || me.id !== this.bots.host || !this.botList().some((b) => b.id === msg.id) || !['fin', 'out', 'tag', 'hit'].includes(msg.a)) return;
+        this.gameMsg({ id: msg.id }, { t: msg.a, id: msg.target, w: msg.w });
+        break;
+      }
+      case 'botcfg': { // the owner changes how many bots and how smart, right in the game
+        if (!this.bots || !this.bots.owner || me.uid !== this.bots.owner) return;
+        const n = Math.max(0, Math.min(BOTS.max, Math.floor(Number(msg.n) || 0))), skill = BOTS.skills.includes(msg.skill) ? msg.skill : 'normal';
+        this.removeBots(true);
+        this.bots.n = n; this.bots.skill = skill;
+        if (!this.bots.host) this.bots.host = me.id;
+        try { await this.env.DB.prepare('UPDATE servers SET bots = ?, bot_skill = ? WHERE code = ?').bind(n, skill, me.code).run(); } catch (e) { /* still works for now */ }
+        for (const b of this.botList()) this.broadcast({ t: 'join', player: pub(b, this.pos) });
+        this.broadcast({ t: 'botcfg', n, skill, host: this.bots.host });
+        this.tick();
+        break;
+      }
+      case 'hb': {
+        this.tick();
+        if (me.kind === 'play' && me.code && (!lim.pres || Date.now() - lim.pres > 120e3)) { lim.pres = Date.now(); this.presence(me, true); }
+        break;
+      }
       case 'look': { // you bought or changed clothes: show everyone (read from your account, so nobody can fake it)
         const now = Date.now();
         if (me.kind !== 'play' || now - (lim.look || 0) < 2000 || !this.env.DB) return;
@@ -208,6 +250,7 @@ export class Room {
     this.pos.delete(me.id);
     this.rate.delete(me.id);
     this.broadcast({ t: 'leave', id: me.id }, ws);
+    if (this.bots && this.bots.host === me.id) this.removeBots();
     if (me.kind === 'play') { await this.presence(me, false, ws); this.tick(); }
     if (me.kind === 'edit' && this.alive(ws).length === 0) await this.flush();
   }
@@ -271,11 +314,34 @@ export class Room {
     } catch (e) { this.game = null; }
     if (this.game) this.round = { phase: 'wait', n: 0 };
   }
-  players() { return this.alive().map(att).filter((a) => a.kind === 'play'); }
+  players() { return [...this.alive().map(att).filter((a) => a.kind === 'play'), ...this.botList()]; }
+  /* ---------- bots (private servers of Blockyard minigame worlds) ---------- */
+  async loadBots(code, world, wake) {
+    if (!this.bots) this.bots = { n: 0, skill: 'normal', owner: null, host: null };
+    if (this.botsFor === code || !code || !this.env.DB) return;
+    this.botsFor = code;
+    try {
+      const r = await this.env.DB.prepare('SELECT owner_id, private, bots, bot_skill, world FROM servers WHERE code = ?').bind(code).first();
+      const b = r && builtinWorld(r.world);
+      if (r && r.private && b && b.game) Object.assign(this.bots, { n: Math.max(0, Math.min(BOTS.max, r.bots | 0)), skill: BOTS.skills.includes(r.bot_skill) ? r.bot_skill : 'normal', owner: r.owner_id });
+      // after a nap: if the owner is still here, they keep driving the bots
+      const ownerHere = this.alive().map(att).find((a) => a.kind === 'play' && a.uid === this.bots.owner);
+      if (wake && ownerHere && !this.bots.host) this.bots.host = ownerHere.id;
+    } catch (e) { /* no bots then */ }
+  }
+  botList() {
+    const b = this.bots;
+    if (!b || !b.host || !b.n) return [];
+    return Array.from({ length: b.n }, (_, i) => ({ id: 'bot' + (i + 1), name: BOT_NAMES[i] + ' (bot)', look: BOT_LOOKS[i], lvl: 1, uid: null, bot: true, kind: 'play' }));
+  }
+  removeBots(keepHost) {
+    for (const b of this.botList()) { this.pos.delete(b.id); this.broadcast({ t: 'leave', id: b.id }); }
+    if (!keepHost && this.bots) this.bots.host = null;
+  }
   roundOut(extra) {
     const R = this.round;
     if (!R) return null;
-    return { phase: R.phase, mode: R.mode, left: R.ends ? Math.max(0, R.ends - Date.now()) : 0, it: R.it ? [...R.it] : [], alive: R.alive ? [...R.alive] : [], fin: R.fin || [],
+    return { practice: R.practice || undefined, phase: R.phase, mode: R.mode, left: R.ends ? Math.max(0, R.ends - Date.now()) : 0, it: R.it ? [...R.it] : [], alive: R.alive ? [...R.alive] : [], fin: R.fin || [],
       scores: R.scores ? Object.fromEntries([...R.scores].map(([k, v]) => [k, Math.round(v * 10) / 10])) : {}, lava: R.lava, results: R.results, need: ROUND.minPlayers, ...extra };
   }
   sendRound(extra) {
@@ -299,6 +365,7 @@ export class Room {
       // go! everyone here right now is in the round
       R.phase = 'play'; R.start = now; R.ends = now + GAMES[R.mode].secs * 1000;
       R.ids = new Set(here.map((a) => a.id)); R.names = Object.fromEntries(here.map((a) => [a.id, { name: a.name, uid: a.uid }]));
+      R.practice = [...R.ids].some((x) => String(x).startsWith('bot')); // rounds with bots are practice: no coins
       R.alive = new Set(R.ids); R.fin = []; R.scores = new Map(); R.seen = new Map(); R.startCount = R.ids.size;
       R.it = new Set(); R.hits = new Map(); R.lastShot = new Map(); R.safe = new Map();
       if (R.mode === 'tag') { const list = [...R.ids]; const k = n >= 6 ? 2 : 1; while (R.it.size < k) R.it.add(list[Math.floor(Math.random() * list.length)]); R.firstIt = new Set(R.it); }
@@ -346,7 +413,7 @@ export class Room {
     if (!R || R.phase !== 'play' || !R.ids.has(me.id)) return;
     if (msg.t === 'fin' && R.mode === 'race' && !R.fin.includes(me.id)) { R.fin.push(me.id); this.sendRound({ ev: { fin: me.id } }); }
     else if (msg.t === 'out' && R.mode === 'lava' && R.alive.has(me.id)) { R.alive.delete(me.id); this.sendRound({ ev: { out: me.id } }); }
-    else if (msg.t === 'tag' && R.mode === 'tag' && R.it.has(me.id) && R.ids.has(msg.id) && !R.it.has(msg.id)) {
+    else if (msg.t === 'tag' && R.mode === 'tag' && R.it.has(me.id) && R.ids.has(msg.id) && !R.it.has(msg.id) && Date.now() - R.start >= ROUND.itWait - 300) {
       const a = this.posOf(me.id), b = this.posOf(msg.id);
       if (a && b && Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < ROUND.tagReach + 1.2) { R.it.add(msg.id); this.sendRound({ ev: { tag: msg.id, by: me.id } }); }
     }
@@ -385,11 +452,11 @@ export class Room {
     } else if (mode === 'paint') winners = [...R.scores].filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id], i) => [id, i + 1, i ? PRIZE.second : PRIZE.first]);
     else if (mode === 'koth') winners = [...R.scores].filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id], i) => [id, i + 1, i ? PRIZE.second : PRIZE.first]);
     else if (mode === 'lava') winners = [...R.alive].filter((id) => R.ids.has(id)).map((id, _, all) => [id, 1, all.length === 1 ? PRIZE.first : PRIZE.win]);
-    if (count < ROUND.minPlayers) winners = winners.map(([id, pl]) => [id, pl, 0]);
+    if (count < ROUND.minPlayers || R.practice) winners = winners.map(([id, pl]) => [id, pl, 0]);
     R.phase = 'results'; R.ends = Date.now() + ROUND.results * 1000;
     R.results = winners.map(([id, place, coins]) => ({ id, name: name(id), place, coins, score: R.scores.get(id) }));
     this.sendRound();
-    this.award(mode, winners.filter((w) => w[2] > 0).map(([id, , coins]) => ({ id, uid: R.names[id].uid, coins })));
+    this.award(mode, winners.filter((w) => w[2] > 0 && R.names[w[0]].uid).map(([id, , coins]) => ({ id, uid: R.names[id].uid, coins })));
   }
   async award(mode, list) {
     const db = this.env.DB;

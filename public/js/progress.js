@@ -32,7 +32,41 @@ export const ACHIEVEMENTS = [
   { id: 'publisher', name: 'Published', text: 'Publish a level or world' },
   { id: 'teamwork', name: 'Teamwork', text: 'Build with a friend' },
   { id: 'shopper', name: 'Fresh look', text: 'Buy something in the closet' },
+  // the hard (and weird) ones
+  { id: 'nightowl', name: 'Night Owl', text: 'Play between midnight and 4 AM', hard: true },
+  { id: 'jumps25k', name: 'Pogo Stick Brain', text: 'Jump 25,000 times', hard: true },
+  { id: 'die1000', name: 'Professional Faller', text: 'Respawn 1,000 times', hard: true },
+  { id: 'stomp250', name: 'Walker Wrecker', text: 'Stomp 250 walkers', hard: true },
+  { id: 'portals1000', name: 'Dimension Hopper', text: 'Go through 1,000 portals', hard: true },
+  { id: 'coins5000', name: 'Dragon Hoard', text: 'Grab 5,000 coins in levels', hard: true },
+  { id: 'endless2500', name: 'Light Speed', text: 'Reach 2,500 m in Endless Rush', hard: true },
+  { id: 'daily30', name: 'Creature of Habit', text: 'Finish 30 daily challenges', hard: true },
+  { id: 'skyflawless', name: 'Cloud Walker', text: 'Beat Sky Gauntlet without falling once', hard: true },
+  { id: 'finalflawless', name: 'Untouchable Legend', text: 'Beat Final Rush without dying', hard: true },
+  { id: 'towerspeed', name: 'Elevator? Never Heard of It', text: 'Beat Tower of Tries in under 25 seconds', hard: true },
+  { id: 'insane', name: 'Asylum Escapee', text: 'Beat an Insane (9★) level or obby', hard: true },
+  { id: 'demon', name: 'Demon Slayer', text: 'Beat a Demon (10★) level', hard: true },
+  { id: 'rstars100', name: 'Star Eater', text: 'Earn 100 difficulty stars', hard: true },
+  { id: 'tycoon', name: 'Tycoon', text: 'Have 10,000 coins at once', hard: true },
+  { id: 'collector', name: 'Museum Curator', text: 'Own 25 different items', hard: true },
+  { id: 'friends10', name: 'Popular Pip', text: 'Have 10 friends', hard: true },
+  { id: 'chat500', name: 'Chatterbox', text: 'Send 500 chat messages in 3D servers', hard: true },
+  { id: 'dance200', name: 'Disco Inferno', text: 'Dance 200 times', hard: true },
+  { id: 'spin100', name: 'Spin Cycle', text: 'Spin 100 times', hard: true },
+  { id: 'snow50', name: 'Snowball Sniper', text: 'Hit 50 players with snowballs', hard: true },
+  { id: 'splat100', name: 'Paint Picasso', text: 'Splat 100 players in Paintball', hard: true },
+  { id: 'race25', name: 'Photo Finish', text: 'Win 25 races', hard: true },
+  { id: 'tag10', name: 'Slippery Eel', text: 'Win Tag 10 times', hard: true },
+  { id: 'koth10', name: 'Hill Hog', text: 'Win King of the Hill 10 times', hard: true },
+  { id: 'lava10', name: 'Floor Is Lava Pro', text: 'Win Rising Lava 10 times', hard: true },
+  { id: 'tourist', name: 'World Tourist', text: 'Visit every Blockyard world', hard: true },
+  { id: 'publish10', name: 'Architect', text: 'Publish 10 levels or worlds', hard: true },
+  { id: 'trades25', name: 'Wall Street Pip', text: 'Finish 25 trades', hard: true },
+  { id: 'buy25', name: 'Shopaholic', text: 'Buy 25 things in the closet', hard: true },
+  { id: 'chosen', name: 'The Chosen One', text: 'You 100%ed everything: every other badge in Blockyard', hard: true, chosen: true },
 ];
+// Blockyard's own 3D worlds (for World Tourist)
+export const TOUR = ['plaza', 'town', 'mg-race', 'mg-tag', 'mg-paint', 'mg-koth', 'mg-lava', 'sunny', 'tower', 'lava', 'factory', 'sky'];
 export const OBBIES = ['sunny', 'tower', 'lava', 'factory', 'sky'];
 const STAR_REWARD = 10;
 const blank = () => ({
@@ -94,7 +128,7 @@ export function merge(a, b) {
   }
   out.owned = [...new Set([...a.owned, ...b.owned])];
   out.ach = { ...b.ach, ...a.ach };
-  for (const s in out.stats) out.stats[s] = Math.max(a.stats[s] || 0, b.stats[s] || 0);
+  for (const s of new Set([...Object.keys(a.stats), ...Object.keys(b.stats)])) out.stats[s] = Math.max(a.stats[s] || 0, b.stats[s] || 0);
   for (const d of new Set([...Object.keys(a.daily), ...Object.keys(b.daily)])) {
     const x = a.daily[d] || {}, y = b.daily[d] || {};
     out.daily[d] = { best: Math.max(x.best || 0, y.best || 0), won: !!(x.won || y.won), attempts: Math.max(x.attempts || 0, y.attempts || 0) };
@@ -134,14 +168,14 @@ export const progress = {
       if (typeof l.best === 'number' && (e.time == null || l.best < e.time)) e.time = l.best;
     }
     for (const b of Object.keys(res.badges || {})) if (!data.ach[b]) data.ach[b] = Date.now();
-    save();
+    checkAll(); save();
   },
   setWallet(w, notify = true) {
     wallet = w;
     data.coins = w.coins;
     data.owned = [...new Set([...FREE, ...Object.keys(w.items).map((k) => k.slice(k.indexOf(':') + 1))])];
     data.equip = { ...data.equip, ...w.look };
-    if (notify) save();
+    if (notify) { checkAll(); save(); }
   },
   itemsOwned() { return wallet ? wallet.items : null; },
   guestHasProgress() {
@@ -169,6 +203,9 @@ export const progress = {
       if (!e.won || e.time === null || r.time < e.time) { out.newBest = e.won; e.time = Math.round(r.time * 10) / 10; }
       e.won = true; e.progress = 1;
       data.stats.wins++;
+      if (id === 'b-final' && r.deaths === 0) grant('finalflawless');
+      if ((meta.stars || 0) >= 9) grant('insane');
+      if ((meta.stars || 0) >= 10) grant('demon');
       if (meta.builtin) {
         const got = [1, r.totalCoins ? (r.coins >= r.totalCoins ? 1 : 0) : (r.deaths === 0 ? 1 : 0), meta.rush ? (r.deaths === 0 ? 1 : 0) : (meta.par && r.time <= meta.par ? 1 : 0)];
         got.forEach((g, i) => { if (g && !e.stars[i]) { e.stars[i] = 1; out.newStars.push(i); out.coinsEarned += STAR_REWARD; } });
@@ -193,6 +230,9 @@ export const progress = {
     e.stars[0] = 1;
     e.coins = Math.max(e.coins || 0, r.coins);
     if (first) data.stats.obbies++;
+    if (id === 'sky' && r.deaths === 0 && !r.noProof) grant('skyflawless');
+    if (id === 'tower' && r.time < 25 && !r.noProof) grant('towerspeed');
+    if (id === 'sky') grant('insane');
     checkAll(); save();
     return { first };
   },
@@ -214,6 +254,10 @@ export const progress = {
     return out;
   },
   stat(name, n = 1) { data.stats[name] = (data.stats[name] || 0) + n; },
+  // keep the biggest number seen (friends, etc.)
+  peak(name, v) { if (v > (data.stats[name] || 0)) { data.stats[name] = v; checkAll(); save(); } },
+  visit(worldId) { if (!data.stats['v_' + worldId]) { data.stats['v_' + worldId] = 1; checkAll(); save(); } },
+  special(id) { grant(id); checkAll(); save(); },
   flush() { checkAll(); save(); },
   achieve(id) { grant(id); save(); },
   takeNewAchievements() { const a = pendingAch; pendingAch = []; return a; },
@@ -267,4 +311,35 @@ function checkAll() {
   if (s.team >= 1) grant('teamwork');
   if (OBBIES.some((id) => won('w:' + id))) grant('obby1');
   if (OBBIES.every((id) => won('w:' + id))) grant('obbyall');
+  // the hard ones
+  const h = new Date().getHours();
+  if (h >= 0 && h < 4 && s.wins + s.obbies + s.chats > 0) grant('nightowl');
+  if (s.jumps >= 25000) grant('jumps25k');
+  if (s.deaths >= 1000) grant('die1000');
+  if (s.stomps >= 250) grant('stomp250');
+  if (s.portals >= 1000) grant('portals1000');
+  if (s.coins >= 5000) grant('coins5000');
+  if (s.endlessBest >= 2500) grant('endless2500');
+  if (s.dailies >= 30) grant('daily30');
+  if (s.chats >= 500) grant('chat500');
+  if ((s.dances || 0) >= 200) grant('dance200');
+  if ((s.spins || 0) >= 100) grant('spin100');
+  if ((s.snowhits || 0) >= 50) grant('snow50');
+  if ((s.splats || 0) >= 100) grant('splat100');
+  if ((s.win_race || 0) >= 25) grant('race25');
+  if ((s.win_tag || 0) >= 10) grant('tag10');
+  if ((s.win_koth || 0) >= 10) grant('koth10');
+  if ((s.win_lava || 0) >= 10) grant('lava10');
+  if ((s.friends || 0) >= 10) grant('friends10');
+  if (s.published >= 10) grant('publish10');
+  if (s.trades >= 25) grant('trades25');
+  if (s.bought >= 25) grant('buy25');
+  if (TOUR.every((id) => s['v_' + id])) grant('tourist');
+  if (wallet) {
+    if (wallet.coins >= 10000) grant('tycoon');
+    if ((wallet.rstars || 0) >= 100) grant('rstars100');
+    if (Object.values(wallet.items || {}).filter((q) => q > 0).length >= 25) grant('collector');
+  }
+  // every other badge: you are The Chosen One
+  if (ACHIEVEMENTS.every((a) => a.chosen || data.ach[a.id])) grant('chosen');
 }

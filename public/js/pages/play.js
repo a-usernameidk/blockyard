@@ -206,7 +206,7 @@ export function playBuiltin(mi) {
     by: 'Blockyard', key: lv.id,
     onNext: MAP[mi + 1] ? () => { selected = mi + 1; go('#/play/' + MAP[mi + 1].id); } : null,
     onWin: (r) => {
-      const res = progress.finish(lv.id, r, { builtin: true, par: lv.par, rush: lv.style === 'rush' });
+      const res = progress.finish(lv.id, r, { builtin: true, par: lv.par, rush: lv.style === 'rush', stars: starsFor(lv.id) });
       const goals = starGoals(lv);
       const missing = goals.filter((g, i) => !res.stars[i]);
       if (session.user) setTimeout(() => rewardLine(api.finish({ kind: 'level', id: lv.id, replay: r.replay }), 0), 0);
@@ -240,7 +240,7 @@ async function playPublished(id) {
     playLevel(lv, {
       by: game.creator, key: 'p:' + id, pubId: id, online: true, back: '#/discover',
       onWin: (r) => {
-        const res = progress.finish('p:' + id, r, {});
+        const res = progress.finish('p:' + id, r, { stars: game.stars || 0 });
         // checked by the server even when it doesn't pay: it counts for quests
         if (session.user) setTimeout(() => rewardLine(api.finish({ kind: 'game', id, replay: r.replay }), 0), 0);
         else if (game.reward) setTimeout(() => { $('#win-reward').textContent = `Log in to earn ${game.reward} coins from this level.`; }, 0);

@@ -8,7 +8,7 @@ import { drawWorldThumb, thumbOfWorld } from '../thumb3d.js';
 import { setWallet, friendsNow, checkFriends, openFriends, refreshWallet } from './account.js';
 import { manageUser } from './admin.js';
 import { levelOf } from '../cosmetics.js';
-import { gameConfig, GAMES } from '../games.js';
+import { gameConfig, GAMES, BOTS, BOT_SKILL } from '../games.js';
 import { openReport, diffTag, diffFace } from './play.js';
 import { starsFor } from '../stars.js';
 import { shopPanel } from './closet.js';
@@ -85,8 +85,8 @@ function renderFriendsOnline() {
   const d = friendsNow(), box = $('#friends-online');
   const on = d ? d.friends.filter((f) => f.online) : [];
   box.hidden = !on.length;
-  box.replaceChildren(el('h2', {}, 'Friends playing now'), el('div', { class: 'mail-list', style: 'max-width:560px' }, ...on.map((f) => el('div', { class: 'friend-row' },
-    el('span', { class: 'dot', style: `background:${f.look.color}` }), el('span', { class: 'who' }, el('b', {}, f.name), el('span', { class: 'small' }, `in ${f.online.name}`)),
+  box.replaceChildren(el('h2', {}, 'Friends online'), el('div', { class: 'mail-list', style: 'max-width:560px' }, ...on.map((f) => el('div', { class: 'friend-row' },
+    el('span', { class: 'dot', style: `background:${f.look.color}` }), el('span', { class: 'who' }, el('b', {}, f.name), el('span', { class: 'small' }, f.online.site ? 'Online (not in a world)' : `in ${f.online.name}`)),
     f.online.code ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + f.online.code) }, 'Join') : null))),
   el('button', { class: 'linkish', type: 'button', onclick: openFriends }, 'All my friends'));
 }
@@ -162,7 +162,7 @@ async function showWorld(id) {
     w.mode === 'hangout' ? null : el('div', {}, el('h2', {}, 'Fastest times'), boardBox),
     el('div', { class: 'two-col' },
       el('div', {}, el('h2', {}, 'Public servers'), serversBox),
-      el('div', {}, el('h2', {}, 'Private servers'), el('p', { class: 'small' }, 'Only people with the link can join. Great for playing with just your friends.'), privBox)));
+      el('div', {}, el('h2', {}, 'Private servers'), el('p', { class: 'small' }, w.builtin && builtinWorld(id).game ? 'Only people with the link can join. You can add bots (and pick how smart they are) to practice, even alone. Bot rounds don\'t pay coins.' : 'Only people with the link can join. Great for playing with just your friends.'), privBox)));
   requestAnimationFrame(() => drawWorldThumb(cv, thumbOfWorld(w.world), w.sky));
   if (!(await isOnline())) { serversBox.append(el('p', { class: 'small' }, 'Servers need the online version of Blockyard.')); return; }
   try {
@@ -170,16 +170,27 @@ async function showWorld(id) {
     serversBox.append(r.servers.length
       ? el('ul', { class: 'server-list' }, ...r.servers.map((s) => el('li', {}, el('span', {}, `Server ${s.code.slice(0, 4)}`), el('span', { class: 'small' }, `${s.players} of ${r.size} players`), el('button', { class: 'btn', type: 'button', disabled: s.players >= r.size, onclick: () => go('#/join/' + s.code) }, s.players >= r.size ? 'Full' : 'Join'))))
       : el('p', { class: 'small' }, 'Nobody is here right now. Press Play and you will start a new server.'));
-    const mineList = el('ul', { class: 'server-list' }, ...r.mine.map((s) => privRow(s.code, s.players)));
+    const isGame = w.builtin && !!builtinWorld(id).game;
+    const mineList = el('ul', { class: 'server-list' }, ...r.mine.map((s) => privRow(s.code, s.players, isGame ? s : null)));
     privBox.append(mineList, el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => {
       if (!session.user) { needLogin('Private servers need an account.'); return; }
-      try { const p = await api.privateServer(id); mineList.prepend(privRow(p.code, 0)); toast('Private server made. Copy the link and send it to your friends.'); } catch (e) { toast(e.message); }
+      try { const p = await api.privateServer(id); mineList.prepend(privRow(p.code, 0, isGame ? { code: p.code, bots: 0, skill: 'normal' } : null)); toast('Private server made. Copy the link and send it to your friends.'); } catch (e) { toast(e.message); }
     } }, 'Make a private server'));
   } catch (e) { serversBox.append(el('p', { class: 'small' }, e.message)); }
 }
-function privRow(code, players) {
+function privRow(code, players, bots) {
   const link = siteBase() + '#/join/' + code;
-  return el('li', {}, el('span', {}, `Code ${code}`), el('span', { class: 'small' }, plural(players, 'player')),
+  // minigame worlds: pick how many bots and how smart they are
+  let botBits = null;
+  if (bots) {
+    const n = el('select', { 'aria-label': 'Bots' }, ...Array.from({ length: BOTS.max + 1 }, (_, i) => el('option', { value: String(i) }, i ? `${i} bot${i > 1 ? 's' : ''}` : 'No bots')));
+    const sk = el('select', { 'aria-label': 'How smart the bots are' }, ...BOTS.skills.map((k) => el('option', { value: k }, BOT_SKILL[k].name)));
+    n.value = String(bots.bots || 0); sk.value = bots.skill || 'normal';
+    const save = async () => { try { await api.serverBots(code, Number(n.value), sk.value); toast(Number(n.value) ? `${n.value} ${BOT_SKILL[sk.value].name} bot${n.value > 1 ? 's' : ''} will play in this server (when you're in it).` : 'No bots in this server.'); } catch (e) { toast(e.message); } };
+    n.addEventListener('change', save); sk.addEventListener('change', save);
+    botBits = el('span', { class: 'row bot-row', title: 'Bots play when you are in the server. Rounds with bots do not pay coins.' }, n, sk);
+  }
+  return el('li', {}, el('span', {}, `Code ${code}`), el('span', { class: 'small' }, plural(players, 'player')), botBits,
     el('button', { class: 'btn', type: 'button', onclick: (e) => copyText(link, e.currentTarget, 'Copy link') }, 'Copy link'),
     el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + code) }, 'Join'));
 }
@@ -207,7 +218,9 @@ async function enterWorld(id, code) {
     onManage: (name) => manageUser(name),
     game: (() => { try { return gameConfig(w.world, w.builtin ? builtinWorld(id) : null); } catch (e) { return null; } })(),
     onPrize: () => refreshWallet(),
+    onStat: (name, n = 1) => { progress.stat(name, n); progress.flush(); },
     snow: !!(w.builtin && builtinWorld(id).snow),
+    way: w.builtin && builtinWorld(id).game ? builtinWorld(id).get().way : null,
     music: w.builtin ? (builtinWorld(id).snow ? 'snow' : builtinWorld(id).game ? 'game' : w.sky === 'night' && w.mode !== 'hangout' ? 'space' : null) : null,
     shop: w.builtin ? builtinWorld(id).shop || null : null,
     onShop: shopPanel,
@@ -233,6 +246,7 @@ async function enterWorld(id, code) {
       return { text: coins + rank, extra: b ? boardList(b, true) : null };
     },
   });
+  if (w.builtin) progress.visit(id);
   if (!w.builtin) { const seen = 'played:' + id; try { if (!sessionStorage.getItem(seen)) { sessionStorage.setItem(seen, '1'); api.play(id).catch(() => {}); } } catch (e) { /* ok */ } }
   if (multi) setTimeout(() => loadOnline(true), 3000);
   // count chat for the badge
