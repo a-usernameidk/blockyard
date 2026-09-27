@@ -13,6 +13,7 @@ import { builtinWorld } from '../public/js/worlds3d.js';
 import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES } from '../public/js/world.js';
 import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, TYCOON, gameConfig, onHill, lavaLevel, inBox, nearBlock } from '../public/js/games.js';
 import { coinStmts, questBumps } from './econ.js';
+import { cleanDisplay, cleanTags } from '../public/js/names.js';
 
 const MAX_PLAYERS = 16;
 const CHAT_MAX = 200;
@@ -72,7 +73,7 @@ export class Room {
       return new Response(null, { status: 101, webSocket: client });
     }
     const id = Math.random().toString(36).slice(2, 8);
-    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, title: /^[a-z0-9]{2,20}$/.test(info.title || '') ? info.title : '', kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
+    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, title: /^[a-z0-9]{2,20}$/.test(info.title || '') ? info.title : '', dn: cleanDisplay(info.display) || '', tags: cleanTags(info.tags), kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
     server.serializeAttachment(me);
 
     if (me.kind === 'edit') {
@@ -124,7 +125,7 @@ export class Room {
         lim.chat = lim.chat.filter((t) => now - t < 5000);
         if (lim.chat.length >= 3 || (lim.chat.length && now - lim.chat[lim.chat.length - 1] < 700)) { send(ws, { t: 'sys', m: 'Slow down a little. One message a second.' }); return; }
         lim.chat.push(now);
-        const line = { id: me.id, uid: me.uid, n: me.name, m, at: now, admin: me.admin || undefined };
+        const line = { id: me.id, uid: me.uid, n: me.name, dn: me.dn || undefined, m, at: now, admin: me.admin || undefined };
         await this.loadLog();
         this.log.push(line);
         if (this.log.length > LOG_KEEP) this.log.splice(0, this.log.length - LOG_KEEP);
@@ -638,7 +639,7 @@ function att(ws) { try { return ws.deserializeAttachment(); } catch (e) { return
 function send(ws, msg) { try { ws.send(JSON.stringify(msg)); } catch (e) { /* closed */ } }
 function pub(a, pos) {
   const st = pos.get(a.id) || (a.p ? { p: a.p, r: a.r, a: a.a } : {});
-  return { id: a.id, name: a.name, look: a.look, lvl: a.lvl || 1, role: a.role || undefined, title: a.title || undefined, admin: a.admin || undefined, p: st.p || null, r: st.r || 0, a: st.a || 0 };
+  return { id: a.id, name: a.name, look: a.look, lvl: a.lvl || 1, role: a.role || undefined, title: a.title || undefined, dn: a.dn || undefined, tags: a.tags && a.tags.length ? a.tags : undefined, admin: a.admin || undefined, p: st.p || null, r: st.r || 0, a: st.a || 0 };
 }
 // No word filter (Blockyard's choice), just tidy: no invisible characters, no giant messages.
 export function cleanChat(m) {

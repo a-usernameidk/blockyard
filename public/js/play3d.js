@@ -9,8 +9,11 @@ import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
 import { store } from './api.js';
 import { GAMES, ROUND, WEAPONS, WEAPON_IDS, TYCOON, onHill, inBox, nearBlock } from './games.js';
 import { LOGIC_GEAR } from './logic.js';
-import { ACHIEVEMENTS } from './progress.js';
-const titleName = (id) => { const a = id && ACHIEVEMENTS.find((x) => x.id === id); return a ? a.name : ''; };
+import { titleText, titleClass, tagPills } from './pfp.js';
+const titleName = (id) => titleText(id);
+// the name everyone sees (display name, or the username)
+const label = (o) => (o && (o.dn || o.name)) || 'Someone';
+const tagBits = (tags) => tagPills(tags, (t, name) => h('span', { class: 'lvl tag-' + t }, name));
 import { GEAR_MODS, gearAllowed } from './cosmetics.js';
 import { GFX, GFX_ORDER, gfxMode, setGfx } from './settings.js';
 import { emojiNodes, emojiButton } from './emoji.js';
@@ -321,7 +324,7 @@ export function startWorld(root, opts) {
   }
   function addPlayer(p) {
     if (others.has(p.id)) return;
-    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.role === 'builder' ? h('span', { class: 'lvl builder' }, 'Builder') : p.role === 'builderpro' ? h('span', { class: 'lvl builder' }, 'Builder Pro') : null, p.name, titleName(p.title) ? h('span', { class: 'w3-title' }, titleName(p.title)) : null), h('span', { class: 'w3-bubble', hidden: true }));
+    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.role === 'builder' ? h('span', { class: 'lvl builder' }, 'Builder') : p.role === 'builderpro' ? h('span', { class: 'lvl builder' }, 'Builder Pro') : null, ...tagBits(p.tags), label(p), titleName(p.title) ? h('span', { class: 'w3-title' + titleClass(p.title) }, titleName(p.title)) : null), h('span', { class: 'w3-bubble', hidden: true }));
     tags.append(tag);
     others.set(p.id, { ...p, snaps: p.p ? [{ t: performance.now(), p: p.p, r: p.r || 0, a: p.a || 0 }] : [], tag, walk: 0, bubbleUntil: 0, emote: null, et: 0, trailT: 0 });
     renderList();
@@ -329,18 +332,18 @@ export function startWorld(root, opts) {
   function removePlayer(id) { const o = others.get(id); if (!o) return; o.tag.remove(); others.delete(id); renderList(); }
   function renderList() {
     listBtn.textContent = `Players ${others.size + 1}`;
-    list.replaceChildren(h('li', { class: 'me' }, h('span', { class: 'dot', style: `background:${look.color}` }), (opts.me && opts.me.name) || 'You', ' (you)'),
-      ...[...others.values()].map((o) => h('li', {}, h('button', { class: 'linkish', type: 'button', onclick: (e) => openMenu(o, e) }, h('span', { class: 'dot', style: `background:${(o.look && o.look.color) || '#ff6b35'}` }), o.name, isMutedPlayer(o.name) ? ' (muted)' : ''))));
+    list.replaceChildren(h('li', { class: 'me' }, h('span', { class: 'dot', style: `background:${look.color}` }), (opts.me && (opts.me.display || opts.me.name)) || 'You', ' (you)'),
+      ...[...others.values()].map((o) => h('li', {}, h('button', { class: 'linkish', type: 'button', onclick: (e) => openMenu(o, e) }, h('span', { class: 'dot', style: `background:${(o.look && o.look.color) || '#ff6b35'}` }), label(o), o.dn ? h('span', { class: 'small' }, ' @' + o.name) : null, isMutedPlayer(o.name) ? ' (muted)' : ''))));
   }
   listBtn.addEventListener('click', () => { list.hidden = !list.hidden; listBtn.setAttribute('aria-expanded', String(!list.hidden)); });
   function closeMenu() { menu.hidden = true; }
   function openMenu(o) {
-    if (String(o.id).startsWith('bot')) { menu.replaceChildren(h('h3', {}, o.name), h('p', { class: 'small' }, "A bot. It's here to practice with. Rounds with bots don't pay coins."), h('button', { class: 'btn w3-menu-x', type: 'button', onclick: closeMenu }, 'Close')); menu.hidden = false; return; }
+    if (String(o.id).startsWith('bot')) { menu.replaceChildren(h('h3', {}, label(o)), h('p', { class: 'small' }, "A bot. It's here to practice with. Rounds with bots don't pay coins."), h('button', { class: 'btn w3-menu-x', type: 'button', onclick: closeMenu }, 'Close')); menu.hidden = false; return; }
     const m = isMutedPlayer(o.name);
     const reasons = h('select', { 'aria-label': 'Why are you reporting them?' }, ...[['mean', 'Mean or bullying'], ['spam', 'Spamming'], ['personal', 'Asking for or sharing personal info'], ['cheating', 'Cheating'], ['other', 'Something else']].map(([v, l]) => h('option', { value: v }, l)));
     const reportRow = h('div', { class: 'w3-report', hidden: true }, reasons, h('button', { class: 'btn btn-danger', type: 'button', onclick: () => { if (room) room.send({ t: 'report', id: o.id, reason: reasons.value }); closeMenu(); } }, 'Send report'));
     menu.replaceChildren(
-      h('h3', {}, o.name),
+      h('h3', {}, label(o), o.dn ? h('span', { class: 'small' }, ' @' + o.name) : null),
       h('div', { class: 'w3-menu-row' },
         opts.onProfile ? h('button', { class: 'btn', type: 'button', onclick: () => opts.onProfile(o.name) }, 'Profile') : null,
         opts.onLiveTrade ? h('button', { class: 'btn btn-sun', type: 'button', onclick: () => { clearKeys(); closeMenu(); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); opts.onLiveTrade(o.name); } }, 'Live trade') : null,
@@ -374,13 +377,13 @@ export function startWorld(root, opts) {
         setupBots({ n: m.n, skill: m.skill, host: m.host === myId, owner: botInfo && botInfo.owner }, Array.from({ length: m.n }, (_, i) => 'bot' + (i + 1)));
         addLine(null, m.n ? `${m.n} ${BOT_SKILL[m.skill].name} bot${m.n > 1 ? 's' : ''} joined.` : 'The bots left.', null, true);
         break;
-      case 'join': addPlayer(m.player); addLine(null, `${m.player.name} joined.`, null, true); sfx('join'); break;
-      case 'leave': { const o = others.get(m.id); if (o) { addLine(null, `${o.name} left.`, null, true); sfx('leave'); } removePlayer(m.id); break; }
+      case 'join': addPlayer(m.player); addLine(null, `${label(m.player)} joined.`, null, true); sfx('join'); break;
+      case 'leave': { const o = others.get(m.id); if (o) { addLine(null, `${label(o)} left.`, null, true); sfx('leave'); } removePlayer(m.id); break; }
       case 'st': { const o = others.get(m.id); if (o) { o.snaps.push({ t: performance.now(), p: m.p, r: m.r, a: m.a }); if (o.snaps.length > 12) o.snaps.shift(); } break; }
       case 'chat': {
         if (isMutedPlayer(m.n)) break;
         const o = others.get(m.id);
-        addLine(m.n, m.m, o && o.look ? o.look.color : m.id === myId ? look.color : null);
+        addLine(m.dn || m.n, m.m, o && o.look ? o.look.color : m.id === myId ? look.color : null);
         if (o) { const b = o.tag.querySelector('.w3-bubble'); b.replaceChildren(...emojiNodes(m.m, 20)); b.hidden = false; o.bubbleUntil = performance.now() + 6000; }
         if (m.id === myId) { myBubble.replaceChildren(...emojiNodes(m.m, 20)); myBubble.hidden = false; myBubbleUntil = performance.now() + 6000; }
         else sfx('chat');
@@ -416,7 +419,7 @@ export function startWorld(root, opts) {
         h('button', { class: 'btn btn-sun', type: 'button', onclick: async (e) => { const b = e.currentTarget; b.disabled = true; try { await opts.inviteFriend(code, f.name); b.textContent = 'Invited!'; sfx('send'); } catch (err) { b.textContent = err.message.slice(0, 40); } } }, 'Invite'))) : [h('li', { class: 'small' }, 'No friends yet. Add friends from their profile, then invite them here.')]));
     } catch (e) { list.replaceChildren(h('li', { class: 'small' }, e.message)); }
   }
-  const myTag = h('div', { class: 'w3-tag me' }, h('span', { class: 'w3-name' }, opts.me && opts.me.lvl ? h('span', { class: 'lvl' }, `Lv ${opts.me.lvl}`) : null, (opts.me && opts.me.name) || 'You', opts.me && titleName(opts.me.title) ? h('span', { class: 'w3-title' }, titleName(opts.me.title)) : null), h('span', { class: 'w3-bubble', hidden: true }));
+  const myTag = h('div', { class: 'w3-tag me' }, h('span', { class: 'w3-name' }, opts.me && opts.me.lvl ? h('span', { class: 'lvl' }, `Lv ${opts.me.lvl}`) : null, ...tagBits(opts.me && opts.me.tags), (opts.me && (opts.me.display || opts.me.name)) || 'You', opts.me && titleName(opts.me.title) ? h('span', { class: 'w3-title' + titleClass(opts.me.title) }, titleName(opts.me.title)) : null), h('span', { class: 'w3-bubble', hidden: true }));
   const myBubble = myTag.querySelector('.w3-bubble');
   let myBubbleUntil = 0;
   tags.append(myTag);
@@ -511,7 +514,7 @@ export function startWorld(root, opts) {
     const i = list.indexOf(spec.id);
     spec.id = list[((i < 0 ? 0 : i + d) % list.length + list.length) % list.length]; drawSpec();
   }
-  function drawSpec() { if (spec) specBar.querySelector('.w3-spec-name').textContent = `Watching ${(others.get(spec.id) || {}).name || '…'}`; }
+  function drawSpec() { if (spec) specBar.querySelector('.w3-spec-name').textContent = `Watching ${label(others.get(spec.id))}`; }
   specBtn.addEventListener('click', () => { setSpec(!spec); specBtn.blur(); });
   /* ----- tycoon: plots, cash and buy buttons (the live room keeps the real score) ----- */
   const tyPlots = cfg && cfg.areas.tycoon ? cfg.areas.tycoon.plots || {} : null;
@@ -552,7 +555,7 @@ export function startWorld(root, opts) {
     return `Your ${COLOR_NAME[c] || ''} plot: $${cash} (+$${p[3]}/s). ${next ? `Next button: $${next.price}${cash >= next.price ? ', go step on it!' : ''}` : 'All built!'} ${p[1]}/${plot.buttons.length} built.`;
   }
   tyApply(null);
-  const nameOf = (id) => (id === myId ? 'You' : (others.get(id) || {}).name || 'Someone');
+  const nameOf = (id) => (id === myId ? 'You' : label(others.get(id)));
   const toXYZ = (a, spread) => ({ x: a[0] + (spread ? (Math.random() - 0.5) * spread : 0), y: a[1], z: a[2] + (spread ? (Math.random() - 0.5) * spread : 0) });
   // gear works in hangouts, Tag and Paintball. Never in obbies (timed and checked) or the other minigames (fair play).
   function applyGear() {
@@ -603,7 +606,7 @@ export function startWorld(root, opts) {
       let hit = b.life <= 0 || camSolid(b.x, b.y, b.z);
       const mine = b.by === (myId || 'me');
       if (!hit && !mine && Math.hypot(b.x - S.p.x, b.y - (S.p.y + 0.8), b.z - S.p.z) < 0.75) { hit = true; toast(`${nameOf(b.by)} got you with a snowball!`, 1.4); sfx('land'); }
-      if (!hit && mine) for (const o of others.values()) if (o.pos && Math.hypot(b.x - o.pos[0], b.y - (o.pos[1] + 0.8), b.z - o.pos[2]) < 0.75) { hit = true; toast(`Hit ${o.name}!`, 0.9); sfx('hit'); if (opts.onStat) opts.onStat('snowhits'); break; }
+      if (!hit && mine) for (const o of others.values()) if (o.pos && Math.hypot(b.x - o.pos[0], b.y - (o.pos[1] + 0.8), b.z - o.pos[2]) < 0.75) { hit = true; toast(`Hit ${label(o)}!`, 0.9); sfx('hit'); if (opts.onStat) opts.onStat('snowhits'); break; }
       if (hit) { burst(b.x, b.y, b.z, ['#ffffff', '#dff4ff'], 10, 3, 2); snowballs.splice(i, 1); continue; }
       scene.push({ prim: 'sphere', color: [1, 1, 1], m: M4.trs(b.x, b.y, b.z, 0, 0, 0, 0.32, 0.32, 0.32) });
     }

@@ -231,7 +231,7 @@ async function enterWorld(id, code) {
   let joined = code || null;
   const g3 = gfx(), low = g3.low;
   game = startWorld(root, {
-    world: w.world, title: w.name, by: w.by, gfx: g3, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0, title: session.user.title || '' } : { name: 'You' }, low,
+    world: w.world, title: w.name, by: w.by, gfx: g3, look: progress.data.equip, me: session.user ? { name: session.user.name, display: session.user.display || '', tags: session.user.tags || [], admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0, title: session.user.title || '' } : { name: 'You' }, low,
     onManage: (name) => manageUser(name),
     game: (() => { try { return gameConfig(w.world, w.builtin ? builtinWorld(id) : null); } catch (e) { return null; } })(),
     onPrize: () => refreshWallet(),

@@ -8,6 +8,7 @@ import { drawTile } from '../render2d.js';
 import { levelOf, xpFor } from '../cosmetics.js';
 import { iconCanvas } from '../art.js';
 import { diffName } from '../stars.js';
+import { pfpCanvas } from '../pfp.js';
 import { isMuted, setMuted, unlockAudio, isMusicOn, setMusicOn } from '../audio.js';
 
 /* ---------------- header ---------------- */
@@ -16,8 +17,10 @@ export function renderMe() {
   $('#coin-count').textContent = w ? w.coins : progress.data.coins;
   $('#coin-chip').title = w ? 'Your coins' : 'Coins you earned as a guest. Log in to keep them.';
   $('#coin-chip').classList.toggle('guest', !w);
-  $('#me-dot').style.background = progress.data.equip.color;
-  $('#me-name').textContent = session.user ? session.user.name : 'Log in';
+  const dot = $('#me-dot');
+  if (session.user) { dot.classList.add('has-pfp'); dot.style.background = ''; dot.replaceChildren(pfpCanvas(session.user.pfp, progress.data.equip, 22)); }
+  else { dot.classList.remove('has-pfp'); dot.replaceChildren(); dot.style.background = progress.data.equip.color; }
+  $('#me-name').textContent = session.user ? session.user.display || session.user.name : 'Log in';
   $('#me-lvl').hidden = !w; if (w) $('#me-lvl').textContent = `Lv ${levelOf(w.xp)}`;
 }
 // A level-up gets a party.
@@ -192,7 +195,7 @@ export function openAccount(mode, name) {
     if (name) $('#acct-name').value = name;
     renderSaved();
     if (session.user) {
-      $('#acct-user').textContent = session.user.name;
+      $('#acct-user').textContent = session.user.display ? `${session.user.display} (@${session.user.name})` : session.user.name;
       const w = progress.wallet;
       $('#acct-sum').textContent = `${progress.totalStars()} stars, ${w ? w.coins : 0} coins, ${Object.keys(progress.data.ach).length} badges`;
       const xp = w ? w.xp || 0 : 0, lv = levelOf(xp), a = xpFor(lv), b = xpFor(lv + 1);
@@ -323,25 +326,26 @@ function setFriendCount(n) {
   $('#me-count').title = n ? `${n} friend request${n > 1 ? 's' : ''}` : '';
 }
 export function friendsNow() { return friendData; }
-const friendDot = (f) => el('span', { class: 'dot', style: `background:${f.look.color}` });
+const friendDot = (f) => pfpCanvas(f.pfp, f.look, 30);
+const shown = (f) => (f.display ? `${f.display} (@${f.name})` : f.name);
 function renderFriends() {
   const d = friendData, body = $('#fl-body');
   if (!d) { body.replaceChildren(el('p', { class: 'small' }, 'Loading…')); return; }
   const act = (name, action, done) => async () => { try { await api.friend(name, action); if (done) toast(done); await checkFriends(); renderFriends(); } catch (e) { $('#fl-msg').textContent = e.message; } };
   body.replaceChildren(
     d.incoming.length ? el('h3', {}, 'Friend requests') : null,
-    ...d.incoming.map((f) => el('div', { class: 'friend-row' }, friendDot(f), el('span', { class: 'who' }, el('b', {}, f.name)),
+    ...d.incoming.map((f) => el('div', { class: 'friend-row' }, friendDot(f), el('span', { class: 'who' }, el('b', {}, shown(f))),
       el('button', { class: 'btn btn-grass', type: 'button', onclick: act(f.name, 'accept', `You and ${f.name} are friends now!`) }, 'Accept'),
       el('button', { class: 'btn', type: 'button', onclick: act(f.name, 'remove') }, 'No thanks'))),
     el('h3', {}, d.friends.length ? `Friends (${d.friends.filter((f) => f.online).length} online)` : 'No friends yet'),
     d.friends.length ? null : el('p', { class: 'small' }, 'Type a username above, or press "Add friend" on someone\'s profile. They have to say yes.'),
     ...d.friends.map((f) => el('div', { class: 'friend-row' }, friendDot(f),
-      el('span', { class: 'who' }, el('a', { class: 'linkish', href: '#/u/' + f.name, 'data-go': '#/u/' + f.name }, f.name), el('span', { class: 'small' }, f.online ? (f.online.site ? 'Online' : `Playing ${f.online.name}`) : 'Offline')),
+      el('span', { class: 'who' }, el('a', { class: 'linkish', href: '#/u/' + f.name, 'data-go': '#/u/' + f.name }, shown(f)), el('span', { class: 'small' }, f.online ? (f.online.site ? 'Online' : `Playing ${f.online.name}`) : 'Offline')),
       f.online && f.online.code ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#friends-list-modal')); go('#/join/' + f.online.code); } }, 'Join') : null,
       el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#friends-list-modal')); dispatchEvent(new CustomEvent('by:dm', { detail: f.name })); } }, 'Message'),
       el('button', { class: 'btn', type: 'button', title: `Unfriend ${f.name}`, onclick: act(f.name, 'remove', `Removed ${f.name}.`) }, 'Remove'))),
     d.outgoing.length ? el('h3', {}, 'Waiting for them to say yes') : null,
-    ...d.outgoing.map((f) => el('div', { class: 'friend-row' }, friendDot(f), el('span', { class: 'who' }, f.name), el('button', { class: 'btn', type: 'button', onclick: act(f.name, 'remove') }, 'Cancel'))));
+    ...d.outgoing.map((f) => el('div', { class: 'friend-row' }, friendDot(f), el('span', { class: 'who' }, shown(f)), el('button', { class: 'btn', type: 'button', onclick: act(f.name, 'remove') }, 'Cancel'))));
 }
 export async function openFriends() {
   if (!session.user) { openAccount(); return; }

@@ -17,7 +17,8 @@ import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, 
 import { findItem } from '../public/js/cosmetics.js';
 import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
 import { MARKET_SCHEMA, marketRoute } from './market.js';
-import { PEOPLE_SCHEMA, PEOPLE_COLUMNS, peopleRoute, followInfo, tellFollowers, rateGame } from './people.js';
+import { PEOPLE_SCHEMA, PEOPLE_COLUMNS, peopleRoute, followInfo, tellFollowers, rateGame, titleOk, setTag, isOwner } from './people.js';
+import { cleanTags } from '../public/js/names.js';
 import { COMMUNITY_SCHEMA, vote, voteSummary, facesBeaten, dailyPick, setDailyPick, dailyPicks } from './community.js';
 import { MOD, ROLES, ROLE_NAME, addWarning, creditReporters, checkPopular, adminNotify, setAdminNotify, mailAdmin, setPay } from './mod.js';
 import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool, ECON_COLUMNS, questBumps } from './econ.js';
@@ -305,12 +306,12 @@ async function sessionUser(db, request, env) {
   if (!token) { token = readCookie(request); viaCookie = !!token; }
   if (!token || token.length > 100) return null;
   const hash = await sha256(token);
-  const row = await db.prepare(`SELECT u.id, u.name, u.banned, u.role, s.expires FROM sessions s JOIN users u ON u.id = s.user_id
+  const row = await db.prepare(`SELECT u.id, u.name, u.banned, u.role, u.display, s.expires FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires > ?`).bind(hash, Date.now()).first();
   if (!row || row.banned) return null;
   // logins you keep using never run out
   if (row.expires - Date.now() < (SESSION_DAYS - 30) * DAY) await db.prepare('UPDATE sessions SET expires = ? WHERE token_hash = ?').bind(Date.now() + SESSION_DAYS * DAY, hash).run();
-  return { id: row.id, name: row.name, token, viaCookie, admin: isAdmin(env, row), role: row.role || '' };
+  return { id: row.id, name: row.name, token, viaCookie, admin: isAdmin(env, row), role: row.role || '', display: row.display || null };
 }
 // "Keep me logged in": the login also goes in a cookie. Otherwise only this tab remembers it.
 const remember = (resp, input, token) => (input && input.remember === false ? resp : withCookie(resp, token, SESSION_DAYS));
@@ -329,8 +330,8 @@ function checkPassword(pw) {
 async function account(ctx, u, extra = {}) {
   const { db, env } = ctx;
   if (!u.econ) await migrateUser(db, u.id, u.progress);
-  const [ex, mail, rr] = await Promise.all([accountExtras(db, u.id), db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(u.id).first(), db.prepare('SELECT role, warnings, title FROM users WHERE id = ?').bind(u.id).first()]);
-  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u), role: (rr && rr.role) || '', warnings: (rr && rr.warnings) || 0, title: (rr && rr.title) || null }, progress: JSON.parse(u.progress || '{}'), ...ex, unread: mail.n };
+  const [ex, mail, rr] = await Promise.all([accountExtras(db, u.id), db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(u.id).first(), db.prepare('SELECT role, warnings, title, display, display_at, pfp, tags FROM users WHERE id = ?').bind(u.id).first()]);
+  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u), role: (rr && rr.role) || '', warnings: (rr && rr.warnings) || 0, title: (rr && rr.title) || null, display: (rr && rr.display) || null, displayAt: (rr && rr.display_at) || 0, pfp: (rr && rr.pfp) || null, tags: cleanTags(rr && rr.tags), owner: isOwner(env, u) }, progress: JSON.parse(u.progress || '{}'), ...ex, unread: mail.n };
 }
 async function signup(ctx, input) {
   const { db, env, ip } = ctx;
@@ -528,7 +529,7 @@ const MAX_FRIENDS = 100;
 async function friendsList(ctx) {
   const user = needUser(ctx);
   const { db } = ctx;
-  const { results } = await db.prepare(`SELECT f.a, f.b, f.status, u.id, u.name, u.look, u.seen AS site, p.world, p.code, p.at AS seen
+  const { results } = await db.prepare(`SELECT f.a, f.b, f.status, u.id, u.name, u.display, u.pfp, u.look, u.seen AS site, p.world, p.code, p.at AS seen
     FROM friends f JOIN users u ON u.id = CASE WHEN f.a = ? THEN f.b ELSE f.a END
     LEFT JOIN presence p ON p.user_id = u.id
     WHERE (f.a = ? OR f.b = ?) AND u.banned = 0 ORDER BY u.name_lower LIMIT 300`).bind(user.id, user.id, user.id).all();
@@ -544,7 +545,7 @@ async function friendsList(ctx) {
       const on = r.world && r.seen > Date.now() - FRESH;
       // on the site (the page checks in every few seconds) but not in a world
       const site = !on && r.site > Date.now() - 3 * 60e3;
-      out.friends.push({ name: r.name, look: lookOf(r.look), online: on ? { world: r.world, code: r.code, name: worldName(r.world) || names[r.world] || 'a player world' } : site ? { world: null, code: null, name: null, site: true } : null });
+      out.friends.push({ name: r.name, display: r.display || undefined, pfp: r.pfp || undefined, look: lookOf(r.look), online: on ? { world: r.world, code: r.code, name: worldName(r.world) || names[r.world] || 'a player world' } : site ? { world: null, code: null, name: null, site: true } : null });
     } else if (r.b === user.id) out.incoming.push({ name: r.name, look: lookOf(r.look) });
     else out.outgoing.push({ name: r.name, look: lookOf(r.look) });
   }
@@ -578,7 +579,7 @@ async function friendAction(ctx, input) {
 
 async function profile(ctx, name) {
   const { db } = ctx;
-  const u = await db.prepare('SELECT id, name, created_at, banned, role, progress, title FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
+  const u = await db.prepare('SELECT id, name, created_at, banned, role, progress, title, display, pfp, tags FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
   if (!u || u.banned) fail(404, 'No player with that name.');
   const [items, games, here] = await Promise.all([
     publicItems(db, u.id),
@@ -594,7 +595,7 @@ async function profile(ctx, name) {
   let saved = {};
   try { saved = JSON.parse(u.progress || '{}').ach || {}; } catch (e) { /* none */ }
   const badges = { ...Object.fromEntries(Object.keys(saved).slice(0, 200).map((k) => [String(k).slice(0, 30), true])), ...items.badges };
-  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), title: u.title && badges[u.title] ? u.title : null, ...items, badges, faces: await facesBeaten(db, u.id), games: games.results.map(row), playing, ...(await followInfo(db, u.id, ctx.user && ctx.user.id)) });
+  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), title: u.title && (await titleOk(ctx.env, db, u.id, u, u.title, items.badges)) ? u.title : null, display: u.display || null, pfp: u.pfp || null, tags: cleanTags(u.tags), owner: isOwner(ctx.env, u), ...items, badges, faces: await facesBeaten(db, u.id), games: games.results.map(row), playing, ...(await followInfo(db, u.id, ctx.user && ctx.user.id)) });
 }
 const worldName = (id) => { const b = builtinWorld(id); return b ? b.name : null; };
 
@@ -953,10 +954,10 @@ async function joinPlay(ctx, input) {
     }
   }
   await db.prepare('UPDATE servers SET updated = ? WHERE code = ?').bind(now, code).run();
-  const u = await db.prepare('SELECT look, title FROM users WHERE id = ?').bind(user.id).first();
+  const u = await db.prepare('SELECT look, title, display, tags FROM users WHERE id = ?').bind(user.id).first();
   const w = await getWallet(db, user.id);
   const look = cleanLook(lookOf(u && u.look), w.items);
-  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, o: user.role || undefined, t: (u && u.title) || undefined, a: user.admin, w: world.id, c: code, x: now + 20e3 });
+  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, o: user.role || undefined, t: (u && u.title) || undefined, d: (u && u.display) || undefined, g: u && u.tags ? cleanTags(u.tags) : undefined, a: user.admin, w: world.id, c: code, x: now + 20e3 });
   return json({ ticket, code, world, private: priv });
 }
 async function joinEdit(ctx, input) {
@@ -977,7 +978,7 @@ async function connectRoom(request, env, url) {
   const p = await readTicket(await roomSecret(env), url.searchParams.get('t'));
   if (!p) fail(401, 'That ticket expired. Join again.');
   const headers = new Headers(request.headers);
-  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, role: p.o || '', title: p.t || '', admin: !!p.a, world: p.w, code: p.c, project: p.p }));
+  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, role: p.o || '', title: p.t || '', display: p.d || '', tags: p.g || [], admin: !!p.a, world: p.w, code: p.c, project: p.p }));
   return env.ROOMS.get(env.ROOMS.idFromName(p.r)).fetch(new Request(request, { headers }));
 }
 async function kickEverywhere(env, db, uid, why) {
@@ -1182,14 +1183,14 @@ async function admin(ctx, path, method) {
   }
   m = path.match(/^\/users\/([A-Za-z0-9_]{3,16})$/);
   if (m && method === 'GET') {
-    const u = await db.prepare('SELECT id, name, banned, created_at, role, warnings FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
+    const u = await db.prepare('SELECT id, name, banned, created_at, role, warnings, tags, display FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
     if (!u) fail(404, 'No user with that name.');
     const [w, ledger, games] = await Promise.all([
       getWallet(db, u.id),
       db.prepare('SELECT delta, why, at FROM ledger WHERE user_id = ? ORDER BY at DESC LIMIT 25').bind(u.id).all(),
       db.prepare('SELECT COUNT(*) AS n FROM games WHERE user_id = ?').bind(u.id).first(),
     ]);
-    return json({ name: u.name, banned: !!u.banned, since: u.created_at, admin: isAdmin(env, u), role: u.role || '', warnings: u.warnings || 0, wallet: w, ledger: ledger.results, games: games.n });
+    return json({ name: u.name, banned: !!u.banned, since: u.created_at, admin: isAdmin(env, u), role: u.role || '', tags: cleanTags(u.tags), display: u.display || null, warnings: u.warnings || 0, wallet: w, ledger: ledger.results, games: games.n });
   }
   if (m && method === 'POST') {
     const input = await body(ctx.request);
@@ -1240,6 +1241,16 @@ async function admin(ctx, path, method) {
           : mailStmt(db, u.id, 'role', 'Your role was removed', `${user.name} took away your Builder role.`),
       ]);
       return json({ ok: true, role });
+    }
+    if (action === 'resetname') {
+      // take away a display name that isn't ok (they go back to their username)
+      await db.batch([db.prepare('UPDATE users SET display = NULL WHERE id = ?').bind(u.id), mailStmt(db, u.id, 'role', 'Your display name was reset', `${user.name} reset your display name. Everyone sees your username again. You can pick a new display name on your profile.`)]);
+      return json({ ok: true });
+    }
+    if (action === 'tag') {
+      // OG and Beta Tester: extra roles (they stack with Builder), each one also a title
+      const tags = await setTag(ctx, u, String(input.tag || ''), input.on !== false, user.name);
+      return json({ ok: true, tags });
     }
     if (action === 'kick') { if (isAdmin(env, u)) fail(400, "You can't kick an admin."); await kickEverywhere(env, db, u.id, 'An admin removed you from this server.'); return json({ ok: true }); }
     if (isAdmin(env, u)) fail(400, "You can't ban an admin.");

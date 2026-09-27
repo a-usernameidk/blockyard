@@ -5,6 +5,7 @@ import { progress, ACHIEVEMENTS } from '../progress.js';
 import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice, rarityOf as baseRarity, RARITY, MAX_BUY, GEAR_CATS, GEAR_TIER, TIER_NAME, gearCat } from '../cosmetics.js';
 import { drawPip, drawPet, drawGear } from '../art.js';
 import { setWallet, openAccount } from './account.js';
+import { SPECIAL_TITLES } from '../names.js';
 
 let tab = 'shop', kind = 'hat', pick = null, raf = 0, shopInfo = null;
 const KIND_LABEL = { hat: 'Hats', color: 'Colors', trail: 'Trails', pet: 'Pets', gear: 'Gear' };
@@ -334,8 +335,13 @@ function renderBadges() {
   pickBox.hidden = !session.user;
   if (session.user) {
     const mine = ACHIEVEMENTS.filter((a) => got[a.id]);
-    sel.replaceChildren(el('option', { value: '' }, 'No title'), ...mine.map((a) => el('option', { value: a.id }, a.name)));
-    sel.value = session.user.title && got[session.user.title] ? session.user.title : '';
+    // special titles: Admin (only the owner), and OG / Beta Tester for players the admin gave them to
+    const special = [...(session.user.owner ? ['admin'] : []), ...(session.user.tags || [])].filter((t) => SPECIAL_TITLES[t]);
+    sel.replaceChildren(el('option', { value: '' }, 'No title'),
+      ...(special.length ? [el('optgroup', { label: 'Special' }, ...special.map((t) => el('option', { value: t }, SPECIAL_TITLES[t])))] : []),
+      el('optgroup', { label: 'Badges' }, ...mine.map((a) => el('option', { value: a.id }, a.name))));
+    const cur = session.user.title;
+    sel.value = cur && (special.includes(cur) || got[cur]) ? cur : '';
     sel.onchange = async () => {
       try { await api.saveProgress(progress.data).catch(() => {}); const r = await api.setTitle(sel.value); session.user.title = r.title; toast(r.title ? `You're wearing "${sel.selectedOptions[0].textContent}" as your title.` : 'Title taken off.'); }
       catch (e) { toast(e.message); sel.value = session.user.title || ''; }

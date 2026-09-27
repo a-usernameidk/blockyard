@@ -166,6 +166,8 @@ export const api = {
   user: (name) => request('GET', `/users/${enc(name)}`),
   follow: (name, on = true) => request('POST', `/users/${enc(name)}/follow`, { on }),
   setTitle: (id) => request('PUT', '/me/title', { id }),
+  setDisplay: (name) => request('PUT', '/me/display', { name }),
+  setPfp: (pfp) => request('PUT', '/me/pfp', { pfp }),
   dislike: (id) => request('POST', `/games/${enc(id)}/dislike`),
   // projects
   projects: () => request('GET', '/projects'),

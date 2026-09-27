@@ -9,6 +9,7 @@ import { normalizeLevel } from '../format.js';
 import { thumb } from './play.js';
 import { drawWorldThumb } from '../thumb3d.js';
 import { diffName } from '../stars.js';
+import { TAGS } from '../names.js';
 
 let tab = 'chat';
 async function showAdmin() {
@@ -163,6 +164,15 @@ export async function manageUser(name) {
       u.role !== 'builder' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('role', { role: 'builder' }, () => `${u.name} is a Builder now! They got a mail about it.`) }, 'Make Builder') : null,
       u.role !== 'builderpro' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('role', { role: 'builderpro' }, () => `${u.name} is a Builder Pro now! They got a mail about it.`) }, 'Make Builder Pro') : null,
       u.role ? el('button', { class: 'btn', type: 'button', onclick: () => act('role', { role: '' }, () => `${u.name} is a normal player again.`) }, 'Remove role') : null));
+  // OG and Beta Tester: extra roles that stack with Builder. Each one is also a title they can wear.
+  const tags = u.tags || [];
+  const special = el('section', {}, el('h3', {}, `Special roles: ${tags.length ? tags.map((t) => TAGS[t]).join(', ') : 'none'}`),
+    el('p', { class: 'small' }, 'They show on their profile and name tag, and they can wear it as a title. Only you (the owner) can wear the Admin title.'),
+    el('div', { class: 'row', style: 'margin-top:8px' }, ...Object.entries(TAGS).map(([t, name]) => (tags.includes(t)
+      ? el('button', { class: 'btn', type: 'button', onclick: () => act('tag', { tag: t, on: false }, () => `Took away ${name} from ${u.name}.`) }, `Remove ${name}`)
+      : el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('tag', { tag: t, on: true }, () => `${u.name} is ${t === 'og' ? 'an' : 'a'} ${name} now! They got a mail about it.`) }, `Make ${name}`)))),
+    u.display ? el('div', { class: 'row', style: 'margin-top:8px' }, el('span', { class: 'small' }, `Display name: "${u.display}"`),
+      el('button', { class: 'btn', type: 'button', onclick: () => act('resetname', {}, () => `Reset ${u.name}'s display name.`) }, 'Reset display name')) : null);
   // kick / ban
   const warnNow = async () => {
     if (!(await ask(`Warn ${u.name}?`, (u.warnings || 0) >= 3 ? 'They already have 3 warnings. Next you will be asked about deleting their account.' : `This will be warning ${(u.warnings || 0) + 1} of 3.`, [{ label: 'Give a warning', value: true, cls: 'btn-sun' }]))) { openModal('#manage-modal'); return; }
@@ -188,7 +198,7 @@ export async function manageUser(name) {
     u.ledger.length ? el('ul', { class: 'ledger' }, ...u.ledger.map((l) => el('li', {}, el('span', {}, `${l.why} · ${timeAgo(l.at)}`), el('span', { class: l.delta < 0 ? 'minus' : 'plus' }, (l.delta > 0 ? '+' : '') + l.delta)))) : el('p', { class: 'small' }, 'Nothing yet.'));
   box.replaceChildren(
     el('p', { class: 'small' }, `${u.admin ? 'Admin. ' : ''}${u.banned ? 'Banned. ' : ''}Playing since ${new Date(u.since).toLocaleDateString()}. ${plural(u.games, 'published game')}. `, el('a', { class: 'linkish', href: '#/u/' + u.name, 'data-go': '#/u/' + u.name }, 'Profile')),
-    note, coins, items, roles, pass, safety, history);
+    note, coins, items, roles, special, pass, safety, history);
 }
 async function findUsers() {
   const box = $('#admin-users'); box.innerHTML = '';

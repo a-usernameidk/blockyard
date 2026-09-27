@@ -873,6 +873,31 @@ body.tos-pending main { opacity: .96; }
 .w3-invite-list .dot { width: 10px; height: 10px; border-radius: 99px; display: inline-block; }
 .w3-title { display: block; font-size: 11px; font-weight: 900; color: #ffd23f; letter-spacing: .02em; }
 .title-pill { display: inline-block; background: #1d2340; color: #ffd23f; border-radius: 999px; padding: 2px 10px; font: 900 13px Nunito, system-ui, sans-serif; margin-left: 8px; vertical-align: middle; }
+/* special titles and roles: Admin (owner only), OG, Beta Tester */
+.title-pill.t-admin { background: linear-gradient(90deg, #e63946, #ff5a1f); color: #fff; box-shadow: 0 0 0 2px #ffd23f; }
+.title-pill.t-og { background: linear-gradient(90deg, #ffd23f, #ff9f1c); color: #1d2340; }
+.title-pill.t-beta { background: #b06cff; color: #fff; }
+.w3-title.t-admin { color: #ff6b6b; text-shadow: 0 0 6px rgba(255, 90, 31, .7); }
+.w3-title.t-og { color: #ffb02e; }
+.w3-title.t-beta { color: #d6b4ff; }
+.role-badge.og { background: linear-gradient(90deg, #ffd23f, #ff9f1c); }
+.role-badge.beta { background: #b06cff; color: #fff; }
+.w3-name .lvl.tag-og { background: #ffb02e; color: #1d2340; }
+.w3-name .lvl.tag-beta { background: #b06cff; color: #fff; }
+/* profile pictures and display names */
+canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; flex: none; }
+.profile-name { display: flex; align-items: center; gap: 14px; }
+.profile-name h1 { margin: 0; }
+.profile-name .username { margin: 2px 0 0; font-weight: 800; color: var(--muted, #6b7390); }
+.me-btn .dot.has-pfp { width: 22px; height: 22px; background: none; border: 0; display: inline-flex; }
+.friend-row canvas.pfp { margin-right: 4px; }
+.edit-profile .pfp-preview { display: inline-flex; }
+.pfp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 6px; max-height: 210px; overflow: auto; padding: 4px; }
+.pfp-opt, .pfp-bg { border: 3px solid transparent; border-radius: 50%; padding: 1px; background: none; cursor: pointer; display: inline-flex; justify-content: center; }
+.pfp-opt.on, .pfp-bg.on { border-color: var(--line, #1d2340); box-shadow: 0 0 0 2px #ffd23f; }
+.pfp-bgs { display: flex; flex-wrap: wrap; gap: 6px; }
+.pfp-bg { width: 30px; height: 30px; border: 2px solid #1d2340; }
+.pfp-bg.on { border-width: 3px; }
 .title-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; }
 .title-pick select { font-size: 15px; padding: 4px 8px; }
 .b3-gear { display: flex; flex-wrap: wrap; gap: 8px 22px; }
