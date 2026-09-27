@@ -264,7 +264,7 @@ function describe(l) {
   })[d.action] || `${d.action} ${who}`;
   if (p === '/announce') return d.text ? `announced "${d.text}"` : 'removed the announcement';
   if (p === '/stock') return `set ${item} stock to ${d.left}`;
-  if (p === '/deals') return d.sale === null ? 'ended the sale' : d.sale ? `started a ${d.sale.off}% sale for ${d.sale.hours} hours` : d.pin ? (d.pin.items && d.pin.items.length ? `picked deals for ${d.pin.date}` : `let ${d.pin.date} pick its own deals`) : `changed deals (${d.off}% off, ${d.count} a day)`;
+  if (p === '/deals') return d.sale === null ? 'ended the sale' : d.sale ? `started a ${d.sale.off}% sale for ${d.sale.hours} hours` : d.pin ? (d.pin.items && d.pin.items.length ? `picked deals for ${d.pin.date}` : `let ${d.pin.date} pick its own deals`) : `changed deals (${d.off}% off, ${d.count} a day, ${d.stock || 25} each)`;
   if (p === 'pay') return `changed "${d.name}" by ${d.creator} from ${d.from} to ${d.to} coins`;
   if (p === 'farm') return `caught ${d.user} farming coins with ${d.alts} extra accounts (coins wiped, 2 warnings)`;
   if (p.startsWith('/games/')) return d.action === 'warn' ? `took down game ${p.slice(7)} and warned its maker` : d.action === 'reward' ? `made game ${p.slice(7)} pay ${d.amount} coins` : d.action === 'stars' ? `rated game ${p.slice(7)} ${d.amount}★` : `${d.action} game ${p.slice(7)}`;
@@ -289,6 +289,7 @@ async function loadDeals() {
   try { d = await api.deals(); } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); return; }
   pctOpts($('#deal-off'), [10, 15, 20, 25, 30, 40, 50, 60, 75], d.cfg.off);
   $('#deal-count').replaceChildren(...[1, 2, 3, 4, 5, 6, 8].map((n) => el('option', { value: String(n) }, String(n)))); $('#deal-count').value = String(d.cfg.count);
+  $('#deal-stock').replaceChildren(...[5, 10, 25, 50, 100, 250, 1000].map((n) => el('option', { value: String(n) }, String(n)))); $('#deal-stock').value = String(d.cfg.stock || 25);
   pctOpts($('#sale-off'), [10, 15, 20, 25, 30, 40, 50], d.cfg.sale ? d.cfg.sale.off : 20);
   $('#sale-now').textContent = d.cfg.sale ? `A ${d.cfg.sale.off}% sale is on until ${new Date(d.cfg.sale.until).toLocaleString()}.` : 'No sale right now.';
   const names = (k) => (findItem(k) || { item: { name: k } }).item.name;
@@ -303,6 +304,6 @@ async function loadDeals() {
     return el('div', { class: 'deal-day' }, el('b', {}, i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : day.date), ...sels, save, auto, day.pinned ? el('span', { class: 'small' }, '(you picked)') : null);
   }));
 }
-$('#deal-save').addEventListener('click', async () => { try { await api.setDeals({ off: Number($('#deal-off').value), count: Number($('#deal-count').value) }); toast('Deals updated.'); loadDeals(); } catch (e) { toast(e.message); } });
+$('#deal-save').addEventListener('click', async () => { try { await api.setDeals({ off: Number($('#deal-off').value), count: Number($('#deal-count').value), stock: Number($('#deal-stock').value) }); toast('Deals updated.'); loadDeals(); } catch (e) { toast(e.message); } });
 $('#sale-go').addEventListener('click', async () => { try { await api.setDeals({ sale: { off: Number($('#sale-off').value), hours: Number($('#sale-hours').value) } }); toast('Sale is on!'); loadDeals(); } catch (e) { toast(e.message); } });
 $('#sale-stop').addEventListener('click', async () => { try { await api.setDeals({ sale: null }); toast('Sale ended.'); loadDeals(); } catch (e) { toast(e.message); } });

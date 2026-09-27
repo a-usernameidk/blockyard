@@ -21,6 +21,8 @@ export const ECON_SCHEMA = [
   'CREATE TABLE IF NOT EXISTS wallets (user_id TEXT PRIMARY KEY, coins INTEGER NOT NULL DEFAULT 0 CHECK (coins >= 0))',
   'CREATE TABLE IF NOT EXISTS inventory (user_id TEXT NOT NULL, item TEXT NOT NULL, qty INTEGER NOT NULL DEFAULT 1 CHECK (qty >= 0), PRIMARY KEY (user_id, item))',
   'CREATE TABLE IF NOT EXISTS stock (item TEXT PRIMARY KEY, left INTEGER NOT NULL CHECK (left >= 0))',
+  // today's deals only have so many at the deal price, for the whole server (then it's back to the normal price)
+  'CREATE TABLE IF NOT EXISTS deal_left (day TEXT NOT NULL, item TEXT NOT NULL, left INTEGER NOT NULL CHECK (left >= 0), PRIMARY KEY (day, item))',
   'CREATE TABLE IF NOT EXISTS ledger (user_id TEXT NOT NULL, delta INTEGER NOT NULL, why TEXT NOT NULL, at INTEGER NOT NULL)',
   'CREATE INDEX IF NOT EXISTS ledger_user ON ledger (user_id, why, at)',
   'CREATE TABLE IF NOT EXISTS level_progress (user_id TEXT NOT NULL, level TEXT NOT NULL, stars INTEGER NOT NULL DEFAULT 0, coins INTEGER NOT NULL DEFAULT 0, best REAL, PRIMARY KEY (user_id, level))',
@@ -303,23 +305,29 @@ export function cleanDeals(v) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d >= today && Array.isArray(items)) pins[d] = [...new Set(items.filter((k) => pool.has(k)))].slice(0, 8);
   }
   const sale = v.sale && Number(v.sale.until) > Date.now() ? { off: num(v.sale.off, 5, 90, 20), until: Number(v.sale.until) } : null;
-  return { off: num(v.off, 5, 90, 25), count: num(v.count, 1, 8, 4), pins, sale };
+  return { off: num(v.off, 5, 90, 25), count: num(v.count, 1, 8, 4), stock: num(v.stock, 1, 1000, 25), pins, sale };
 }
 export async function dealSettings(db) {
   try { const r = await db.prepare("SELECT value FROM settings WHERE key = 'deals'").first(); return cleanDeals(parse(r && r.value)); } catch (e) { return cleanDeals({}); }
 }
 export function featured(date = todayUTC(), cfg = cleanDeals({})) {
-  if (cfg.pins[date] && cfg.pins[date].length) return { date, off: cfg.off, items: cfg.pins[date], pinned: true, sale: cfg.sale };
+  if (cfg.pins[date] && cfg.pins[date].length) return { date, off: cfg.off, stock: cfg.stock, items: cfg.pins[date], pinned: true, sale: cfg.sale };
   const pool = dealPool(date);
   let h = 2166136261;
   for (const ch of date) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
   const pick = [];
   while (pick.length < cfg.count && pool.length) { h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0; pick.push(pool.splice(h % pool.length, 1)[0]); }
-  return { date, off: cfg.off, items: pick, sale: cfg.sale };
+  return { date, off: cfg.off, stock: cfg.stock, items: pick, sale: cfg.sale };
+}
+// how many are left at the deal price today, for each of today's deals
+export async function dealLeft(db, deal) {
+  const left = Object.fromEntries(deal.items.map((k) => [k, deal.stock]));
+  try { for (const r of (await db.prepare('SELECT item, left FROM deal_left WHERE day = ?').bind(deal.date).all()).results) if (r.item in left) left[r.item] = r.left; } catch (e) { /* all left */ }
+  return left;
 }
 // the biggest discount that applies: today's deal, or a shop-wide sale (limited items are never on sale)
-const priceOf = (f, deal) => {
-  const off = Math.max(deal.items.includes(f.key) ? deal.off : 0, deal.sale && !f.item.stock ? deal.sale.off : 0);
+const priceOf = (f, deal, onDeal = deal.items.includes(f.key)) => {
+  const off = Math.max(onDeal ? deal.off : 0, deal.sale && !f.item.stock ? deal.sale.off : 0);
   return Math.floor(f.item.price * (100 - off) / 100);
 };
 
@@ -329,7 +337,7 @@ async function shop(ctx) {
   for (const r of results) stock[r.item] = r.left;
   const date = todayUTC(), deal = featured(date, await dealSettings(ctx.db));
   const out = KINDS.flatMap((k) => SHOP[k].map((i) => ({ key: k + ':' + i.id, item: i }))).filter((f) => !inStockToday(f, deal, date)).map((f) => f.key);
-  return json({ stock, featured: deal, outToday: out, date, maxBuy: MAX_BUY });
+  return json({ stock, featured: deal, dealLeft: await dealLeft(ctx.db, deal), outToday: out, date, maxBuy: MAX_BUY });
 }
 
 async function buy(ctx, input) {
@@ -350,11 +358,18 @@ async function buy(ctx, input) {
   if (!inStockToday(f, deal)) fail(409, `${f.item.name} isn't in stock today. The shop changes every day (rarer things show up less often), or try the Reseller shop.`);
   // you can own more than one, and buy a few at once
   const qty = Math.max(1, Math.min(MAX_BUY, Math.floor(Number(input.qty) || 1)));
-  const each = priceOf(f, deal), price = each * qty;
+  // today's deal: only so many at the deal price for the whole server, then it's the normal price again
+  const isDeal = deal.items.includes(f.key) && !f.item.stock;
+  const left = isDeal ? (await dealLeft(db, deal))[f.key] : 0, onDeal = isDeal && left > 0;
+  if (onDeal && left < qty) fail(409, `Only ${left} left at the deal price today. Buy ${left} or fewer.`);
+  const each = priceOf(f, deal, onDeal), price = each * qty;
+  if (input.expect != null && Number(input.expect) !== each) fail(409, `The price changed: it's ${each} coins now${isDeal && !onDeal ? ' (the deal sold out)' : ''}. Try again.`);
   const stmts = [...coinStmts(db, user.id, -price, 'buy ' + f.key + (qty > 1 ? ' x' + qty : '')), giveItems(db, user.id, f.key, qty)];
   if (f.item.stock) stmts.push(db.prepare('UPDATE stock SET left = left - ? WHERE item = ?').bind(qty, f.key));
+  if (onDeal) stmts.push(db.prepare('INSERT OR IGNORE INTO deal_left (day, item, left) VALUES (?, ?, ?)').bind(deal.date, f.key, deal.stock), db.prepare('UPDATE deal_left SET left = left - ? WHERE day = ? AND item = ?').bind(qty, deal.date, f.key));
   try { await db.batch(stmts); } catch (e) {
     if (!isConstraint(e)) throw e;
+    if (onDeal) { const d = (await dealLeft(db, deal))[f.key]; if (d < qty) fail(409, d ? `Only ${d} left at the deal price today.` : 'The deal just sold out! It costs the normal price now.'); }
     if (f.item.stock) {
       const s = await db.prepare('SELECT left FROM stock WHERE item = ?').bind(f.key).first();
       if (!s || s.left <= 0) fail(409, 'Sold out! Try the Reseller shop or a trade.');

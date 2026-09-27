@@ -17,6 +17,7 @@ import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, 
 import { findItem } from '../public/js/cosmetics.js';
 import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
 import { MARKET_SCHEMA, marketRoute } from './market.js';
+import { TYCOON_SCHEMA, tycoonRoute } from './tycoon.js';
 import { PEOPLE_SCHEMA, PEOPLE_COLUMNS, peopleRoute, followInfo, tellFollowers, rateGame, titleOk, setTag, isOwner } from './people.js';
 import { cleanTags } from '../public/js/names.js';
 import { COMMUNITY_SCHEMA, vote, voteSummary, facesBeaten, dailyPick, setDailyPick, dailyPicks } from './community.js';
@@ -87,6 +88,7 @@ const SCHEMA = [
   ...SOCIAL_SCHEMA,
   ...COMMUNITY_SCHEMA,
   ...MARKET_SCHEMA,
+  ...TYCOON_SCHEMA,
   ...PEOPLE_SCHEMA,
 ];
 // columns added after the first version
@@ -191,6 +193,8 @@ async function handle(request, env, url) {
   if (pp) return pp;
   const mk = await marketRoute(ctx, path, method);
   if (mk) return mk;
+  const ty = await tycoonRoute(ctx, path, method);
+  if (ty) return ty;
 
   // players
   if (path === '/users' && method === 'GET') return findUsers(ctx);
@@ -937,12 +941,18 @@ async function joinPlay(ctx, input) {
   const user = needUser(ctx);
   const { db, env } = ctx;
   if (!env.ROOMS) fail(503, 'Multiplayer is off. The Durable Object binding named ROOMS is missing from wrangler.jsonc.');
-  let code = input.code ? String(input.code).trim() : '', world, priv = false;
+  let code = input.code ? String(input.code).trim() : '', world, priv = false, owner = null;
   const now = Date.now();
   if (code) {
-    const s = await db.prepare('SELECT code, world, private FROM servers WHERE code = ?').bind(code).first();
+    const s = await db.prepare('SELECT s.code, s.world, s.private, u.name AS owner FROM servers s LEFT JOIN users u ON u.id = s.owner_id WHERE s.code = ?').bind(code).first();
     if (!s) fail(404, "That server code doesn't work. It may have been closed.");
-    world = await worldInfo(ctx, s.world); priv = !!s.private;
+    world = await worldInfo(ctx, s.world); priv = !!s.private; owner = s.private ? s.owner : null;
+  } else if (builtinWorld(String(input.world || '')) && builtinWorld(String(input.world)).own) {
+    // Tycoon: everyone plays in their own private server (friends can visit with the invite link)
+    world = await worldInfo(ctx, String(input.world)); priv = true;
+    const s = await db.prepare('SELECT code FROM servers WHERE world = ? AND private = 1 AND owner_id = ? ORDER BY created_at ASC LIMIT 1').bind(world.id, user.id).first();
+    if (s) code = s.code;
+    else { code = randomId(8); await db.prepare('INSERT INTO servers (code, world, private, owner_id, players, updated, created_at) VALUES (?, ?, 1, ?, 0, ?, ?)').bind(code, world.id, user.id, now, now).run(); }
   } else {
     world = await worldInfo(ctx, String(input.world || ''));
     const s = await db.prepare('SELECT code FROM servers WHERE world = ? AND private = 0 AND players < ? AND updated > ? ORDER BY players DESC, created_at ASC LIMIT 1').bind(world.id, ROOM_SIZE, now - FRESH).first();
@@ -960,7 +970,7 @@ async function joinPlay(ctx, input) {
   const w = await getWallet(db, user.id);
   const look = cleanLook(lookOf(u && u.look), w.items);
   const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, o: user.role || undefined, t: (u && u.title) || undefined, d: (u && u.display) || undefined, g: u && u.tags ? cleanTags(u.tags) : undefined, a: user.admin, w: world.id, c: code, x: now + 20e3 });
-  return json({ ticket, code, world, private: priv });
+  return json({ ticket, code, world, private: priv, owner: owner || (priv && !input.code ? user.name : undefined) });
 }
 async function joinEdit(ctx, input) {
   const user = needUser(ctx);
@@ -1151,6 +1161,7 @@ async function admin(ctx, path, method) {
     const cfg = await dealSettings(db);
     if (input.off != null) cfg.off = input.off;
     if (input.count != null) cfg.count = input.count;
+    if (input.stock != null) cfg.stock = input.stock;
     if (input.pin && typeof input.pin === 'object') {
       if (Array.isArray(input.pin.items) && input.pin.items.length) cfg.pins[String(input.pin.date)] = input.pin.items; else delete cfg.pins[String(input.pin.date)];
     }

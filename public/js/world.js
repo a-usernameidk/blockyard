@@ -51,10 +51,11 @@ export const BLOCKS = [
   { id: 'switchOn', name: 'Switch block', pat: 10, tint: true, logic: true, tip: 'Solid until Logic hides it ("Hide Switch blocks" of this color).' },
   { id: 'switchOff', name: 'Hidden switch', pat: 22, tint: true, see: true, ghost: true, logic: true, tip: 'You walk through it until Logic shows it ("Show Switch blocks" of this color).' },
   { id: 'marker', name: 'Marker', pat: 22, tint: true, see: true, ghost: true, logic: true, tip: 'A spot Logic can teleport players to ("Teleport to Marker" of this color).' },
-  // Tycoon minigame blocks (by color: each color is one player's plot)
-  { id: 'tclaim', name: 'Claim pad', pat: 18, tint: true, glow: true, tycoon: true, tip: 'Tycoon: step on it to claim the plot of this color.' },
-  { id: 'tbutton', name: 'Buy button', pat: 11, tint: true, glow: true, tycoon: true, tip: 'Tycoon: the plot owner buys it to build the Tycoon blocks of its color near it. Closer to the claim pad = cheaper.' },
-  { id: 'tbuild', name: 'Tycoon block', pat: 10, tint: true, tycoon: true, tip: 'Tycoon: hidden until the owner of this color buys the nearest buy button.' },
+  // (these three were the old Tycoon minigame's blocks. It's gone, but old worlds still have them, so they stay here
+  //  as plain blocks: never reorder or remove anything in this list)
+  { id: 'tclaim', name: 'Glow pad', pat: 18, tint: true, glow: true, old: true },
+  { id: 'tbutton', name: 'Glow button', pat: 11, tint: true, glow: true, old: true },
+  { id: 'tbuild', name: 'Plain block', pat: 10, tint: true, old: true },
   // creator shops: a shop keeper stands on it and sells what you set up in the World tab
   { id: 'shopstand', name: 'Shop stand', pat: 4, color: '#e0b12a', tip: 'Your shop: a shop keeper stands here and sells the things you pick in the World tab (Shop). The coins go to you.' },
 ];
@@ -71,9 +72,9 @@ export const SKIES = {
   night: { name: 'Night', top: '#0b1030', bottom: '#2a3570', fog: '#223066', sun: [0.3, 0.8, -0.4], light: 0.55, amb: 0.42 },
   space: { name: 'Space', top: '#05060f', bottom: '#1b1440', fog: '#120f2e', sun: [0.5, 0.7, 0.2], light: 0.9, amb: 0.45 },
 };
-export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just chill)', race: 'Minigame: Race (needs a Goal)', tag: 'Minigame: Tag', koth: 'Minigame: King of the Hill (Goal blocks are the hill)', lava: 'Minigame: Rising Lava', paint: 'Minigame: Paintball', tycoon: 'Minigame: Tycoon (claim pads + buy buttons)' };
+export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just chill)', race: 'Minigame: Race (needs a Goal)', tag: 'Minigame: Tag', koth: 'Minigame: King of the Hill (Goal blocks are the hill)', lava: 'Minigame: Rising Lava', paint: 'Minigame: Paintball' };
 // Minigame worlds are hangouts with a game: the live server runs rounds of it (see games.js).
-export const GAME_TYPES = ['race', 'tag', 'koth', 'lava', 'paint', 'tycoon'];
+export const GAME_TYPES = ['race', 'tag', 'koth', 'lava', 'paint'];
 
 export const solidType = (t) => t !== 0 && !BLOCKS[t].entity && !BLOCKS[t].ghost;
 
@@ -210,7 +211,6 @@ export function normalizeWorld(w, { needGoal } = {}) {
   if (w.gear === 'off') world.gear = 'off'; // the maker turned gear off for this world
   const ban = cleanGearBan(w.gearBan);
   if (ban.length && w.gear !== 'off') world.gearBan = ban; // ...or just some kinds of gear
-  if (game === 'tycoon' && !grid.t.some((t) => t === B.tclaim)) throw new Error('Tycoon worlds need at least one Tycoon claim pad (and buy buttons of the same color).');
   const logic = cleanLogic(w.logic);
   if (logic.length) world.logic = logic;
   // hotbar and creator shop: only in hangouts (and minigames), where gear works

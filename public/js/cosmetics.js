@@ -1,6 +1,8 @@
 // Everything in Pip's Closet. Prices are in coins, and every item is worth its price.
 // need: { stars: n } or { ach: 'id' } means you earn it instead of buying it (earned items can't be traded).
 // stock: limited items. Only that many exist, ever. When they sell out you can only get one by trading.
+// Limited is only for the really special stuff (6 items). Recolors of one item are its "variants" and show up
+// together in the shop under that item (see VARIANTS and variantGroups); a variant can be limited on its own.
 
 export const COLORS = [
   { id: '#ff6b35', name: 'Tangerine', price: 0 },
@@ -17,8 +19,8 @@ export const COLORS = [
   { id: '#7ae582', name: 'Glow', need: { stars: 15 }, hint: 'Earn 15 stars' },
   { id: '#c8a2ff', name: 'Lavender', price: 70 },
   { id: '#0077b6', name: 'Ocean', price: 90 },
-  { id: '#e0b12a', name: 'Gold', price: 700, stock: 20 },
-  { id: '#9ff0ff', name: 'Diamond', price: 1200, stock: 10 },
+  { id: '#e0b12a', name: 'Gold', price: 700 },
+  { id: '#9ff0ff', name: 'Diamond', price: 1200 },
   // the big color drop
   { id: '#ffb4a2', name: 'Peach', price: 50 }, { id: '#ff7f50', name: 'Coral', price: 60 }, { id: '#fa8072', name: 'Salmon', price: 60 },
   { id: '#87ceeb', name: 'Sky', price: 60 }, { id: '#1b2a6b', name: 'Navy', price: 90 }, { id: '#008080', name: 'Teal', price: 80 },
@@ -31,8 +33,8 @@ export const COLORS = [
   { id: '#8b6b4a', name: 'Mocha', price: 70 }, { id: '#d6f5ff', name: 'Ice', price: 90 }, { id: '#6b8e23', name: 'Moss', price: 70 },
   { id: '#8a1c4b', name: 'Berry', price: 90 }, { id: '#ff7518', name: 'Pumpkin', price: 80 }, { id: '#d4a017', name: 'Mustard', price: 70 },
   { id: '#1560bd', name: 'Denim', price: 80 }, { id: '#fff5d1', name: 'Cream', price: 60 }, { id: '#6a0dad', name: 'Grape Soda', price: 100 },
-  { id: '#c1121f', name: 'Ruby', price: 1500, stock: 15 }, { id: '#0f9d58', name: 'Emerald', price: 1500, stock: 15 }, { id: '#1a4fd6', name: 'Sapphire', price: 1500, stock: 15 },
-  { id: '#14161f', name: 'Obsidian', price: 2000, stock: 10 }, { id: '#e8a598', name: 'Rose Gold', price: 1800, stock: 12 }, { id: '#f0ead6', name: 'Pearl', price: 1800, stock: 12 },
+  { id: '#c1121f', name: 'Ruby', price: 1500 }, { id: '#0f9d58', name: 'Emerald', price: 1500 }, { id: '#1a4fd6', name: 'Sapphire', price: 1500 },
+  { id: '#14161f', name: 'Obsidian', price: 2000 }, { id: '#e8a598', name: 'Rose Gold', price: 1800 }, { id: '#f0ead6', name: 'Pearl', price: 1800 },
 ];
 
 export const HATS = [
@@ -49,20 +51,20 @@ export const HATS = [
   { id: 'crown', name: 'Crown', need: { stars: 30 }, hint: 'Earn 30 stars' },
   { id: 'halo', name: 'Halo', need: { ach: 'flawless' }, hint: 'Beat Portal Party without dying' },
   { id: 'wizard', name: 'Wizard hat', need: { ach: 'endless1000' }, hint: 'Reach 1000 m in Endless Rush' },
-  { id: 'viking', name: 'Viking helmet', price: 600, stock: 25 },
-  { id: 'chef', name: 'Chef hat', price: 500, stock: 25 },
+  { id: 'viking', name: 'Viking helmet', price: 600 },
+  { id: 'chef', name: 'Chef hat', price: 500 },
   { id: 'bunny', name: 'Bunny ears', price: 240 },
   { id: 'cowboy', name: 'Cowboy hat', price: 280 },
-  { id: 'unicorn', name: 'Unicorn horn', price: 900, stock: 20 },
+  { id: 'unicorn', name: 'Unicorn horn', price: 900 },
   // new shapes
   { id: 'pirate', name: 'Pirate hat', price: 400 }, { id: 'antlers', name: 'Antlers', price: 350 }, { id: 'catears', name: 'Cat ears', price: 250 },
   { id: 'santa', name: 'Santa hat', price: 300 }, { id: 'grad', name: 'Graduation cap', price: 450 }, { id: 'astronaut', name: 'Astronaut helmet', price: 3000, stock: 10 },
   // recolors (see VARIANTS below)
   { id: 'cap-red', name: 'Red cap', price: 80 }, { id: 'cap-green', name: 'Green cap', price: 80 }, { id: 'cap-black', name: 'Black cap', price: 100 },
-  { id: 'cap-pink', name: 'Pink cap', price: 80 }, { id: 'cap-gold', name: 'Golden cap', price: 1200, stock: 15 },
+  { id: 'cap-pink', name: 'Pink cap', price: 80 }, { id: 'cap-gold', name: 'Golden cap', price: 1200 },
   { id: 'beanie-blue', name: 'Blue beanie', price: 160 }, { id: 'beanie-green', name: 'Green beanie', price: 160 }, { id: 'beanie-purple', name: 'Purple beanie', price: 160 }, { id: 'beanie-black', name: 'Black beanie', price: 180 },
   { id: 'party-gold', name: 'Gold party hat', price: 250 }, { id: 'party-mint', name: 'Mint party hat', price: 140 }, { id: 'party-red', name: 'Red party hat', price: 140 },
-  { id: 'tophat-white', name: 'White top hat', price: 320 }, { id: 'tophat-purple', name: 'Purple top hat', price: 320 }, { id: 'tophat-gold', name: 'Golden top hat', price: 2500, stock: 8 },
+  { id: 'tophat-white', name: 'White top hat', price: 320 }, { id: 'tophat-purple', name: 'Purple top hat', price: 320 }, { id: 'tophat-gold', name: 'Golden top hat', price: 2500 },
   { id: 'bow-blue', name: 'Blue bow', price: 90 }, { id: 'bow-red', name: 'Red bow', price: 90 }, { id: 'bow-mint', name: 'Mint bow', price: 90 }, { id: 'bow-black', name: 'Black bow', price: 110 },
   { id: 'crown-silver', name: 'Silver crown', price: 1500 }, { id: 'crown-ruby', name: 'Ruby crown', price: 5000, stock: 5 },
   { id: 'wizard-fire', name: 'Fire wizard hat', price: 600 }, { id: 'wizard-forest', name: 'Forest wizard hat', price: 600 }, { id: 'wizard-ice', name: 'Ice wizard hat', price: 600 },
@@ -87,14 +89,14 @@ export const TRAILS = [
   { id: 'fire', name: 'Flames', price: 300 },
   { id: 'rainbow', name: 'Rainbow', price: 450 },
   { id: 'stars', name: 'Stardust', need: { ach: 'daily5' }, hint: 'Finish 5 daily challenges' },
-  { id: 'lightning', name: 'Lightning', price: 800, stock: 15 },
+  { id: 'lightning', name: 'Lightning', price: 800 },
   { id: 'confetti', name: 'Confetti', price: 260 },
   { id: 'snow', name: 'Snowflakes', price: 260 },
-  { id: 'galaxy', name: 'Galaxy', price: 1000, stock: 12 },
+  { id: 'galaxy', name: 'Galaxy', price: 1000 },
   { id: 'leaves', name: 'Leaves', price: 220 }, { id: 'mint', name: 'Mint breeze', price: 220 }, { id: 'lava', name: 'Lava drips', price: 320 },
   { id: 'ice', name: 'Ice shards', price: 300 }, { id: 'candy', name: 'Candy', price: 260 }, { id: 'ocean', name: 'Ocean spray', price: 280 },
   { id: 'toxic', name: 'Toxic goo', price: 350 }, { id: 'sakura', name: 'Cherry blossoms', price: 380 }, { id: 'shadow', name: 'Shadow', price: 400 },
-  { id: 'sunset', name: 'Sunset', price: 420 }, { id: 'goldtrail', name: 'Gold dust', price: 1500, stock: 12 }, { id: 'void', name: 'The Void', price: 2500, stock: 8 },
+  { id: 'sunset', name: 'Sunset', price: 420 }, { id: 'goldtrail', name: 'Gold dust', price: 1500 }, { id: 'void', name: 'The Void', price: 2500, stock: 8 },
   // badge-only
   { id: 'paintsplat', name: 'Paint splats', need: { ach: 'splat100' }, hint: 'Earn the Paint Picasso badge' },
   { id: 'frost', name: 'Frostbite', need: { ach: 'snow50' }, hint: 'Earn the Snowball Sniper badge' },
@@ -110,7 +112,7 @@ export const PETS = [
   { id: 'pup', name: 'Pup', price: 400 },
   { id: 'kitty', name: 'Kitty', price: 400 },
   { id: 'bee', name: 'Bumble bee', need: { stars: 45 }, hint: 'Earn 45 stars' },
-  { id: 'dragon', name: 'Mini dragon', price: 1500, stock: 10 },
+  { id: 'dragon', name: 'Mini dragon', price: 1500 },
   { id: 'slime-blue', name: 'Blue slime', price: 300 }, { id: 'slime-lava', name: 'Lava slime', price: 450 }, { id: 'slime-ghost', name: 'Ghost', price: 600 },
   { id: 'kitty-black', name: 'Black cat', price: 450 }, { id: 'kitty-fox', name: 'Fox', price: 550 }, { id: 'pup-snow', name: 'Snow pup', price: 500 },
   { id: 'slime-gold', name: 'Golden slime', price: 4000, stock: 6 },
@@ -139,6 +141,18 @@ export const VARIANTS = {
   'kitty-black': ['kitty', '#3d405b', '#1d2340'], 'kitty-fox': ['kitty', '#ff8c42', '#c85a1e'], 'pup-snow': ['pup', '#f4f4f4', '#c8d0e0'],
 };
 export const variant = (id) => VARIANTS[id] || [id, null, null];
+// One shop card per item: the item and all its variants (recolors), in shop order. [{ base, list: [items] }]
+export function variantGroups(kind) {
+  const items = SHOP[kind] || [], groups = new Map();
+  for (const it of items) {
+    const b = VARIANTS[it.id] && items.some((x) => x.id === VARIANTS[it.id][0]) ? VARIANTS[it.id][0] : it.id;
+    if (!groups.has(b)) groups.set(b, { base: items.find((x) => x.id === b), list: [] });
+    groups.get(b).list.push(it);
+  }
+  for (const g of groups.values()) g.list.sort((a, c) => (a.id === g.base.id ? -1 : c.id === g.base.id ? 1 : 0));
+  return [...groups.values()];
+}
+export const groupOf = (kind, id) => variantGroups(kind).find((g) => g.list.some((x) => x.id === id)) || null;
 
 // Gear changes how you move. It works in hangouts and minigames, but never in obbies (so times stay fair).
 export const GEAR = [

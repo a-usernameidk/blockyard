@@ -152,7 +152,7 @@ $('#new-2d').addEventListener('click', async () => {
   if (pick) newProject('2d', TEMPLATES_2D[pick].make());
 });
 $('#new-3d').addEventListener('click', async () => {
-  const pick = await ask('New 3D world', 'Pick where to start: a blank obby or hangout, a ready-made minigame (Race, Tag, King of the Hill, Rising Lava, Paintball, Tycoon), or a Logic demo.',
+  const pick = await ask('New 3D world', 'Pick where to start: a blank obby or hangout, a ready-made minigame (Race, Tag, King of the Hill, Rising Lava, Paintball), or a Logic demo.',
     Object.entries(TEMPLATES_3D).map(([k, t], i) => ({ label: t.name, value: k, cls: i === 0 ? 'btn-grass' : i === 1 ? 'btn-sun' : '' })));
   if (pick) newProject('3d', TEMPLATES_3D[pick].make());
 });

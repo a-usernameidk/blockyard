@@ -1,6 +1,7 @@
 // The built-in 3D worlds: the Plaza and Snowy Town (hangouts), one world per minigame, and the obbies.
 // Each one is built by code the first time it's needed. `way` is the route the test bot follows.
 import { Grid, B, encodeBlocks } from './world.js';
+import { SPOTS, padColor, COLLECT_PAD } from './tycoon.js';
 
 function make(meta, draw) {
   let cache = null;
@@ -225,29 +226,7 @@ const AREAS = {
   paint: { spawn: [32.5, 1, 80.5], box: [8, 76, 56, 120], spawns: [[14.5, 1, 82.5], [50.5, 1, 82.5], [14.5, 1, 113.5], [50.5, 1, 113.5], [32.5, 1, 80.5], [32.5, 1, 117.5]] },
   koth: { spawn: [88.5, 1, 88.5], box: [84, 84, 120, 120], hill: [101, 5, 101, 103, 5, 103], path: [[95, 2, 95], [97, 3, 97], [99, 4, 99], [100.5, 5, 100.5], [102, 6, 102]] },
   lava: { spawn: [88.5, 1, 12.5], box: [84, 8, 120, 44], lavaFrom: 0, path: LAVA_RING },
-  tycoon: { spawn: [64.5, 1, 83.5], box: [8, 78, 120, 118] },
 };
-// One tycoon plot, 20 x 20, with its corner at (x0, z0): a claim pad at the front, 8 buy buttons (further = pricier)
-// and what each button builds right next to it (see tycoonLayout in games.js). c = the plot's color.
-export const TYCOON_BUTTONS = [[10, 4], [7, 6], [13, 7], [4, 9], [16, 10], [10, 13], [5, 16], [15, 17]];
-export function tycoonPlot({ box, set }, x0, z0, c) {
-  box(x0, 0, z0, x0 + 19, 0, z0 + 19, B.grass);
-  for (let i = 0; i < 20; i++) { set(x0 + i, 0, z0, B.plastic, c); set(x0 + i, 0, z0 + 19, B.plastic, c); set(x0, 0, z0 + i, B.plastic, c); set(x0 + 19, 0, z0 + i, B.plastic, c); }
-  box(x0 + 9, 0, z0 + 1, x0 + 10, 0, z0 + 1, B.tclaim, c);
-  TYCOON_BUTTONS.forEach(([bx, bz], k) => {
-    const x = x0 + bx, z = z0 + bz;
-    set(x, 0, z, B.tbutton, c);
-    // what this button builds: droppers, walls, then taller and taller towers
-    if (k === 0) { box(x - 1, 1, z + 1, x + 1, 1, z + 1, B.tbuild, c); }
-    else if (k === 1) { box(x - 2, 1, z - 1, x - 2, 2, z + 1, B.tbuild, c); }
-    else if (k === 2) { box(x + 2, 1, z - 1, x + 2, 2, z + 1, B.tbuild, c); }
-    else if (k === 3) { box(x - 1, 1, z + 1, x + 1, 3, z + 1, B.tbuild, c); }
-    else if (k === 4) { box(x - 1, 1, z + 1, x + 1, 3, z + 1, B.tbuild, c); }
-    else if (k === 5) { box(x - 1, 1, z + 2, x + 1, 4, z + 2, B.tbuild, c); }
-    else if (k === 6) { box(x - 1, 1, z + 1, x + 1, 5, z + 1, B.tbuild, c); }
-    else { box(x - 1, 1, z + 1, x + 1, 7, z + 1, B.tbuild, c); }
-  });
-}
 
 const MAPS = {
   // a course along z = 11..13 with speed pads at the start and a checkered arch at the finish
@@ -315,12 +294,6 @@ const MAPS = {
     for (const [x, z] of [[87, 87], [117, 87], [87, 117], [117, 117]]) { box(x, 1, z, x, 5, z, B.wood); box(x - 1, 6, z - 1, x + 1, 6, z + 1, B.leaves); }
     box(90, 0, 101, 92, 0, 103, B.speed); box(112, 0, 101, 114, 0, 103, B.speed);
   },
-  // tycoon: four plots in a row south of the lobby, joined by a stone walkway
-  tycoon(api) {
-    const { box } = api;
-    box(8, 0, 78, 120, 0, 86, B.stone);
-    for (const [x0, c] of [[10, 4], [38, 9], [70, 7], [98, 6]]) tycoonPlot(api, x0, 88, c);
-  },
   // rising lava: a tower to climb around (and a few crumbly steps), the lava comes up from the floor
   lava({ box }) {
     box(84, 0, 8, 120, 0, 44, B.stone);
@@ -351,7 +324,30 @@ export const MG_TAG = mgWorld('tag', 'Tag', 'sunset', 4, "Don't get tagged. Whoe
 export const MG_PAINT = mgWorld('paint', 'Paintball', 'day', 11, 'Pick a blaster in the lobby, then splat everyone. Most splats wins.');
 export const MG_KOTH = mgWorld('koth', 'King of the Hill', 'sunset', 6, 'Hold the glowing hilltop the longest.');
 export const MG_LAVA = mgWorld('lava', 'Rising Lava', 'night', 7, 'Climb before the lava gets you.');
-export const MG_TYCOON = mgWorld('tycoon', 'Tycoon', 'day', 9, 'Claim a plot, earn cash and build it up. First to buy every button wins.');
+
+// Tycoon: your own town (everyone gets their own private server). Houses on the left of the road, factories on the
+// right, the vault by the entrance and the gold mine at the end. The buildings themselves come from your saved town
+// (see tycoon.js); this is just the empty land with a glowing pad in front of every lot.
+export const TYCOON = make({ id: 'tycoon', name: 'Tycoon', mode: 'hangout', sky: 'day', own: true, tycoon: true,
+  blurb: 'Your own town that makes real coins. Build houses for workers, upgrade the gold mine, build factories, and collect coins from the vault. Up to 2000 a day!' }, ({ box, set }) => {
+  box(24, 0, 16, 104, 0, 110, B.grass);
+  box(61, 0, 18, 67, 0, 90, B.stone);               // main road
+  box(52, 0, 18, 76, 0, 26, B.stone);               // the town square by the entrance
+  box(56, 0, 90, 72, 0, 106, B.dirt);               // the mine lot
+  set(64, 1, 21, B.spawn);
+  // lots: a dirt floor for each one, and its pad on the road
+  for (const sp of SPOTS) {
+    if (sp.kind !== 'mine') box(sp.x0, 0, sp.z0, sp.x0 + sp.w - 1, 0, sp.z0 + sp.w - 1, B.sand);
+    set(sp.pad[0], sp.pad[1], sp.pad[2], B.tclaim, padColor(sp));
+  }
+  set(COLLECT_PAD[0], COLLECT_PAD[1], COLLECT_PAD[2], B.tclaim, 6);
+  // a fence around town, lamps along the road, trees
+  for (let x = 24; x <= 104; x++) { set(x, 1, 16, B.wood); set(x, 1, 110, B.wood); }
+  for (let z = 16; z <= 110; z++) { set(24, 1, z, B.wood); set(104, 1, z, B.wood); }
+  for (let z = 34; z <= 86; z += 10) for (const x of [60, 68]) { box(x, 1, z, x, 3, z, B.metal); set(x, 4, z, B.neon, 6); }
+  for (const [x, z] of [[30, 24], [40, 20], [90, 22], [98, 30], [32, 96], [44, 104], [88, 100], [98, 90], [30, 60], [98, 60]]) tree(box, x, 1, z, 4);
+  box(56, 1, 18, 57, 1, 19, B.plastic, 6); box(71, 1, 18, 72, 1, 19, B.plastic, 6); // gold blocks at the gate
+});
 
 // Snowy Town: a place to hang out, like a little penguin town. A dance club with a flashing disco floor,
 // a coffee shop, a gift shop with the shop keeper, a ski hill, a frozen pond to slide around on,
@@ -409,5 +405,5 @@ export const TOWN = make({ id: 'town', name: 'Snowy Town', mode: 'hangout', sky:
   box(62, 0, 44, 66, 0, 52, B.stone); box(62, 0, 76, 66, 0, 106, B.stone); box(76, 0, 62, 108, 0, 66, B.stone); box(46, 0, 62, 52, 0, 66, B.stone);
 });
 
-export const WORLDS3D = [PLAZA, TOWN, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA, MG_TYCOON, SUNNY, TOWER, LAVA, FACTORY, SKY];
+export const WORLDS3D = [PLAZA, TOWN, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA, TYCOON, SUNNY, TOWER, LAVA, FACTORY, SKY];
 export const builtinWorld = (id) => WORLDS3D.find((w) => w.id === id) || null;

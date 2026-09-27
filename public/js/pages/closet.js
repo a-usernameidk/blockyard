@@ -2,7 +2,7 @@
 import { $, $$, el, session, show, go, addRoute, ask, toast, needLogin, pipCanvas, plural, timeAgo, onLeave, currentView } from '../app.js';
 import { api, isOnline } from '../api.js';
 import { progress, ACHIEVEMENTS } from '../progress.js';
-import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice, rarityOf as baseRarity, RARITY, MAX_BUY, GEAR_CATS, GEAR_TIER, TIER_NAME, gearCat } from '../cosmetics.js';
+import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice, rarityOf as baseRarity, RARITY, MAX_BUY, GEAR_CATS, GEAR_TIER, TIER_NAME, gearCat, variantGroups, groupOf } from '../cosmetics.js';
 import { drawPip, drawPet, drawGear } from '../art.js';
 import { setWallet, openAccount } from './account.js';
 import { SPECIAL_TITLES } from '../names.js';
@@ -114,10 +114,13 @@ function renderWallet() {
   $('#closet-lede').textContent = w ? 'The shop changes every day: rarer things are in stock less often. Limited items run out and only come back if the admin restocks them. You can own more than one of anything.' : 'Log in to buy, sell and trade. Coins come from built-in levels, 3D obbies, Endless, the daily challenge and levels that pay coins.';
 }
 // same rule as the server: the bigger of today's deal and a shop-wide sale (limited items are never on sale)
+// today's deals only have so many at the deal price (for everyone), then it's the normal price
+const dealLeftOf = (key) => (shopInfo && shopInfo.dealLeft && key in shopInfo.dealLeft ? shopInfo.dealLeft[key] : null);
+const onDeal = (key, item) => !!shopInfo && shopInfo.featured.items.includes(key) && !item.stock && dealLeftOf(key) !== 0;
 const dealPrice = (key, item) => {
   if (!shopInfo) return item.price;
   const f = shopInfo.featured, sale = f.sale && f.sale.until > Date.now() && !item.stock ? f.sale.off : 0;
-  return Math.floor(item.price * (100 - Math.max(f.items.includes(key) ? f.off : 0, sale)) / 100);
+  return Math.floor(item.price * (100 - Math.max(onDeal(key, item) ? f.off : 0, sale)) / 100);
 };
 // normal items rotate in and out of the shop each day (rarer ones are in stock less often)
 const outToday = (key) => !!(shopInfo && shopInfo.outToday && shopInfo.outToday.includes(key));
@@ -126,7 +129,9 @@ function priceTag(key, item) {
   if (outToday(key)) return el('span', { class: 'item-price' }, `${item.price} coins`, el('span', { class: 'stock out' }, ' Not in stock today'));
   const p = dealPrice(key, item);
   const left = item.stock && shopInfo ? shopInfo.stock[key] : null;
-  return el('span', { class: 'item-price' }, p < item.price ? [el('s', {}, String(item.price)), ` ${p} coins`] : `${p} coins`, item.stock ? el('span', { class: 'stock' + (left === 0 ? ' out' : '') }, left === 0 ? ' Sold out' : left != null ? ` ${left} left` : ' Limited') : null);
+  const dl = shopInfo && shopInfo.featured.items.includes(key) && !item.stock ? dealLeftOf(key) : null;
+  return el('span', { class: 'item-price' }, p < item.price ? [el('s', {}, String(item.price)), ` ${p} coins`] : `${p} coins`, item.stock ? el('span', { class: 'stock' + (left === 0 ? ' out' : '') }, left === 0 ? ' Sold out' : left != null ? ` ${left} left` : ' Limited') : null,
+    dl != null ? el('span', { class: 'stock' + (dl === 0 ? ' out' : '') }, dl === 0 ? ' Deal sold out' : ` ${dl} left at this price`) : null);
 }
 function itemButton(k, item, { status, onclick }) {
   const key = itemKey(k, item.id), on = progress.data.equip[k] === item.id;
@@ -158,7 +163,15 @@ function render() {
       el('div', { class: 'shelf' }, el('div', { class: 'shelf-head' }, el('h3', {}, 'Everything'), chips),
         ...(kind === 'gear'
           ? [['none'], ...Object.values(GEAR_CATS).map((C) => C.items)].map((ids, i) => { const list = SHOP.gear.filter((g) => ids.includes(g.id) && !gone('gear', g)); return list.length ? el('div', {}, i ? el('h4', { class: 'gear-group' }, Object.values(GEAR_CATS)[i - 1].name) : null, el('div', { class: 'items' }, ...list.map((item) => itemButton('gear', item, { status: statusOf('gear', item), onclick: choose('gear', item) })))) : null; })
-          : [el('div', { class: 'items' }, ...SHOP[kind].filter((item) => !gone(kind, item)).map((item) => itemButton(kind, item, { status: statusOf(kind, item), onclick: choose(kind, item) })))])));
+          : [el('div', { class: 'items' }, ...variantGroups(kind).map((g) => {
+            // one card per item: its variants (recolors) are picked in the caption
+            const list = g.list.filter((item) => !gone(kind, item) || g.list.length > 1);
+            if (!list.length) return null;
+            const shown = pick && pick.kind === kind && list.some((x) => x.id === pick.id) ? pick.item : list[0];
+            const b = itemButton(kind, shown, { status: statusOf(kind, shown), onclick: choose(kind, shown) });
+            if (list.length > 1) { b.append(el('span', { class: 'variant-count' }, `${list.length} styles`)); if (list.some((x) => !x.need || progress.canUnlock(x) || progress.owns(kind, x.id))) b.classList.remove('locked'); }
+            return b;
+          }))])));
   } else {
     const groups = KINDS.map((k) => {
       const owned = SHOP[k].filter((i) => progress.owns(k, i.id));
@@ -192,9 +205,12 @@ function renderCaption() {
       const price = dealPrice(key, item), left = item.stock && shopInfo ? shopInfo.stock[key] : null;
       const most = Math.max(1, Math.min(MAX_BUY, left == null ? MAX_BUY : left));
       const qty = el('input', { type: 'number', min: '1', max: String(most), value: '1', class: 'qty', 'aria-label': 'How many' });
-      const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item, Math.max(1, Math.min(most, Math.floor(+qty.value || 1)))) });
+      const dl = shopInfo && shopInfo.featured.items.includes(key) && !item.stock ? dealLeftOf(key) : null;
+      const most2 = dl ? Math.min(most, dl) : most;
+      const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item, Math.max(1, Math.min(most2, Math.floor(+qty.value || 1))), price) });
+      if (dl) qty.max = String(most2);
       const upd = () => {
-        const n = Math.max(1, Math.min(most, Math.floor(+qty.value || 1)));
+        const n = Math.max(1, Math.min(most2, Math.floor(+qty.value || 1)));
         b.disabled = false;
         b.textContent = `${owned ? 'Buy more' : 'Buy'}${n > 1 ? ` ${n}` : ''} for ${price * n} coins`;
         if (left === 0) { b.disabled = true; b.textContent = 'Sold out. Try the Reseller shop'; }
@@ -205,7 +221,15 @@ function renderCaption() {
       buttons.push(el('label', { class: 'qty-label' }, 'How many ', qty), b);
     }
   }
-  cap.append(el('b', {}, item.name), item.need && !owned ? el('span', { class: 'small' }, ` ${item.hint}.`) : null, statsLine(key, item), el('div', { class: 'row' }, ...buttons));
+  // variants: all the styles of this item, each with its own price, stock and lock
+  const grp = groupOf(k, id);
+  const styles = grp && grp.list.length > 1 ? el('div', { class: 'variants', role: 'group', 'aria-label': 'Styles' }, ...grp.list.map((v) => {
+    const vk = itemKey(k, v.id), left = v.stock && shopInfo ? shopInfo.stock[vk] : null;
+    const note = progress.owns(k, v.id) ? 'Owned' : v.need ? (v.need.stars ? `${v.need.stars} stars` : 'Badge') : v.stock ? (left === 0 ? 'Sold out' : left != null ? `${left} left` : 'Limited') : `${dealPrice(vk, v)}`;
+    return el('button', { class: 'variant' + (v.stock ? ' limited' : '') + (v.id === id ? ' on' : ''), type: 'button', 'aria-pressed': String(v.id === id), title: v.name, onclick: () => { pick = { kind: k, id: v.id, key: vk, item: v }; render(); } },
+      itemPreview(k, v, 34), el('span', {}, v.name), el('span', { class: 'small' }, note));
+  })) : null;
+  cap.append(el('b', {}, item.name), item.need && !owned ? el('span', { class: 'small' }, ` ${item.hint}.`) : null, statsLine(key, item), styles, el('div', { class: 'row' }, ...buttons));
 }
 async function wear(k, id) {
   if (progress.wallet) {
@@ -213,19 +237,19 @@ async function wear(k, id) {
   } else progress.equipLocal(k, id);
   pick = null; render();
 }
-async function buy(key, item, qty = 1) {
+async function buy(key, item, qty = 1, expect) {
   if (!session.user) { needLogin('Buying needs an account, so your coins are safe on the server.'); return; }
   try {
-    const r = await api.buy(key, qty);
+    const r = await api.buy(key, qty, expect);
     setWallet(r.wallet);
     const f = findItem(key);
     await api.look({ [f.kind]: f.id }).then((x) => setWallet(x.wallet)).catch(() => {});
     progress.stat('bought'); progress.flush();
     import('../audio.js').then((a) => a.sfx('buy')).catch(() => {});
     toast(qty > 1 ? `You got ${qty} ${item.name}!` : `New ${f.kind === 'color' ? 'color' : f.kind}: ${item.name}!`);
-    if (item.stock) try { shopInfo = await api.shop(); } catch (e) { /* ok */ }
+    if (item.stock || (shopInfo && shopInfo.featured.items.includes(key))) try { shopInfo = await api.shop(); } catch (e) { /* ok */ }
     pick = null; render(); renderWallet();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(e.message); if (/deal|price/.test(e.message)) try { shopInfo = await api.shop(); render(); } catch (e2) { /* ok */ } }
 }
 async function sell(key, item) {
   const ok = await ask(`Sell ${item.name}?`, `You get ${sellPrice(item)} coins back. For more, try the Reseller shop, where players set the price.`, [{ label: `Sell for ${sellPrice(item)}`, value: true, cls: 'btn-danger' }]);
@@ -391,10 +415,12 @@ export async function shopPanel(host, { close, looked }) {
     const w = progress.wallet;
     coins.textContent = w ? `${w.coins} coins` : 'Guest';
     chips.replaceChildren(...KINDS.map((x) => el('button', { class: 'chip', type: 'button', 'aria-pressed': String(x === k), onclick: () => { k = x; sel = null; draw(); } }, KIND_LABEL[x])));
-    grid.replaceChildren(...SHOP[k].map((item) => {
+    grid.replaceChildren(...variantGroups(k).map((g) => {
+      const item = sel && g.list.some((x) => x.id === sel.item.id) ? sel.item : g.list.find((x) => progress.data.equip[k] === x.id) || g.list[0];
       const key = itemKey(k, item.id), owned = progress.owns(k, item.id), on = progress.data.equip[k] === item.id;
       return el('button', { class: `item${on ? ' on' : ''}${sel && sel.key === key ? ' pick' : ''}${item.stock ? ' limited' : ''}`, type: 'button', onclick: () => { sel = { key, item }; draw(); } },
-        itemPreview(k, item, 52), el('span', { class: 'item-name' }, item.name), on ? el('span', { class: 'item-price' }, 'Wearing') : owned ? el('span', { class: 'item-price' }, 'Owned') : priceTag(key, item));
+        itemPreview(k, item, 52), el('span', { class: 'item-name' }, item.name), on ? el('span', { class: 'item-price' }, 'Wearing') : owned ? el('span', { class: 'item-price' }, 'Owned') : priceTag(key, item),
+        g.list.length > 1 ? el('span', { class: 'variant-count' }, `${g.list.length} styles`) : null);
     }));
     cap.replaceChildren();
     if (!sel) { cap.append(el('p', { class: 'small' }, 'Pick something.')); return; }
@@ -405,11 +431,13 @@ export async function shopPanel(host, { close, looked }) {
     else if (item.need) btns.push(el('button', { class: 'btn', type: 'button', disabled: true }, item.hint));
     else {
       const price = dealPrice(key, item), left = item.stock && shopInfo ? shopInfo.stock[key] : null;
-      const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => { b.disabled = true; await buy(key, item); looked({ ...progress.data.equip }); draw(); } }, `Buy for ${price} coins`);
+      const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => { b.disabled = true; await buy(key, item, 1, price); looked({ ...progress.data.equip }); draw(); } }, `Buy for ${price} coins`);
       if (left === 0) { b.disabled = true; b.textContent = 'Sold out'; } else if (outToday(key)) { b.disabled = true; b.textContent = 'Not in stock today'; } else if (w.coins < price) { b.disabled = true; b.textContent = `Need ${price - w.coins} more coins`; }
       btns.push(b);
     }
-    cap.append(el('b', {}, item.name), el('div', { class: 'row' }, ...btns));
+    const grp = groupOf(k, item.id);
+    const styles = grp && grp.list.length > 1 ? el('div', { class: 'variants' }, ...grp.list.map((v) => el('button', { class: 'variant' + (v.stock ? ' limited' : '') + (v.id === item.id ? ' on' : ''), type: 'button', 'aria-pressed': String(v.id === item.id), title: v.name, onclick: () => { sel = { key: itemKey(k, v.id), item: v }; draw(); } }, itemPreview(k, v, 30), el('span', {}, v.name)))) : null;
+    cap.append(el('b', {}, item.name), styles, el('div', { class: 'row' }, ...btns));
   };
   draw();
 }

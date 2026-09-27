@@ -73,7 +73,7 @@ export const ACHIEVEMENTS = [
   { id: 'chosen', name: 'The Chosen One', text: 'You 100%ed everything: every other badge in Blockyard', hard: true, chosen: true },
 ];
 // Blockyard's own 3D worlds (for World Tourist)
-export const TOUR = ['plaza', 'town', 'mg-race', 'mg-tag', 'mg-paint', 'mg-koth', 'mg-lava', 'mg-tycoon', 'sunny', 'tower', 'lava', 'factory', 'sky'];
+export const TOUR = ['plaza', 'town', 'mg-race', 'mg-tag', 'mg-paint', 'mg-koth', 'mg-lava', 'tycoon', 'sunny', 'tower', 'lava', 'factory', 'sky'];
 export const OBBIES = ['sunny', 'tower', 'lava', 'factory', 'sky'];
 const STAR_REWARD = 10;
 const blank = () => ({

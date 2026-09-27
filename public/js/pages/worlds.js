@@ -41,13 +41,13 @@ $('#announce-x').addEventListener('click', () => { store.set('announce-hidden', 
 
 /* ---------------- cards ---------------- */
 const builtinThumbs = new Map();
-export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, dislikes, done, game, stars }) {
+export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, dislikes, done, game, stars, tycoon }) {
   const cv = el('canvas', { class: 'thumb3d', 'aria-hidden': 'true' });
   requestAnimationFrame(() => drawWorldThumb(cv, thumb, sky));
   const n = online.worlds[id] || 0;
   const meta = el('div', { class: 'card-meta' },
     diffTag(stars),
-    el('span', { class: 'tag tag-3d' + (game ? ' tag-game' : '') }, game ? GAMES[game].name : mode === 'hangout' ? 'Hangout' : 'Obby'),
+    el('span', { class: 'tag tag-3d' + (game || tycoon ? ' tag-game' : '') }, tycoon ? 'Your own town' : game ? GAMES[game].name : mode === 'hangout' ? 'Hangout' : 'Obby'),
     n ? el('span', { class: 'tag tag-live' }, `${n} playing`) : null,
     reward ? el('span', { class: 'tag tag-pay' }, done ? 'Paid out' : `Pays ${reward} coins`) : null,
     plays != null ? el('span', { class: 'tag' }, plural(plays, 'visit')) : null,
@@ -58,11 +58,11 @@ export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays
       el('div', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go(`#/w/${id}/play`) }, 'Play'), el('button', { class: 'btn', type: 'button', onclick: () => go('#/w/' + id) }, 'Servers'))));
 }
 export function builtinCards(only) {
-  const kind = (w) => (w.game ? 'games' : w.mode === 'hangout' ? 'hangout' : 'obby');
+  const kind = (w) => (w.game || w.tycoon ? 'games' : w.mode === 'hangout' ? 'hangout' : 'obby');
   return WORLDS3D.filter((w) => !w.hidden && (!only || kind(w) === only)).map((w) => {
     if (!builtinThumbs.has(w.id)) builtinThumbs.set(w.id, thumbOfWorld(w.get().world));
     const done = progress.level('w:' + w.id);
-    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, stars: starsFor('w:' + w.id) });
+    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, tycoon: w.tycoon, stars: starsFor('w:' + w.id) });
   });
 }
 export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, thumb: g.thumb, plays: g.plays, likes: g.likes, dislikes: g.dislikes, stars: g.stars, reward: g.pays || g.reward });
@@ -144,7 +144,7 @@ async function showWorld(id) {
   const done = progress.level('w:' + id);
   page.replaceChildren(
     el('div', { class: 'world-hero' }, el('div', { class: 'hero-thumb' }, cv, diffFace(w.stars, 64)), el('div', { class: 'world-info' },
-      el('p', { class: 'detail-kicker' }, w.world.game ? `Minigame: ${GAMES[w.world.game].name}` : w.builtin && builtinWorld(id).game ? 'Minigame' : w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
+      el('p', { class: 'detail-kicker' }, w.builtin && builtinWorld(id).tycoon ? 'Your own town' : w.world.game ? `Minigame: ${GAMES[w.world.game].name}` : w.builtin && builtinWorld(id).game ? 'Minigame' : w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
       el('h1', {}, w.name),
       w.blurb ? el('p', { class: 'lede' }, w.blurb) : null,
       el('div', { class: 'card-meta' },
@@ -162,16 +162,18 @@ async function showWorld(id) {
     w.mode === 'hangout' ? null : el('div', {}, el('h2', {}, 'Fastest times'), boardBox),
     el('div', { class: 'two-col' },
       el('div', {}, el('h2', {}, 'Public servers'), serversBox),
-      el('div', {}, el('h2', {}, 'Private servers'), el('p', { class: 'small' }, w.builtin && builtinWorld(id).game ? 'Only people with the link can join. You can add bots (and pick how smart they are) to practice, even alone. Bot rounds don\'t pay coins.' : 'Only people with the link can join. Great for playing with just your friends.'), privBox)));
+      el('div', {}, el('h2', {}, 'Private servers'), el('p', { class: 'small' }, w.builtin && builtinWorld(id).own ? 'Your town lives in your own private server. Copy the link to invite friends to visit (only you can build and collect).' : w.builtin && builtinWorld(id).game ? 'Only people with the link can join. You can add bots (and pick how smart they are) to practice, even alone. Bot rounds don\'t pay coins.' : 'Only people with the link can join. Great for playing with just your friends.'), privBox)));
   requestAnimationFrame(() => drawWorldThumb(cv, thumbOfWorld(w.world), w.sky));
   if (!(await isOnline())) { serversBox.append(el('p', { class: 'small' }, 'Servers need the online version of Blockyard.')); return; }
   try {
     const r = await api.servers(id);
-    serversBox.append(r.servers.length
+    if (w.builtin && builtinWorld(id).own) serversBox.append(el('p', { class: 'small' }, 'Everyone gets their own Tycoon, so there are no public servers. Press Play to go to yours, then press Invite to bring friends over to see it.'));
+    else serversBox.append(r.servers.length
       ? el('ul', { class: 'server-list' }, ...r.servers.map((s) => el('li', {}, el('span', {}, `Server ${s.code.slice(0, 4)}`), el('span', { class: 'small' }, `${s.players} of ${r.size} players`), el('button', { class: 'btn', type: 'button', disabled: s.players >= r.size, onclick: () => go('#/join/' + s.code) }, s.players >= r.size ? 'Full' : 'Join'))))
       : el('p', { class: 'small' }, 'Nobody is here right now. Press Play and you will start a new server.'));
     const isGame = w.builtin && !!builtinWorld(id).game;
     const mineList = el('ul', { class: 'server-list' }, ...r.mine.map((s) => privRow(s.code, s.players, isGame ? s : null)));
+    if (w.builtin && builtinWorld(id).own) { privBox.append(r.mine.length ? mineList : el('p', { class: 'small' }, 'Press Play and your town is made for you.')); return; }
     privBox.append(mineList, el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => {
       if (!session.user) { needLogin('Private servers need an account.'); return; }
       try { const p = await api.privateServer(id); mineList.prepend(privRow(p.code, 0, isGame ? { code: p.code, bots: 0, skill: 'normal' } : null)); toast('Private server made. Copy the link and send it to your friends.'); } catch (e) { toast(e.message); }
@@ -229,6 +231,7 @@ async function enterWorld(id, code) {
   const multi = !!(session.user && session.online && session.rooms);
   let first = firstTicket; firstTicket = null;
   let joined = code || null;
+  let gotJoined; const joinedP = new Promise((res) => { gotJoined = res; });
   const g3 = gfx(), low = g3.low;
   game = startWorld(root, {
     world: w.world, title: w.name, by: w.by, gfx: g3, look: progress.data.equip, me: session.user ? { name: session.user.name, display: session.user.display || '', tags: session.user.tags || [], admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0, title: session.user.title || '' } : { name: 'You' }, low,
@@ -242,6 +245,14 @@ async function enterWorld(id, code) {
     shop: w.builtin ? builtinWorld(id).shop || null : null,
     onShop: shopPanel,
     worldId: id,
+    isTycoon: !!(w.builtin && builtinWorld(id).tycoon),
+    // Tycoon: your own town (or a friend's, when you join their server with an invite)
+    tycoon: w.builtin && builtinWorld(id).tycoon && multi ? {
+      load: async () => { const info = await joinedP; return info && info.owner && info.owner.toLowerCase() !== session.user.name.toLowerCase() ? api.tycoonOf(info.owner) : api.tycoon(); },
+      buy: (spot) => api.tycoonBuy(spot),
+      collect: () => api.tycoonCollect(),
+    } : null,
+    tycoonNote: !session.user ? 'Log in to get your own Tycoon town. It makes real coins!' : !multi ? 'Tycoon needs the online version of Blockyard.' : null,
     ownsGear: (gid) => progress.owns('gear', gid),
     wallet: () => progress.wallet,
     // this world's own shop (player worlds only): what you bought, and buying more
@@ -250,7 +261,7 @@ async function enterWorld(id, code) {
     onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },
     room: multi ? async () => { if (first) { const f = first; first = null; return f; } return api.joinRoom(joined ? { code: joined } : { world: id }); } : null,
     soloNote: !session.user ? 'You are playing solo. Log in to see other players and chat.' : !session.rooms ? 'Multiplayer is off on this server, so you are playing solo.' : null,
-    onJoined: (info) => { if (info && info.code) { joined = info.code; replaceRoute('#/join/' + info.code); } },
+    onJoined: (info) => { if (info && info.code) { joined = info.code; replaceRoute('#/join/' + info.code); } gotJoined(info); },
     friends: session.user ? () => api.friends() : null,
     inviteFriend: (code, name) => api.inviteFriend(code, name),
     onExit: () => go(w.builtin || !w.by ? '#/worlds' : '#/w/' + id),

@@ -27,7 +27,6 @@ const h = (tag, attrs = {}, ...kids) => {
 const TOOLS = [['place', 'Place', '1'], ['break', 'Break', '2'], ['paint', 'Paint', '3'], ['pick', 'Pick', '4']];
 const ORDER = ['grass', 'dirt', 'stone', 'wood', 'brick', 'sand', 'snow', 'leaves', 'metal', 'plastic', 'neon', 'glass', 'ghost', 'ice', 'lava', 'bounce', 'speed', 'crumble', 'checkpoint', 'beltN', 'beltE', 'beltS', 'beltW', 'teleport', 'moveX', 'moveZ', 'moveY', 'disco', 'goal', 'spawn', 'coin'];
 const LOGIC_ORDER = ['trigger', 'switchOn', 'switchOff', 'marker'];
-const TYCOON_ORDER = ['tclaim', 'tbutton', 'tbuild'];
 const SHOP_ORDER = ['shopstand'];
 export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') + '|' + (w.b || ''); for (let i = 0; i < s.length; i++) { hh ^= s.charCodeAt(i); hh = Math.imul(hh, 16777619) >>> 0; } return hh.toString(36) + ':' + s.length; };
 
@@ -131,7 +130,7 @@ export function startBuilder(root, opts) {
       gearBox,
       h('label', { class: 'check b3-hotbar' }, hotbarBox, ' Hotbar: gear only works when players put it in a numbered slot and hold it (1, 2, 3…), like Roblox'),
       shopBox,
-      h('p', { class: 'small' }, 'Minigame worlds run rounds for everyone in a server. Tycoon needs claim pads and buy buttons (Build tab, Tycoon blocks): each color is one plot. Gear (speed coils, jetpacks...) works in hangouts, Tag and Paintball unless you turn it off, and Logic can lend gear for a while in any world.')),
+      h('p', { class: 'small' }, 'Minigame worlds run rounds for everyone in a server. Gear (speed coils, jetpacks...) works in hangouts, Tag and Paintball unless you turn it off, and Logic can lend gear for a while in any world.')),
     logic: h('div', { class: 'b3-pane', hidden: true }, logicEd.el),
     view: h('div', { class: 'b3-pane', hidden: true }, h('div', { class: 'row' }, specBtn), viewNote,
       h('p', { class: 'small' }, 'Spectate follows a teammate who is building with you (◀ ▶ to switch). With nobody here it slowly tours around your spawn so you can see your world like a player would.')),
@@ -158,7 +157,6 @@ export function startBuilder(root, opts) {
     };
     palette.replaceChildren(h('h3', {}, 'Blocks'), h('div', { class: 'b3-grid' }, ...ORDER.map(btn)),
       h('h3', {}, 'Logic blocks'), h('div', { class: 'b3-grid' }, ...LOGIC_ORDER.map(btn)),
-      h('h3', {}, 'Tycoon blocks'), h('div', { class: 'b3-grid' }, ...TYCOON_ORDER.map(btn)),
       h('h3', {}, 'Shop blocks'), h('div', { class: 'b3-grid' }, ...SHOP_ORDER.map(btn)));
     swatches.replaceChildren(...PALETTE.map((c, i) => h('button', { class: 'swatch', type: 'button', style: `background:${c}`, 'aria-label': 'Color ' + (i + 1), 'aria-pressed': String(ed.color === i), onclick: () => { ed.color = i; renderPalette(); } })));
     const b = BLOCKS[ed.block];

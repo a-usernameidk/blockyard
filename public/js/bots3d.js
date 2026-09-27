@@ -3,7 +3,7 @@
 // and its position is sent to the room like a player's. The room checks everything they do.
 import { createSim, step3, STEP3, packInput, yawIndex, KEY } from './physics3d.js';
 import { solidType, SX, SZ } from './world.js';
-import { ROUND, WEAPONS, BOT_SKILL, inBox, onHill, nearBlock } from './games.js';
+import { ROUND, WEAPONS, BOT_SKILL, inBox, onHill } from './games.js';
 
 const WEAPON_PICK = ['blaster', 'rapid', 'splatter', 'sniper'];
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -110,26 +110,6 @@ export function createBots(opts) {
             if (!b.target || Math.random() < 0.04 || Math.hypot(b.target[0] - S.p.x, b.target[1] - S.p.z) < 1) b.target = [cx + (Math.random() - 0.5) * 24, cz + (Math.random() - 0.5) * 24];
             go(b.target[0], b.target[1]);
           }
-        }
-        break;
-      }
-      case 'tycoon': {
-        // claim a free plot, then walk to the next button and buy it when there's enough cash
-        const ty = rs.ty || {}, plots = area.plots || {};
-        const mine = Object.keys(ty).find((c) => ty[c][0] === b.id);
-        const at = [S.p.x, S.p.y, S.p.z];
-        if (!mine) {
-          let best = null;
-          for (const [c, p] of Object.entries(plots)) if (ty[c] && !ty[c][0]) { const d = Math.hypot(p.pad[0] - S.p.x, p.pad[2] - S.p.z); if (!best || d < best.d) best = { c, p, d }; }
-          if (!best) { b.plan = null; break; }
-          go(best.p.pad[0] + 1, best.p.pad[2] + 0.5, 0.2);
-          if (nearBlock(at, best.p.pad) && now - b.lastAct > 500) { b.lastAct = now; opts.send({ t: 'botact', id: b.id, a: 'tclaim', c: best.c }); }
-        } else {
-          const nx = plots[mine].buttons[ty[mine][1]];
-          if (!nx) { b.plan = { type: 'spin' }; break; }
-          if (ty[mine][2] + 3 < nx.price) { b.plan = null; break; } // wait for cash
-          go(nx.x + 0.5, nx.z + 0.5, 0.2);
-          if (nearBlock(at, [nx.x, nx.y, nx.z]) && now - b.lastAct > 600) { b.lastAct = now; opts.send({ t: 'botact', id: b.id, a: 'tbuy', c: mine }); }
         }
         break;
       }

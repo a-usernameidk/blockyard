@@ -11,7 +11,7 @@ import { cleanLogic } from '../public/js/logic.js';
 import { cleanGearBan } from '../public/js/cosmetics.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
 import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES, cleanShop, shopBlasters, idx, LIVE_BLOCKS } from '../public/js/world.js';
-import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, TYCOON, gameConfig, onHill, lavaLevel, inBox, nearBlock } from '../public/js/games.js';
+import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
 import { coinStmts, questBumps } from './econ.js';
 import { cleanDisplay, cleanTags } from '../public/js/names.js';
 
@@ -274,7 +274,7 @@ export class Room {
         break;
       }
       case 'ping': send(ws, { t: 'pong', at: msg.at }); break;
-      case 'fin': case 'tag': case 'out': case 'hit': case 'tclaim': case 'tbuy': this.gameMsg(me, msg); break;
+      case 'fin': case 'tag': case 'out': case 'hit': this.gameMsg(me, msg); break;
       case 'bots': { // the owner's computer tells us where its bots are
         if (!this.bots || me.id !== this.bots.host || !Array.isArray(msg.l)) return;
         const ids = new Set(this.botList().map((b) => b.id));
@@ -290,7 +290,7 @@ export class Room {
         break;
       }
       case 'botact': { // a bot finished, got out, tagged or hit someone
-        if (!this.bots || me.id !== this.bots.host || !this.botList().some((b) => b.id === msg.id) || !['fin', 'out', 'tag', 'hit', 'tclaim', 'tbuy'].includes(msg.a)) return;
+        if (!this.bots || me.id !== this.bots.host || !this.botList().some((b) => b.id === msg.id) || !['fin', 'out', 'tag', 'hit'].includes(msg.a)) return;
         this.gameMsg({ id: msg.id }, { t: msg.a, id: msg.target, w: msg.w, c: msg.c });
         break;
       }
@@ -474,7 +474,7 @@ export class Room {
     const R = this.round;
     if (!R) return null;
     return { practice: R.practice || undefined, phase: R.phase, mode: R.mode, left: R.ends ? Math.max(0, R.ends - Date.now()) : 0, it: R.it ? [...R.it] : [], alive: R.alive ? [...R.alive] : [], fin: R.fin || [],
-      scores: R.scores ? Object.fromEntries([...R.scores].map(([k, v]) => [k, Math.round(v * 10) / 10])) : {}, lava: R.lava, results: R.results, need: ROUND.minPlayers, ty: R.ty ? this.tyOut() : undefined, ...extra };
+      scores: R.scores ? Object.fromEntries([...R.scores].map(([k, v]) => [k, Math.round(v * 10) / 10])) : {}, lava: R.lava, results: R.results, need: ROUND.minPlayers, ...extra };
   }
   sendRound(extra) {
     this.broadcast({ t: 'round', ...this.roundOut(extra) });
@@ -502,8 +502,6 @@ export class Room {
       R.it = new Set(); R.hits = new Map(); R.lastShot = new Map(); R.safe = new Map();
       if (R.mode === 'tag') { const list = [...R.ids]; const k = n >= 6 ? 2 : 1; while (R.it.size < k) R.it.add(list[Math.floor(Math.random() * list.length)]); R.firstIt = new Set(R.it); }
       R.lava = R.mode === 'lava' ? lavaLevel(this.game.areas.lava, 0) : undefined;
-      // tycoon: every plot starts empty and unclaimed
-      R.ty = R.mode === 'tycoon' ? Object.fromEntries(Object.keys(this.game.areas.tycoon.plots || {}).map((c) => [c, { owner: null, bought: 0, cash: 0, since: now }])) : null;
       this.sendRound();
       return;
     }
@@ -518,10 +516,8 @@ export class Room {
       const over = now >= R.ends || R.ids.size === 0
         || (R.mode === 'race' && R.fin.length >= R.ids.size)
         || (R.mode === 'tag' && (free.length === 0 || R.it.size === 0))
-        || (R.mode === 'lava' && R.alive.size <= (R.startCount > 1 ? 1 : 0))
-        || (R.mode === 'tycoon' && this.tyDone());
+        || (R.mode === 'lava' && R.alive.size <= (R.startCount > 1 ? 1 : 0));
       if (over) this.endRound();
-      else if (R.mode === 'tycoon' && (!R.lastScores || now - R.lastScores > 2000)) { R.lastScores = now; this.sendRound(); }
       return;
     }
     if (R.phase === 'results' && now >= R.ends) {
@@ -547,8 +543,7 @@ export class Room {
   gameMsg(me, msg) {
     const R = this.round;
     if (!R || R.phase !== 'play' || !R.ids.has(me.id)) return;
-    if ((msg.t === 'tclaim' || msg.t === 'tbuy') && R.mode === 'tycoon') this.tyMsg(me, msg);
-    else if (msg.t === 'fin' && R.mode === 'race' && !R.fin.includes(me.id)) { R.fin.push(me.id); this.sendRound({ ev: { fin: me.id } }); }
+    if (msg.t === 'fin' && R.mode === 'race' && !R.fin.includes(me.id)) { R.fin.push(me.id); this.sendRound({ ev: { fin: me.id } }); }
     else if (msg.t === 'out' && R.mode === 'lava' && R.alive.has(me.id)) { R.alive.delete(me.id); this.sendRound({ ev: { out: me.id } }); }
     else if (msg.t === 'tag' && R.mode === 'tag' && R.it.has(me.id) && R.ids.has(msg.id) && !R.it.has(msg.id) && Date.now() - R.start >= ROUND.itWait - 300) {
       const a = this.posOf(me.id), b = this.posOf(msg.id);
@@ -574,35 +569,6 @@ export class Room {
     }
     this.tick();
   }
-  /* ----- tycoon ----- */
-  tyCash(p, now = Date.now()) { return p.owner ? p.cash + TYCOON.income(p.bought) * (now - p.since) / 1000 : 0; }
-  tyOut() {
-    const R = this.round, now = Date.now();
-    return Object.fromEntries(Object.entries(R.ty).map(([c, p]) => [c, [p.owner, p.bought, Math.floor(this.tyCash(p, now)), TYCOON.income(p.bought)]]));
-  }
-  tyDone() {
-    const R = this.round, plots = this.game.areas.tycoon.plots;
-    return Object.entries(R.ty).some(([c, p]) => p.owner && plots[c] && p.bought >= plots[c].buttons.length);
-  }
-  tyMsg(me, msg) {
-    const R = this.round, plots = this.game.areas.tycoon.plots, c = String(msg.c), plot = plots[c], p = R.ty[c];
-    if (!plot || !p) return;
-    const at = this.posOf(me.id), now = Date.now();
-    if (msg.t === 'tclaim') {
-      if (p.owner || Object.values(R.ty).some((q) => q.owner === me.id) || !at || !nearBlock(at, plot.pad)) return;
-      Object.assign(p, { owner: me.id, bought: 0, cash: 0, since: now });
-      this.sendRound({ ev: { claim: me.id, c } });
-    } else if (msg.t === 'tbuy') {
-      if (p.owner !== me.id) return;
-      const b = plot.buttons[p.bought];
-      if (!b || !at || !nearBlock(at, [b.x, b.y, b.z])) return;
-      const cash = this.tyCash(p, now);
-      if (cash < b.price) return;
-      Object.assign(p, { cash: cash - b.price, since: now, bought: p.bought + 1 });
-      R.scores.set(me.id, p.bought);
-      this.sendRound({ ev: { buy: me.id, c, n: p.bought } });
-    }
-  }
   posOf(id) {
     const st = this.pos.get(id);
     if (st) return st.p;
@@ -620,7 +586,6 @@ export class Room {
     } else if (mode === 'paint') winners = [...R.scores].filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id], i) => [id, i + 1, i ? PRIZE.second : PRIZE.first]);
     else if (mode === 'koth') winners = [...R.scores].filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id], i) => [id, i + 1, i ? PRIZE.second : PRIZE.first]);
     else if (mode === 'lava') winners = [...R.alive].filter((id) => R.ids.has(id)).map((id, _, all) => [id, 1, all.length === 1 ? PRIZE.first : PRIZE.win]);
-    else if (mode === 'tycoon') winners = Object.values(R.ty).filter((p) => p.owner && p.bought >= 1 && R.ids.has(p.owner)).sort((a, b) => b.bought - a.bought || this.tyCash(b) - this.tyCash(a)).slice(0, 3).map((p, i) => [p.owner, i + 1, [PRIZE.first, PRIZE.second, PRIZE.third][i]]);
     if (count < ROUND.minPlayers || R.practice) winners = winners.map(([id, pl]) => [id, pl, 0]);
     R.phase = 'results'; R.ends = Date.now() + ROUND.results * 1000;
     R.results = winners.map(([id, place, coins]) => ({ id, name: name(id), place, coins, score: R.scores.get(id) }));

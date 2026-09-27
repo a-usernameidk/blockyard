@@ -1,6 +1,5 @@
 // Starting points for new levels and worlds: a blank one, or a small ready-made one to change.
 import { Grid, B, encodeBlocks, emptyWorld } from './world.js';
-import { tycoonPlot } from './worlds3d.js';
 import { BUILTIN } from './levels.js';
 import { newLevel } from './editor.js';
 
@@ -49,13 +48,6 @@ export const TEMPLATES_3D = {
       box(40, 0, 44, 88, 0, 84, B.grass); set(64, 1, 64, B.spawn);
       for (const [x, z] of [[48, 52], [58, 50], [70, 52], [80, 50], [48, 76], [60, 78], [72, 76], [80, 78], [54, 64], [74, 64]]) box(x, 1, z, x + 1, 2, z + 1, B.wood);
     }, { game: 'paint' }),
-  },
-  tycoon: {
-    name: 'Tycoon', info: 'Minigame: claim a plot, earn cash, build it up.', make: () => world('My tycoon', 'hangout', 'day', (api) => {
-      const { box, set } = api;
-      box(38, 0, 56, 90, 0, 62, B.stone); set(64, 1, 58, B.spawn);
-      tycoonPlot(api, 40, 64, 4); tycoonPlot(api, 66, 64, 9);
-    }, { game: 'tycoon' }),
   },
   logic: {
     name: 'Logic demo', info: 'An obby with a Trigger pad that opens a Switch door.', make: () => world('My logic obby', 'obby', 'day', ({ box, set }) => {
