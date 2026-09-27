@@ -1,7 +1,7 @@
 // Tycoon: everyone's own town that makes real coins (the rules are in public/js/tycoon.js).
 // The server keeps each town and moves it forward in time whenever you look at it, build, or collect,
-// so nothing the game sends can make gold or coins appear. Collecting is capped at TY.dailyCap coins a day.
-import { json, fail, needUser, body } from './util.js';
+// so nothing the game sends can make coins appear. Buildings cost real coins; collecting is capped at TY.dailyCap a day.
+import { json, fail, needUser, body, isConstraint } from './util.js';
 import { coinStmts, getWallet } from './econ.js';
 import { TY, SPOTS, newTycoon, cleanTycoon, advance, buy, stats, nextOf } from '../public/js/tycoon.js';
 
@@ -34,11 +34,15 @@ async function todayGot(db, uid) {
   return r ? r.n : 0;
 }
 function out(s, extra = {}) {
-  const st = stats(s);
-  return { tycoon: { ...s, gold: Math.floor(s.gold), vault: Math.floor(s.vault) }, stats: st, next: Object.fromEntries(SPOTS.map((x) => [x.id, nextOf(s, x.id)])), now: Date.now(), cap: TY.dailyCap, ...extra };
+  return { tycoon: { ...s, vault: Math.floor(s.vault) }, stats: stats(s), next: Object.fromEntries(SPOTS.map((x) => [x.id, nextOf(s, x.id)])), now: Date.now(), cap: TY.dailyCap, ...extra };
 }
-// Saves only if nobody else changed the town in the meantime (two tabs clicking at once can't double anything).
-const saveStmt = (db, uid, s, version) => db.prepare('UPDATE tycoons SET data = ?, version = version + 1 WHERE user_id = ? AND version = ?').bind(JSON.stringify(s), uid, version);
+// Every change to a town saves it, bumps its version and writes a claim for the old version, all in one batch.
+// A second request made from the same (now old) version hits that claim and the whole batch is cancelled,
+// so two tabs clicking at once can never double coins or buildings.
+const changeStmts = (db, uid, s, version) => [
+  db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(uid, 'ty:' + version, Date.now()),
+  db.prepare('UPDATE tycoons SET data = ?, version = version + 1 WHERE user_id = ? AND version = ?').bind(JSON.stringify(s), uid, version),
+];
 
 async function mine(ctx) {
   const user = needUser(ctx), { db } = ctx;
@@ -56,15 +60,24 @@ async function theirs(ctx, name) {
   advance(s, Date.now());
   return json(out(s, { owner: u.name }));
 }
+// Build or upgrade a lot. It costs real coins (they come out of your wallet).
 async function build(ctx, input) {
   const user = needUser(ctx), { db } = ctx;
   const { s, version } = await load(db, user.id);
   advance(s, Date.now());
-  const err = buy(s, String(input.spot || ''));
+  const id = String(input.spot || ''), n = nextOf(s, id);
+  const err = buy(s, id);
   if (err) fail(400, err);
-  const r = await saveStmt(db, user.id, s, version).run();
-  if (!r.meta.changes) fail(409, 'Your town just changed. Try again.');
-  return json(out(s, { built: String(input.spot) }));
+  if (input.expect != null && Number(input.expect) !== n.cost) fail(409, `That costs ${n.cost} coins now. Try again.`);
+  try {
+    await db.batch([...changeStmts(db, user.id, s, version), ...coinStmts(db, user.id, -n.cost, 'tycoon build ' + id)]);
+  } catch (e) {
+    if (!isConstraint(e)) throw e;
+    const w = await getWallet(db, user.id);
+    if (w.coins < n.cost) fail(402, `You need ${n.cost - w.coins} more coins for that.`);
+    fail(409, 'Your town just changed. Try again.');
+  }
+  return json(out(s, { built: id, cost: n.cost, today: await todayGot(db, user.id), wallet: await getWallet(db, user.id) }));
 }
 async function collect(ctx) {
   const user = needUser(ctx), { db } = ctx;
@@ -74,9 +87,8 @@ async function collect(ctx) {
   const got = Math.max(0, Math.min(Math.floor(s.vault), TY.dailyCap - today));
   if (!got) return json(out(s, { got: 0, today, full: today >= TY.dailyCap }));
   s.vault -= got;
-  // save the emptier vault first (only if nobody changed the town meanwhile), then pay: two collects can't both pay
-  const r = await saveStmt(db, user.id, s, version).run();
-  if (!r.meta.changes) fail(409, 'Your town just changed. Try again.');
-  await db.batch([db.prepare('UPDATE tycoons SET collected = collected + ? WHERE user_id = ?').bind(got, user.id), ...coinStmts(db, user.id, got, 'tycoon')]);
+  try {
+    await db.batch([...changeStmts(db, user.id, s, version), db.prepare('UPDATE tycoons SET collected = collected + ? WHERE user_id = ?').bind(got, user.id), ...coinStmts(db, user.id, got, 'tycoon')]);
+  } catch (e) { if (isConstraint(e)) fail(409, 'Already collected. Try again.'); throw e; }
   return json(out(s, { got, today: today + got, wallet: await getWallet(db, user.id) }));
 }

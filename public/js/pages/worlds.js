@@ -246,10 +246,11 @@ async function enterWorld(id, code) {
     onShop: shopPanel,
     worldId: id,
     isTycoon: !!(w.builtin && builtinWorld(id).tycoon),
+    onWallet: (wal) => setWallet(wal),
     // Tycoon: your own town (or a friend's, when you join their server with an invite)
     tycoon: w.builtin && builtinWorld(id).tycoon && multi ? {
       load: async () => { const info = await joinedP; return info && info.owner && info.owner.toLowerCase() !== session.user.name.toLowerCase() ? api.tycoonOf(info.owner) : api.tycoon(); },
-      buy: (spot) => api.tycoonBuy(spot),
+      buy: (spot, cost) => api.tycoonBuy(spot, cost),
       collect: () => api.tycoonCollect(),
     } : null,
     tycoonNote: !session.user ? 'Log in to get your own Tycoon town. It makes real coins!' : !multi ? 'Tycoon needs the online version of Blockyard.' : null,

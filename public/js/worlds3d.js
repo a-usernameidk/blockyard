@@ -325,14 +325,14 @@ export const MG_PAINT = mgWorld('paint', 'Paintball', 'day', 11, 'Pick a blaster
 export const MG_KOTH = mgWorld('koth', 'King of the Hill', 'sunset', 6, 'Hold the glowing hilltop the longest.');
 export const MG_LAVA = mgWorld('lava', 'Rising Lava', 'night', 7, 'Climb before the lava gets you.');
 
-// Tycoon: your own town (everyone gets their own private server). Houses on the left of the road, factories on the
-// right, the vault by the entrance and the gold mine at the end. The buildings themselves come from your saved town
-// (see tycoon.js); this is just the empty land with a glowing pad in front of every lot.
+// Tycoon: your own town (everyone gets their own private server). The Town Hall and houses on the left of the road,
+// the vault, factories, car factories and grocery shops on the right, and the gold mine at the end. The buildings
+// come from your saved town (see tycoon.js); this is just the empty land with a glowing pad in front of every lot.
 export const TYCOON = make({ id: 'tycoon', name: 'Tycoon', mode: 'hangout', sky: 'day', own: true, tycoon: true,
-  blurb: 'Your own town that makes real coins. Build houses for workers, upgrade the gold mine, build factories, and collect coins from the vault. Up to 2000 a day!' }, ({ box, set }) => {
+  blurb: 'Your own town that makes real coins. Spend coins on houses, factories, car factories and shops, collect taxes, and watch it grow. Up to 2000 a day!' }, ({ box, set }) => {
   box(24, 0, 16, 104, 0, 110, B.grass);
   box(61, 0, 18, 67, 0, 90, B.stone);               // main road
-  box(52, 0, 18, 76, 0, 26, B.stone);               // the town square by the entrance
+  box(58, 0, 16, 70, 0, 18, B.stone);               // the town square by the entrance
   box(56, 0, 90, 72, 0, 106, B.dirt);               // the mine lot
   set(64, 1, 21, B.spawn);
   // lots: a dirt floor for each one, and its pad on the road

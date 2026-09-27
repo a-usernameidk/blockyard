@@ -1053,3 +1053,9 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .ty-tag.ty-can .w3-bubble { background: var(--grass); color: var(--ink); }
 .ty-tag.ty-max .w3-bubble { background: var(--sun); }
 .w3-stage.tycoon .w3-toast { top: 92px; }
+.w3-ty { pointer-events: auto; cursor: pointer; font-family: Nunito, system-ui, sans-serif; font-weight: 800; line-height: 1.35; }
+.w3-tyreport { top: 64px; left: 50%; transform: translateX(-50%); width: min(420px, calc(100% - 20px)); }
+.ty-list { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 6px; }
+.ty-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; border-bottom: 2px dashed color-mix(in srgb, var(--line) 25%, transparent); padding-bottom: 4px; }
+.ty-list li > span { display: flex; flex-direction: column; }
+.ty-list .small { margin: 0; }

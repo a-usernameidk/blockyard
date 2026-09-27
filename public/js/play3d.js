@@ -20,7 +20,7 @@ import { emojiNodes, emojiButton } from './emoji.js';
 import { createBots } from './bots3d.js';
 import { BOTS, BOT_SKILL } from './games.js';
 import { LIVE_BLOCKS as LIVE } from './world.js';
-import { SPOTS as TY_SPOTS, TY, COLLECT_PAD, advance as tyAdvance, stats as tyStats, spotCells, spotBox, workerPath } from './tycoon.js';
+import { SPOTS as TY_SPOTS, TY, TAX as TY_TAX, COLLECT_PAD, advance as tyAdvance, stats as tyStats, spotCells, spotBox, workerPath } from './tycoon.js';
 import { actionOf, keyName, sensitivity, invertY } from './controls.js';
 
 const h = (tag, attrs = {}, ...kids) => {
@@ -204,6 +204,7 @@ export function startWorld(root, opts) {
     if (shopOpen) { if (down && e.key === 'Escape') closeShop(); return; }
     if (down && /^Digit[1-9]$/.test(e.code)) { const n = Number(e.code.slice(5)); if (digitKey(n)) return; if (paintWorld && n <= WEAPON_IDS.length) pickWeapon(WEAPON_IDS[n - 1]); else if (n <= EMOTES.length) emote(EMOTES[n - 1]); return; }
     if (down && act === 'shift' && !e.repeat) { setShiftLock(!shiftLock); return; }
+    if (down && act === 'shop' && tyCanBuy()) { tyBuy(); return; }
     if (down && act === 'shop' && (nearShop || nearStand)) { if (nearStand) openStand(); else openShop(); return; }
     if (down && act === 'fly' && canFly() && !e.repeat) { setFly(!fly); return; }
     if (down && act === 'spec' && !e.repeat) { setSpec(!spec); return; }
@@ -791,19 +792,25 @@ export function startWorld(root, opts) {
   }
 
   /* ----- Tycoon: your own town that makes real coins (the server keeps the real numbers) ----- */
+  // Buildings cost real coins: stand on a lot's pad, then press Buy (or B). The gold pad by the vault collects.
   const TYW = opts.tycoon || null;
-  let ty = null, tyAt = 0, tyBusy = false, tyPad = null, tyPoll = 0, tyErr = '';
+  let ty = null, tyAt = 0, tyBusy = false, tyOn = null, tyPad = null, tyPoll = 0, tyErr = '', tyPop = 0;
   const tyShown = {};
-  const tyBox = h('div', { class: 'w3-round w3-ty', hidden: !opts.isTycoon, 'aria-live': 'polite' }, opts.isTycoon ? (opts.tycoonNote || 'Loading your town…') : '');
+  const tyBox = h('button', { class: 'w3-round w3-ty', type: 'button', hidden: !opts.isTycoon, title: 'Where your coins come from' }, opts.isTycoon ? (opts.tycoonNote || 'Loading your town…') : '');
+  const tyReport = h('div', { class: 'w3-admin panel w3-tyreport', hidden: true });
+  const tyBuyBtn = h('button', { class: 'btn btn-sun w3-shopbtn', type: 'button', hidden: true });
   const tyTags = new Map();
   if (opts.isTycoon) {
-    stage.append(tyBox); stage.classList.add('tycoon');
-    for (const sp of TY_SPOTS) { const tag = h('div', { class: 'w3-tag shopkeep ty-tag' }, h('span', { class: 'w3-bubble' }), h('span', { class: 'w3-name' }, sp.kind === 'vault' ? 'Bigger vault' : sp.name)); tags.append(tag); tyTags.set(sp.id, tag); }
+    stage.append(tyBox, tyReport, tyBuyBtn); stage.classList.add('tycoon');
+    for (const sp of TY_SPOTS) { const tag = h('div', { class: 'w3-tag shopkeep ty-tag' }, h('span', { class: 'w3-bubble' }), h('span', { class: 'w3-name' }, sp.name)); tags.append(tag); tyTags.set(sp.id, tag); }
     const ct = h('div', { class: 'w3-tag shopkeep ty-tag ty-can' }, h('span', { class: 'w3-bubble' }, 'Step here to collect your coins!'), h('span', { class: 'w3-name' }, 'Collect'));
     tags.append(ct); tyTags.set('collect', ct);
   }
+  tyBox.addEventListener('click', () => { tyReport.hidden = !tyReport.hidden; tyBox.blur(); if (!tyReport.hidden) drawReport(); });
+  tyBuyBtn.addEventListener('click', () => { tyBuy(); tyBuyBtn.blur(); });
   const tyNow = () => (ty ? tyAdvance({ ...ty.tycoon, b: { ...ty.tycoon.b } }, ty.tycoon.t + (Date.now() - tyAt)) : null);
   const fmt = (n) => Math.floor(n).toLocaleString();
+  const walletCoins = () => { const w = opts.wallet && opts.wallet(); return w ? w.coins : 0; };
   function tySet(r) {
     ty = r; tyAt = Date.now(); tyErr = '';
     for (const sp of TY_SPOTS) {
@@ -816,73 +823,116 @@ export function startWorld(root, opts) {
       for (const [x, y, z, t, c] of spotCells(sp, lv, B)) if (t) setCell(idx(x, y, z), t, c);
       if (!first && lv) burst(sp.x0 + sp.w / 2, 3, sp.z0 + sp.w / 2, ['#ffd23f', '#ffffff', '#44c06a'], 30, 5, 6);
     }
+    if (!tyReport.hidden) drawReport();
   }
   async function tyLoad() {
     if (!TYW || stopped) return;
     try { tySet(await TYW.load()); } catch (e) { tyErr = e.message; }
   }
-  async function tyAct(fn, spotName) {
+  async function tyAct(fn) {
     if (tyBusy) return;
-    tyBusy = true;
+    tyBusy = true; tyBuyBtn.disabled = true;
     try {
       const r = await fn();
       tySet(r);
-      if (r.built) { const sp = TY_SPOTS.find((x) => x.id === r.built); toast(r.tycoon.b[sp.id] === 1 ? `${sp.name} built!` : `${sp.name} is now level ${r.tycoon.b[sp.id]}!`, 1.8); sfx('buy'); }
+      if (r.wallet && opts.onWallet) opts.onWallet(r.wallet);
+      if (r.built) { const sp = TY_SPOTS.find((x) => x.id === r.built), lv = r.tycoon.b[sp.id]; toast(lv === 1 ? `${sp.name} built!` : `${sp.name} is now level ${lv}!`, 1.8); sfx('buy'); }
       if (r.got != null) {
-        if (r.got) { toast(`+${r.got} coins!`, 2); sfx('coin'); burst(S.p.x, S.p.y + 1.5, S.p.z, ['#ffd23f', '#fff6c9'], 24, 3, 5); if (opts.onPrize) opts.onPrize(r.wallet); }
-        else toast(r.full ? `That's ${TY.dailyCap} coins today! The vault keeps filling for tomorrow.` : 'The vault is empty. Your factories fill it up over time.', 2.4);
+        if (r.got) { toast(`+${r.got} coins!`, 2); sfx('coin'); burst(S.p.x, S.p.y + 1.5, S.p.z, ['#ffd23f', '#fff6c9'], 24, 3, 5); }
+        else toast(r.full ? `That's ${TY.dailyCap} coins today! The vault keeps filling for tomorrow.` : 'The vault is empty. Your town fills it up over time.', 2.4);
       }
     } catch (e) { toast(e.message, 2); sfx('error'); }
-    tyBusy = false;
+    tyBusy = false; tyBuyBtn.disabled = false;
+  }
+  function tyBuy() {
+    if (!tyOn || !ty || ty.owner || !TYW) return;
+    const n = ty.next[tyOn.id];
+    if (!n || n.locked) return;
+    if (walletCoins() < n.cost) { toast(`You need ${fmt(n.cost - walletCoins())} more coins.`, 1.6); sfx('error'); return; }
+    tyAct(() => TYW.buy(tyOn.id, n.cost));
+  }
+  const tyCanBuy = () => !!(tyOn && ty && !ty.owner);
+  // what each part of the town makes (click the bar at the top)
+  function drawReport() {
+    const s = tyNow();
+    if (!s) return;
+    const st = tyStats(s), inc = st.income, row = (label, v, note) => h('li', {}, h('span', {}, h('b', {}, label), note ? h('span', { class: 'small' }, ' ' + note) : null), h('b', {}, `+${fmt(v)}/h`));
+    tyReport.replaceChildren(h('h3', {}, ty.owner ? `${ty.owner}'s town` : 'Your town'),
+      h('ul', { class: 'ty-list' },
+        row('Factories', inc.factory, `turn the mine's gold into coins (mine digs ${fmt(st.gold)} gold/h)`),
+        row('Car factories', inc.cars, 'build cars and sell them'),
+        row('Grocery shops', inc.shops, `your ${st.people} people buy food`),
+        row('Taxes (Town Hall)', inc.taxes, `${st.people} people pay ${TY_TAX[s.b.hall || 0]} each`)),
+      h('p', {}, h('b', {}, `Total: +${fmt(st.coinsPerHour)} coins an hour`), ` into the vault (it holds ${fmt(st.vaultCap)}).`),
+      h('p', { class: 'small' }, `${st.people} people, ${st.jobs} jobs. ${st.staff < 1 ? `Not enough workers, so everything runs at ${Math.round(st.staff * 100)}%. Build or upgrade houses!` : 'Every job is filled.'}`),
+      h('p', { class: 'small' }, 'Buildings cost real coins. Stand on a pad and press Buy. Your town works while you\'re away (up to 12 hours), and you can collect up to 2000 coins a day.'),
+      h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => { tyReport.hidden = true; } }, 'Close')));
   }
   function tyTick(px, py, pz, scene) {
     if (!opts.isTycoon) return;
     const s = tyNow();
-    if (!s) { tyBox.textContent = tyErr || opts.tycoonNote || 'Loading your town…'; for (const t of tyTags.values()) t.hidden = true; return; }
-    const st = tyStats(s), mine = !ty.owner;
-    tyBox.textContent = `${mine ? 'Your town' : `${ty.owner}'s town`}: ${fmt(s.gold)} gold (+${fmt(st.goldPerSec * 60)}/min) · ${st.workers} workers · Vault ${fmt(s.vault)}/${fmt(st.vaultCap)} coins (+${fmt(st.coinsPerHour)}/hour)${mine ? ` · Today ${fmt(ty.today || 0)}/${fmt(TY.dailyCap)}` : ''}`;
-    // pad tags: what each lot costs next
-    let on = null;
+    if (!s) { tyBox.textContent = tyErr || opts.tycoonNote || 'Loading your town…'; for (const t of tyTags.values()) t.hidden = true; tyBuyBtn.hidden = true; return; }
+    const st = tyStats(s), mine = !ty.owner, coinsNow = walletCoins();
+    tyBox.textContent = `${mine ? 'Your town' : `${ty.owner}'s town`}: +${fmt(st.coinsPerHour)} coins/hour · ${st.people} people · Vault ${fmt(s.vault)}/${fmt(st.vaultCap)}${mine ? ` · Today ${fmt(ty.today || 0)}/${fmt(TY.dailyCap)}` : ''}  ▾`;
     if (mine) placeTag(tyTags.get('collect'), COLLECT_PAD[0] + 0.5, 3.2, COLLECT_PAD[2] + 0.5, false, 24); else tyTags.get('collect').hidden = true;
+    let on = null;
     for (const sp of TY_SPOTS) {
-      const tag = tyTags.get(sp.id), lv = s.b[sp.id] || 0, n = ty.next[sp.id];
-      const bubble = tag.firstChild;
+      const tag = tyTags.get(sp.id), lv = s.b[sp.id] || 0, n = ty.next[sp.id], bubble = tag.firstChild;
       let text, can = false;
       if (!n) text = `Level ${lv}: MAX`;
       else if (n.locked) text = n.locked;
-      else { can = s.gold >= n.cost; text = `${lv ? `Upgrade to level ${n.level}` : 'Build'}: ${fmt(n.cost)} gold`; }
+      else { can = mine && coinsNow >= n.cost; text = `${lv ? `Level ${n.level}` : 'Build'}: ${fmt(n.cost)} coins`; }
       if (bubble.textContent !== text) bubble.textContent = text;
       tag.classList.toggle('ty-can', can); tag.classList.toggle('ty-max', !n);
       placeTag(tag, sp.pad[0] + 0.5, 3.2, sp.pad[2] + 0.5, false, 16);
       if (nearBlock([px, py, pz], sp.pad)) on = sp;
     }
-    // stepping on a pad builds or upgrades it; the gold pad by the vault collects your coins
-    if (nearBlock([px, py, pz], COLLECT_PAD)) on = { id: 'collect' };
-    if (on && tyPad !== on.id && mine && TYW && !tyBusy) {
-      const n = ty.next[on.id];
-      if (on.id === 'collect') tyAct(() => TYW.collect());
-      else if (n && !n.locked && s.gold >= n.cost) tyAct(() => TYW.buy(on.id));
-      else if (n) toast(n.locked || `You need ${fmt(n.cost - s.gold)} more gold.`, 1.6);
-      tyPad = on.id;
-    }
-    if (!on) tyPad = null;
+    // on a lot's pad: a Buy button (so nobody spends coins just by walking over it)
+    tyOn = on;
+    const n = on && ty.next[on.id];
+    const show = !!(on && mine && TYW && n && !n.locked);
+    if (show) { const t = `${(s.b[on.id] || 0) ? `Upgrade ${on.name} to level ${n.level}` : `Build ${on.name}`}: ${fmt(n.cost)} coins (${keyName('shop')})`; if (tyBuyBtn.textContent !== t) tyBuyBtn.textContent = t; tyBuyBtn.classList.toggle('btn-sun', coinsNow >= n.cost); }
+    tyBuyBtn.hidden = !show;
+    // the gold pad by the vault collects
+    const onCollect = nearBlock([px, py, pz], COLLECT_PAD);
+    if (onCollect && tyPad !== 'collect' && mine && TYW) { tyPad = 'collect'; tyAct(() => TYW.collect()); }
+    if (!onCollect) tyPad = null;
     // visitors see the town change now and then
     if (!mine && performance.now() - tyPoll > 15000) { tyPoll = performance.now(); tyLoad(); }
-    // workers walk from home to the mine, then to a factory, and back
-    const n = Math.min(16, st.workers);
-    for (let k = 0; k < n; k++) {
-      const pts = workerPath(s, k);
-      if (!pts) break;
+    // coins pop out of whatever is making money
+    if (st.coinsPerHour > 0 && clock - tyPop > 1.6) {
+      tyPop = clock;
+      const makers = TY_SPOTS.filter((x) => s.b[x.id] && ['factory', 'car', 'shop', 'hall'].includes(x.kind));
+      const m = makers[Math.floor(Math.random() * makers.length)];
+      if (m) burst(m.x0 + 3.5, 6, m.z0 + 3.5, ['#ffd23f', '#fff6c9'], 5, 1.5, 3);
+    }
+    // people walk to work (miners carry gold to the factories) and go shopping
+    const people = Math.min(16, Math.ceil(st.people / 2));
+    for (let k = 0; k < people; k++) {
+      const wp = workerPath(s, k);
+      if (!wp) break;
+      const pts = wp.pts;
       let len = 0; const seg = [];
       for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][2] - pts[i - 1][2]); seg.push(d); len += d; }
       let d = (clock * 2.4 + k * 9.7) % len, i = 0;
       while (i < seg.length - 1 && d > seg[i]) { d -= seg[i]; i++; }
       const a = pts[i], b = pts[i + 1], f = seg[i] ? d / seg[i] : 0;
-      const x = a[0] + (b[0] - a[0]) * f, z = a[2] + (b[2] - a[2]) * f;
-      avatarParts({ x, y: 1, z, yaw: Math.atan2(b[0] - a[0], b[2] - a[2]), walk: clock * 9 + k, move: 1, air: false, t: clock, look: TY_WORKER[k % TY_WORKER.length] }, scene);
+      const x = a[0] + (b[0] - a[0]) * f, z = a[2] + (b[2] - a[2]) * f, yaw = Math.atan2(b[0] - a[0], b[2] - a[2]);
+      avatarParts({ x, y: 1, z, yaw, walk: clock * 9 + k, move: 1, air: false, t: clock, look: TY_WORKER[k % TY_WORKER.length] }, scene);
+      if (wp.carry && i >= wp.carry[0] && i < wp.carry[1]) scene.push({ prim: 'cube', color: hexRGB('#ffd23f'), glow: 0.5, m: M4.trs(x + Math.sin(yaw) * 0.45, 1.9, z + Math.cos(yaw) * 0.45, clock * 2, 0, 0, 0.32, 0.26, 0.32) });
+    }
+    // cars from the car factories drive up and down the road
+    for (let k = 0; k < Math.min(10, st.cars); k++) {
+      const len = 2 * 68, d = (clock * 5 + k * (len / Math.min(10, st.cars))) % len, north = d < 68;
+      const z = north ? 20 + d : 88 - (d - 68), x = north ? 62.3 : 65.7, yaw = north ? 0 : Math.PI;
+      const col = hexRGB(TY_CARS[k % TY_CARS.length]);
+      scene.push({ prim: 'cube', color: col, m: M4.trs(x, 1.45, z, yaw, 0, 0, 1.1, 0.55, 2.1) });
+      scene.push({ prim: 'cube', color: [0.75, 0.9, 1], m: M4.trs(x, 1.95, z - (north ? 0.15 : -0.15), yaw, 0, 0, 0.9, 0.45, 1.0) });
+      for (const [wx, wz] of [[-0.55, -0.7], [0.55, -0.7], [-0.55, 0.7], [0.55, 0.7]]) scene.push({ prim: 'cube', color: [0.12, 0.13, 0.2], m: M4.trs(x + wx, 1.2, z + (north ? wz : -wz), yaw, 0, 0, 0.2, 0.4, 0.4) });
     }
   }
-  const TY_WORKER = ['#a3abc2', '#8d5a2b', '#3a86ff', '#44c06a'].map((color) => ({ color, hat: 'cap-gold', trail: 'none', pet: 'none', gear: 'none' }));
+  const TY_WORKER = ['#a3abc2', '#8d5a2b', '#3a86ff', '#44c06a', '#ff5d8f', '#ffd23f'].map((color) => ({ color, hat: 'cap-gold', trail: 'none', pet: 'none', gear: 'none' }));
+  const TY_CARS = ['#e63946', '#3a86ff', '#ffd23f', '#44c06a', '#b06cff', '#f4f4f4', '#ff6b35'];
   if (opts.isTycoon && TYW) tyLoad();
 
   /* ----- paintball ----- */
