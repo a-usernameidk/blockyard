@@ -226,7 +226,12 @@ async function enterWorld(id, code) {
   if (code && !id) {
     // joining by code: the server tells us which world
     if (!session.user) { root.replaceChildren(el('div', { class: 'panel-note' }, el('h3', {}, 'Log in to join your friend'), el('p', {}, 'Servers with other players need an account. It only takes a username and a password.'), el('button', { class: 'btn btn-sun', type: 'button', onclick: () => $('#me-btn').click() }, 'Log in or sign up'))); return; }
-    try { const j = await api.joinRoom({ code }); id = j.world.id; firstTicket = j; } catch (e) { root.replaceChildren(el('div', { class: 'panel-note' }, el('h3', {}, "Couldn't join"), el('p', {}, e.message), el('button', { class: 'btn', type: 'button', 'data-go': '#/worlds' }, 'Back to worlds'))); return; }
+    try {
+      const j = await api.joinRoom({ code });
+      // a friend playing a 2D level: go play that level (you'll see them there)
+      if (j.world.mode === '2d') { const lid = j.world.id.slice(2); go(lid.startsWith('b-') ? '#/play/' + lid : '#/p/' + lid); return; }
+      id = j.world.id; firstTicket = j;
+    } catch (e) { root.replaceChildren(el('div', { class: 'panel-note' }, el('h3', {}, "Couldn't join"), el('p', {}, e.message), el('button', { class: 'btn', type: 'button', 'data-go': '#/worlds' }, 'Back to worlds'))); return; }
   }
   try { w = await loadWorld(id); } catch (e) { if (e.message !== '2d') root.replaceChildren(el('div', { class: 'panel-note' }, el('h3', {}, "That world didn't load"), el('p', {}, e.message))); return; }
   const { startWorld } = await import('../play3d.js');

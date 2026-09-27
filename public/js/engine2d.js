@@ -31,10 +31,12 @@ export const ADV = { g: 1800, jump: 690, term: 900, run: 230, accGround: 2600, a
 const FLYING = new Set(['jet', 'dart', 'flapper', 'glider']);
 
 /* ---------------- setup ---------------- */
-export function createGame(level) {
+// opts.practice: Rush practice mode. Rush checkpoints (P) only exist in practice; a normal Rush run has none at all.
+export function createGame(level, opts = {}) {
+  const rushy = level.style === 'rush', practice = rushy && !!opts.practice;
   const G = {
-    lv: level, w: level.w, h: level.h, rush: level.style === 'rush',
-    map: level.d.split(''), ents: [], crumbles: [],
+    lv: level, w: level.w, h: level.h, rush: rushy, practice,
+    map: rushy && !practice ? level.d.replace(/P/g, '.').split('') : level.d.split(''), ents: [], crumbles: [],
     time: 0, runTime: 0, runDeaths: 0, attempt: 1, deaths: 0, coins: 0, keys: 0,
     totalCoins: 0, won: false, dead: false, deadT: 0,
     events: [], cp: null, cpIdx: -1, ringUsed: -1,
@@ -118,6 +120,13 @@ export function cloneGame(G) {
   return c;
 }
 
+// Practice mode: drop a checkpoint right where you are (only on the ground, alive).
+export function dropCheckpoint(G) {
+  if (!G.practice || G.dead || G.won || !G.p.onGround) return false;
+  G.cp = snapshot(G); G.cpIdx = -2;
+  ev(G, 'checkpoint', G.p.x + G.p.w / 2, G.p.y);
+  return true;
+}
 export function restart(G) {
   G.cp = null; G.cpIdx = -1;
   restore(G, G.init);

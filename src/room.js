@@ -13,7 +13,7 @@ import { builtinWorld } from '../public/js/worlds3d.js';
 import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES, cleanShop, shopBlasters, idx, LIVE_BLOCKS } from '../public/js/world.js';
 import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
 import { coinStmts, questBumps, loadEvents, xpStmt, timeXp } from './econ.js';
-import { XP } from '../public/js/cosmetics.js';
+import { XP, isSong } from '../public/js/cosmetics.js';
 import { cleanDisplay, cleanTags } from '../public/js/names.js';
 
 const MAX_PLAYERS = 16;
@@ -136,7 +136,10 @@ export class Room {
       case 'st': { // where I am: position, facing, animation
         const p = Array.isArray(msg.p) ? msg.p.slice(0, 3).map(Number) : null;
         if (!p || p.length !== 3 || !p.every(Number.isFinite)) return;
-        const st = { p: p.map((v, i) => Math.round(Math.max(-40, Math.min(i === 1 ? SY + 40 : SX + 40, v)) * 100) / 100), r: Math.round((Number(msg.r) || 0) * 100) / 100, a: (msg.a | 0) & 255 };
+        // 2D levels (world '2:...') use pixels, so much bigger numbers
+        const flat = typeof me.world === 'string' && me.world.startsWith('2:');
+        const st = flat ? { p: [Math.round(Math.max(-2000, Math.min(60000, p[0]))), Math.round(Math.max(-4000, Math.min(12000, p[1]))), 0], r: (Number(msg.r) || 0) < 0 ? -1 : 1, a: (msg.a | 0) & 255 }
+          : { p: p.map((v, i) => Math.round(Math.max(-40, Math.min(i === 1 ? SY + 40 : SX + 40, v)) * 100) / 100), r: Math.round((Number(msg.r) || 0) * 100) / 100, a: (msg.a | 0) & 255 };
         this.pos.set(me.id, st);
         // remember it on the socket now and then so a waking room knows where everyone is
         if (!lim.saved || Date.now() - lim.saved > 1500) { lim.saved = Date.now(); ws.serializeAttachment({ ...me, ...st }); }
@@ -636,7 +639,7 @@ export class Room {
     if (row.kind === '3d') {
       let grid;
       try { grid = decodeBlocks(String(data.b || '')); } catch (e) { grid = new Grid(); }
-      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(data.gearBan), logic: cleanLogic(data.logic), hotbar: data.hotbar === true, compass: data.compass === true, shop: cleanShop(data.shop) }, grid };
+      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(data.gearBan), logic: cleanLogic(data.logic), hotbar: data.hotbar === true, compass: data.compass === true, music: isSong(data.music) ? data.music : '', shop: cleanShop(data.shop) }, grid };
     } else {
       const lv = { n: row.name, style: 'adventure', theme: 'meadow', form: 'hopper', speed: '~', w: 48, h: 12, d: '', ...data };
       this.doc = { id: row.id, kind: '2d', meta: { n: cleanText(lv.n, LIMITS.name) || row.name, style: lv.style === 'rush' ? 'rush' : 'adventure', theme: THEMES.includes(lv.theme) ? lv.theme : 'meadow', form: FORMS.includes(lv.form) ? lv.form : 'hopper', speed: Object.hasOwn(SPEED_NAMES, lv.speed) ? lv.speed : '~' }, w: lv.w | 0, h: lv.h | 0, a: String(lv.d || '').split('') };
@@ -646,7 +649,7 @@ export class Room {
   docOut() {
     const d = this.doc;
     if (!d) return null;
-    if (d.kind === '3d') { const { game, gear, logic, gearBan, hotbar, compass, shop, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), ...(gearBan && gearBan.length ? { gearBan } : {}), ...(logic && logic.length ? { logic } : {}), ...(hotbar ? { hotbar: true } : {}), ...(compass ? { compass: true } : {}), ...(shop && shop.length ? { shop } : {}), b: encodeBlocks(d.grid) }; }
+    if (d.kind === '3d') { const { game, gear, logic, gearBan, hotbar, compass, music, shop, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), ...(gearBan && gearBan.length ? { gearBan } : {}), ...(logic && logic.length ? { logic } : {}), ...(hotbar ? { hotbar: true } : {}), ...(compass ? { compass: true } : {}), ...(music ? { music } : {}), ...(shop && shop.length ? { shop } : {}), b: encodeBlocks(d.grid) }; }
     return { kind: '2d', ...d.meta, w: d.w, h: d.h, d: d.a.join('') };
   }
   // Checks one change, applies it, and returns the version to send to everyone (or null).
@@ -665,6 +668,7 @@ export class Room {
         if (Array.isArray(op.f.logic) && JSON.stringify(op.f.logic).length < 60000) f.logic = cleanLogic(op.f.logic);
         if (typeof op.f.hotbar === 'boolean') f.hotbar = op.f.hotbar;
         if (typeof op.f.compass === 'boolean') f.compass = op.f.compass;
+        if (op.f.music === '' || isSong(op.f.music)) f.music = op.f.music;
         if (Array.isArray(op.f.shop)) f.shop = cleanShop(op.f.shop);
       } else {
         if (op.f.style === 'rush' || op.f.style === 'adventure') f.style = op.f.style;

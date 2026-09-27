@@ -6,6 +6,7 @@ import { encodeReplay } from './replay.js';
 import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
 import { openRoom } from './net.js';
 import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
+import { mountMusicBox, unmountMusicBox } from './musicbox.js';
 import { store } from './api.js';
 import { GAMES, ROUND, WEAPONS, WEAPON_IDS, onHill, inBox, nearBlock } from './games.js';
 import { LOGIC_GEAR } from './logic.js';
@@ -14,7 +15,7 @@ const titleName = (id) => titleText(id);
 // the name everyone sees (display name, or the username)
 const label = (o) => (o && (o.dn || o.name)) || 'Someone';
 const tagBits = (tags) => tagPills(tags, (t, name) => h('span', { class: 'lvl tag-' + t }, name));
-import { GEAR, GEAR_MODS, gearAllowed } from './cosmetics.js';
+import { GEAR, GEAR_MODS, gearAllowed, isSong } from './cosmetics.js';
 import { GFX, GFX_ORDER, gfxMode, setGfx } from './settings.js';
 import { emojiNodes, emojiButton } from './emoji.js';
 import { createBots } from './bots3d.js';
@@ -1295,8 +1296,12 @@ export function startWorld(root, opts) {
     frames = []; acc = 0; prevP = { ...S.p }; winShown = false; noProof = fly;
     for (const [i, t] of gone) { viewGrid.t[i] = t; const x = i % SX, z = Math.floor(i / SX) % SZ, y = Math.floor(i / (SX * SZ)); R.markDirty(x, y, z); }
     gone.clear();
-    startMusic(opts.music || (obby ? 'adventure' : 'chill'));
+    startMusic(worldSong());
   }
+
+  // the maker's song for this world (a song they own), else the game's own music
+  const worldSong = () => (isSong(world.music) ? world.music : null) || opts.music || (obby ? 'adventure' : 'chill');
+  mountMusicBox(stage);
 
   /* ---------------- the compass (the maker turns it on in the World tab) ---------------- */
   // North is -z. cam.yaw 0 looks north, and turning right (yaw up) goes to east.
@@ -1326,7 +1331,7 @@ export function startWorld(root, opts) {
   const onVis = () => { paused = document.hidden; last = performance.now(); acc = 0; if (paused) clearKeys(); };
   document.addEventListener('visibilitychange', onVis);
   msgBox.hidden = true;
-  startMusic(opts.music || (obby ? 'adventure' : 'chill'));
+  startMusic(worldSong());
 
   function loop(now) {
     raf = requestAnimationFrame(loop);
@@ -1536,7 +1541,7 @@ export function startWorld(root, opts) {
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     document.removeEventListener('visibilitychange', onVis);
     if (room) room.close();
-    stopMusic();
+    stopMusic(); unmountMusicBox();
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     R.destroy();
   }

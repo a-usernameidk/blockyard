@@ -11,10 +11,11 @@
 
 import { normalizeLevel, toWire, cleanText, isRude, LIMITS } from '../public/js/format.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
+import { BUILTIN } from '../public/js/levels.js';
 import { BOTS } from '../public/js/games.js';
 import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
-import { findItem, xpFor } from '../public/js/cosmetics.js';
+import { findItem, isFree, xpFor } from '../public/js/cosmetics.js';
 import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
 import { MARKET_SCHEMA, marketRoute } from './market.js';
 import { TYCOON_SCHEMA, tycoonRoute, tycoonAdmin } from './tycoon.js';
@@ -637,6 +638,14 @@ async function checkFields(ctx, input) {
   if (isRude(w.world.n) || isRude(desc)) fail(400, 'Something in the name or description has a blocked word.');
   if ((w.world.shop || []).some((x) => isRude(x.n))) fail(400, 'Something in your shop has a blocked word.');
   if (w.world.mode === 'obby' && !(w.run && w.run.won)) fail(400, "Your recorded run didn't reach the goal. Beat your obby in Test, then publish right away.");
+  // a world's song has to be one the maker owns (free songs are fine)
+  if (w.world.music) {
+    const f = findItem('music:' + w.world.music);
+    if (f && !isFree(f.item)) {
+      const has = await ctx.db.prepare('SELECT qty FROM inventory WHERE user_id = ? AND item = ?').bind(needUser(ctx).id, f.key).first();
+      if (!has || has.qty < 1) fail(403, `You need to own the song "${f.item.name}" to put it on your world. Get it in Shop > Music, or pick another song.`);
+    }
+  }
   return { kind, desc, visibility, name: w.world.n, style: w.world.mode, theme: w.world.sky, w: w.blocks, h: w.coins, data: w.world, thumb: w.thumb };
 }
 function row(g) {
@@ -889,6 +898,15 @@ async function collab(ctx, id, input) {
 /* ---------------- multiplayer ---------------- */
 // Is this a world people can join? Built-in ids, or a published 3D game.
 async function worldInfo(ctx, id) {
+  // 2D levels played together: '2:' + a built-in level id or a published 2D level's id
+  const m2 = /^2:(b-[a-z0-9-]{1,30}|[A-Za-z0-9]{8})$/.exec(id);
+  if (m2) {
+    const lv = BUILTIN.find((l) => l.id === m2[1]);
+    if (lv) return { id, name: lv.n, mode: '2d', builtin: true };
+    const g = await ctx.db.prepare("SELECT id, name, style, visibility, user_id, project_id FROM games WHERE id = ? AND kind = '2d' AND hidden = 0").bind(m2[1]).first();
+    if (!g || !(await canSeeGame(ctx, g))) fail(404, 'That level was not found.');
+    return { id, name: g.name, mode: '2d', builtin: false };
+  }
   const b = builtinWorld(id);
   if (b) return { id, name: b.name, mode: b.mode, builtin: true };
   if (!/^[A-Za-z0-9]{8}$/.test(id)) fail(404, 'That world was not found.');

@@ -197,9 +197,23 @@ export function gearAllowed(world, id) {
   return !ban.includes(id) && !ban.includes(gearCat(id));
 }
 export const cleanGearBan = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => GEAR_CATS[x] || GEAR_TIER[x]))].slice(0, 20) : []);
-export const SHOP = { color: COLORS, hat: HATS, trail: TRAILS, pet: PETS, gear: GEAR };
-export const KINDS = ['hat', 'color', 'trail', 'pet', 'gear'];
-export const FREE = [...COLORS, ...HATS, ...TRAILS, ...PETS, ...GEAR].filter((i) => i.price === 0 && !i.need).map((i) => i.id);
+// Songs: play them with the music box in any game, and put one you own on your 3D world. (Made in audio.js, same ids.)
+export const MUSIC = [
+  { id: 'none', name: 'Game music', price: 0 },
+  { id: 'adventure', name: 'Blockyard Adventure', price: 0 }, { id: 'chill', name: 'Chill Plaza', price: 0 },
+  { id: 'snow', name: 'Snowy Town', price: 120 }, { id: 'game', name: 'Minigame Madness', price: 150 },
+  { id: 'space', name: 'Space Drift', price: 180 }, { id: 'volcano', name: 'Volcano Stomp', price: 180 },
+  { id: 'sunny', name: 'Sunny Side', price: 200 }, { id: 'rush', name: 'Rush Hour', price: 250 },
+  { id: 'waves', name: 'Ocean Breeze', price: 250 }, { id: 'pixel', name: 'Pixel Party', price: 300 },
+  { id: 'night', name: 'Night Drive', price: 350 }, { id: 'dream', name: 'Dreamland', price: 400 },
+  { id: 'victory', name: 'Victory Lap', price: 450 }, { id: 'boss', name: 'Boss Battle', price: 500 },
+  { id: 'groove', name: 'Blocky Groove', price: 600 }, { id: 'legend', name: 'Legend of Pip', price: 1200 },
+];
+export const SHOP = { color: COLORS, hat: HATS, trail: TRAILS, pet: PETS, gear: GEAR, music: MUSIC };
+export const KINDS = ['hat', 'color', 'trail', 'pet', 'gear', 'music'];
+// is this a song id someone could put on a world? (not 'none')
+export const isSong = (id) => typeof id === 'string' && id !== 'none' && MUSIC.some((m) => m.id === id);
+export const FREE = [...COLORS, ...HATS, ...TRAILS, ...PETS, ...GEAR, ...MUSIC].filter((i) => i.price === 0 && !i.need).map((i) => i.id);
 export const itemKey = (kind, id) => kind + ':' + id;
 // 'hat:cap' -> { kind, item } or null
 export function findItem(key) {

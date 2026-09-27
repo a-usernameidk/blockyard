@@ -117,7 +117,10 @@
   <div class="bar">
     <button class="btn" id="play-back">Back</button>
     <div class="bar-title"><h2 id="play-title"></h2><span id="play-by" class="by"></span></div>
+    <span class="tag play-mates" id="play-mates" hidden></span>
     <button class="btn" id="play-restart" title="Restart (R)">Restart</button>
+    <button class="btn" id="play-practice" type="button" title="Rush practice: checkpoints on, no stars or coins" hidden>Practice</button>
+    <button class="btn" id="play-full" type="button" title="Full screen">Full screen</button>
     <button class="btn btn-ghost" id="play-report" hidden>Report</button>
   </div>
   <div class="stage" id="stage">
@@ -152,6 +155,7 @@
     <button class="tbtn tbtn-jump" data-k="jump">Jump</button>
   </div>
   <div class="touch" id="touch-rush" hidden>
+    <button class="tbtn tbtn-cp" id="touch-cp" type="button" aria-label="Drop a checkpoint" hidden>⚑</button>
     <button class="tbtn tbtn-jump tbtn-wide" data-k="jump">Tap or hold</button>
   </div>
   <p class="hint hint-keys" id="play-hint"></p>

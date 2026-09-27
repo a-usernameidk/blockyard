@@ -46,7 +46,7 @@ export const TILES = {
   'y': { name: 'Jump ring', group: 'items', tip: 'Press jump while touching it to jump again in midair.' },
   'r': { name: 'Flip ring', group: 'items', tip: 'Press jump while touching it to flip gravity.' },
   'M': { name: 'Mover', group: 'items', tip: 'A platform that slides left and right. Put a few side by side for a wider one.' },
-  'P': { name: 'Checkpoint', group: 'items', tip: 'After you touch it, you respawn here.' },
+  'P': { name: 'Checkpoint', group: 'items', tip: 'After you touch it, you respawn here. In Rush levels, checkpoints only show up in Practice mode.' },
   'S': { name: 'Start', group: 'tools', tip: 'Where the player spawns. One per level.' },
   'G': { name: 'Goal', group: 'tools', tip: 'Touch it to win.' },
   'u': { name: 'Upside down', group: 'portals', tip: 'Flips gravity so you fall up.' },

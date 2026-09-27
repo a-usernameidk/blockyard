@@ -2,7 +2,7 @@
 // Shared by the browser (renderer, builder, game) and the server (checking runs, collaborative editing).
 import { cleanText, isRude } from './format.js';
 import { cleanLogic } from './logic.js';
-import { cleanGearBan, GEAR, GEAR_MODS } from './cosmetics.js';
+import { cleanGearBan, GEAR, GEAR_MODS, isSong } from './cosmetics.js';
 
 export const SX = 128, SY = 64, SZ = 128;
 export const MAX_BLOCKS = 24000;
@@ -214,6 +214,7 @@ export function normalizeWorld(w, { needGoal } = {}) {
   const logic = cleanLogic(w.logic);
   if (logic.length) world.logic = logic;
   if (w.compass === true) world.compass = true; // the maker turned the compass on
+  if (isSong(w.music)) world.music = w.music; // the world's song (the maker has to own it: checked when publishing)
   // hotbar and creator shop: only in hangouts (and minigames), where gear works
   if (mode === 'hangout') {
     if (w.hotbar === true) world.hotbar = true;

@@ -187,7 +187,7 @@ export function playLevel(lv, o) {
   backTo = o.back || '#/play';
   show('play', o.nav || 'play');
   startPlay(lv, {
-    key: o.key, by: o.by, mode: o.mode, dailyBest: o.dailyBest,
+    key: o.key, by: o.by, mode: o.mode, dailyBest: o.dailyBest, room: o.room || null,
     onExit: () => (o.onExit ? o.onExit() : go(backTo)),
     onRemix: (level) => (level.w > 400 ? toast("This level is too long for the editor (it's bigger than player levels can be).") : editLevel(remixOf(level))),
     onReport: o.pubId ? () => (session.user ? openReport(o.pubId) : needLogin("Reporting needs an account so one person can't spam reports.")) : null,
@@ -223,7 +223,7 @@ function rewardLine(p, guess) {
 export function playBuiltin(mi) {
   const lv = MAP[mi];
   playLevel(lv, {
-    by: 'Blockyard', key: lv.id,
+    by: 'Blockyard', key: lv.id, room: '2:' + lv.id,
     onNext: MAP[mi + 1] ? () => { selected = mi + 1; go('#/play/' + MAP[mi + 1].id); } : null,
     onWin: (r) => {
       const res = progress.finish(lv.id, r, { builtin: true, par: lv.par, rush: lv.style === 'rush', stars: starsFor(lv.id) });
@@ -258,7 +258,7 @@ async function playPublished(id) {
     if (game.kind === '3d') { go('#/w/' + id); return; }
     const lv = normalizeLevel(game.level);
     playLevel(lv, {
-      by: game.creator, key: 'p:' + id, pubId: id, online: true, back: '#/discover',
+      by: game.creator, key: 'p:' + id, pubId: id, online: true, back: '#/discover', room: '2:' + id,
       onWin: (r) => {
         const res = progress.finish('p:' + id, r, { stars: game.stars || 0 });
         // checked by the server even when it doesn't pay: it counts for quests

@@ -13,7 +13,7 @@ for (const k of Object.keys(vol)) { const v = Number(vol[k]); vol[k] = Number.is
 export const getVolume = (bus) => vol[bus] ?? 1;
 export function setVolume(bus, v) { vol = { ...vol, [bus]: Math.max(0, Math.min(1, Number(v) || 0)) }; store.set('vol', vol); }
 const UI_SOUNDS = new Set(['chat', 'send', 'open', 'close', 'pop', 'notify', 'leave', 'join', 'error', 'buy', 'badge']);
-export function setMuted(m) { muted = m; store.set('muted', m); if (m) stopMusic(); }
+export function setMuted(m) { muted = m; store.set('muted', m); if (m) { halt(); emit(); } else if (gameSong || preview) play(); }
 
 // Browsers only allow sound after a click or key press.
 export function unlockAudio() {
@@ -86,7 +86,7 @@ export function sfx(name) { const s = SOUNDS[name]; if (!s) return; bus = UI_SOU
 let musicOn = store.get('music', true);
 let timer = 0, nextTime = 0, stepN = 0, song = null;
 export function isMusicOn() { return musicOn; }
-export function setMusicOn(on) { musicOn = on; store.set('music', on); if (!on) stopMusic(); }
+export function setMusicOn(on) { musicOn = on; store.set('music', on); if (!on) { halt(); emit(); } else if (gameSong || preview) play(); }
 
 // Notes are semitones above A3 (0 = A3). null = rest. 16 steps per bar.
 const SONGS = {
@@ -129,24 +129,54 @@ Object.assign(SONGS, {
     bass: [-24, null, -24, null, -21, null, -21, null, -19, null, -19, null, -18, null, -18, null],
   },
 });
+// Songs you buy in the Shop (Shop > Music). wave = the lead's sound (square by default).
+const _ = null;
+Object.assign(SONGS, {
+  sunny: { bpm: 120, lead: [15, _, 19, _, 22, _, 19, _, 20, _, 19, 17, 15, _, _, _, 15, _, 19, _, 22, _, 24, _, 22, _, 20, 19, 17, _, 15, _], bass: [-9, _, -9, _, -4, _, -4, _, -2, _, -2, _, -4, _, -4, _] },
+  pixel: { bpm: 140, lead: [12, 15, 19, 15, 12, 15, 19, 22, 21, _, 19, _, 17, _, 15, _, 12, 15, 19, 15, 12, 15, 19, 24, 22, _, 21, _, 19, _, _, _], bass: [-12, _, 0, _, -12, _, 0, _, -9, _, 3, _, -7, _, 5, _] },
+  night: { bpm: 100, wave: 'sawtooth', lv: 0.012, lead: [7, _, _, 10, _, _, 12, _, 14, _, 12, _, 10, _, 7, _, 5, _, _, 7, _, _, 10, _, 12, _, 10, _, 7, _, _, _], bass: [-17, _, -17, _, -17, _, -17, _, -19, _, -19, _, -15, _, -15, _] },
+  waves: { bpm: 88, wave: 'triangle', lv: 0.05, lead: [12, _, 16, _, 19, _, _, _, 17, _, 16, _, 14, _, _, _, 12, _, 16, _, 19, _, 21, _, 19, _, _, _, _, _, _, _], bass: [-12, _, _, _, -7, _, _, _, -10, _, _, _, -5, _, _, _] },
+  dream: { bpm: 96, wave: 'sine', lv: 0.06, lead: [19, _, 17, _, 19, _, 22, _, 24, _, _, _, 22, _, 19, _, 17, _, 15, _, 17, _, 19, _, 15, _, _, _, _, _, _, _], bass: [-9, _, _, _, -14, _, _, _, -12, _, _, _, -7, _, _, _] },
+  victory: { bpm: 144, lead: [12, _, 12, 12, 19, _, _, _, 17, _, 19, _, 21, _, 19, _, 12, _, 12, 12, 19, _, _, _, 24, _, 23, _, 24, _, _, _], bass: [-12, _, -12, _, -5, _, -5, _, -7, _, -7, _, -5, _, -5, _] },
+  boss: { bpm: 160, wave: 'sawtooth', lv: 0.012, lead: [0, _, 0, 3, _, 0, 6, _, 5, _, 3, _, 0, _, -2, _, 0, _, 0, 3, _, 0, 7, _, 8, _, 7, _, 6, _, 3, _], bass: [-24, -24, _, -24, -21, -21, _, -21, -22, -22, _, -22, -19, -19, _, -19] },
+  groove: { bpm: 116, lead: [12, _, _, 12, 15, _, 12, _, _, 10, _, 12, _, _, _, _, 12, _, _, 12, 15, _, 17, _, 15, _, 12, _, 10, _, _, _], bass: [-12, _, -12, -10, _, -12, _, -5, -12, _, -12, -10, _, -7, _, -5] },
+  legend: { bpm: 108, lead: [7, _, _, _, 12, _, _, _, 14, _, 15, _, 17, _, _, _, 19, _, 17, _, 15, _, 14, _, 12, _, _, _, _, _, _, _, 7, _, _, _, 12, _, _, _, 14, _, 15, _, 17, _, _, _, 22, _, 19, _, 17, _, 15, _, 19, _, _, _, _, _, _, _], bass: [-17, _, _, _, -12, _, _, _, -14, _, _, _, -10, _, _, _] },
+});
+export const hasSong = (id) => Object.hasOwn(SONGS, id);
 const freq = (n) => 220 * Math.pow(2, n / 12);
 
-export function startMusic(name) {
-  stopMusic();
-  if (!musicOn || muted) return;
+// The game asks for its own song (startMusic). The music box can pick one of your songs instead (setSongPick),
+// or pause the music. What's playing = your pick if you made one, else the game's song.
+let gameSong = null, pick = store.get('song', null), userPaused = false, playing = null, preview = null;
+const listeners = new Set();
+const emit = () => { for (const f of listeners) try { f(nowPlaying()); } catch (e) { /* a closed box */ } };
+export const onMusic = (f) => { listeners.add(f); return () => listeners.delete(f); };
+export const nowPlaying = () => ({ playing, gameSong, pick, paused: userPaused, off: !musicOn || muted });
+export function setSongPick(id) { pick = id && hasSong(id) ? id : null; store.set('song', pick); if (gameSong) play(); else emit(); }
+export function setSongPaused(p) { userPaused = !!p; if (userPaused) halt(); else if (gameSong) play(); emit(); }
+export function startMusic(name) { gameSong = SONGS[name] ? name : null; play(); }
+export function stopMusic() { gameSong = null; preview = null; halt(); emit(); }
+// the Shop's Listen button: plays that song until you stop it (or leave the page)
+export function previewSong(id) { preview = id && hasSong(id) ? id : null; if (preview) play(); else if (gameSong) play(); else { halt(); emit(); } }
+export const previewing = () => preview;
+function halt() { clearInterval(timer); timer = 0; song = null; playing = null; }
+function play() {
+  halt();
+  const name = preview || pick || gameSong;
+  if (!name || !musicOn || muted || (userPaused && !preview)) { emit(); return; }
   unlockAudio();
-  if (!ac) return;
-  song = SONGS[name]; stepN = 0; nextTime = ac.currentTime + 0.1;
+  if (!ac) { emit(); return; }
+  song = SONGS[name]; playing = name; stepN = 0; nextTime = ac.currentTime + 0.1;
   timer = setInterval(schedule, 60);
+  emit();
 }
-export function stopMusic() { clearInterval(timer); timer = 0; song = null; }
 function schedule() {
   if (!song || !ac) return;
   const len = 60 / song.bpm / 4;
   while (nextTime < ac.currentTime + 0.25) {
     const d = nextTime - ac.currentTime;
     const l = song.lead[stepN % song.lead.length], b = song.bass[stepN % song.bass.length];
-    if (l !== null) tone(freq(l), len * 0.9, { type: 'square', vol: 0.018, delay: d, on: 'music' });
+    if (l !== null) tone(freq(l), len * 0.9, { type: song.wave || 'square', vol: song.lv || 0.018, delay: d, on: 'music' });
     if (b !== null) tone(freq(b), len * 1.8, { type: 'triangle', vol: 0.05, delay: d, on: 'music' });
     if (stepN % 4 === 0) tone(60, 0.05, { type: 'sine', vol: 0.05, delay: d, slide: -20, on: 'music' });
     nextTime += len; stepN++;

@@ -1166,3 +1166,46 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
   .road-lv { width: 36px; height: 36px; font-size: 15px; }
 }
 .gov-why { font-weight: 700; color: var(--pink); }
+
+/* ---------- 2D: practice checkpoint button and full screen ---------- */
+.tbtn-cp { height: 84px; font-size: 30px; background: var(--grass); }
+#view-play:fullscreen { background: var(--bg); padding: 10px 14px; display: flex; flex-direction: column; overflow: hidden; }
+#view-play:fullscreen .bar { margin-bottom: 8px; }
+#view-play:fullscreen .stage { flex: 1 1 auto; min-height: 0; }
+#view-play:fullscreen #game { width: 100%; height: 100%; aspect-ratio: auto; object-fit: contain; }
+#view-play:fullscreen .touch { margin-top: 10px; }
+#view-play:fullscreen .hint { display: none; }
+
+/* ---------- the music box (in every game) ---------- */
+.mbox { position: absolute; z-index: 5; font-family: Nunito, system-ui, sans-serif; color: var(--text); pointer-events: auto; }
+.w3-stage > .mbox { top: 46px; left: 10px; }
+#stage > .mbox { left: 10px; top: 58px; }
+.mbox-full > * { min-width: 0; }
+.mbox-full { box-sizing: border-box; width: 214px; background: var(--card); border: 3px solid var(--line); border-radius: 14px; box-shadow: 0 3px 0 var(--line); padding: 6px 8px; display: grid; gap: 6px; }
+.mbox.small .mbox-full { display: none; }
+.mbox:not(.small) .mbox-open { display: none; }
+.mbox-open { width: 40px; height: 40px; border: 3px solid var(--line); border-radius: 12px; background: var(--sun); box-shadow: 0 3px 0 var(--line); font-size: 19px; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.mbox-open:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--line); }
+.mbox-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mbox-note { width: 26px; height: 26px; display: grid; place-items: center; background: var(--sun); border: 2px solid var(--line); border-radius: 8px; font-size: 14px; flex: none; }
+.mbox:not(.paused) .mbox-note { animation: mbox-bob 1s ease-in-out infinite; }
+@keyframes mbox-bob { 50% { transform: translateY(-2px) rotate(-6deg); } }
+@media (prefers-reduced-motion: reduce) { .mbox:not(.paused) .mbox-note { animation: none; } }
+.mbox-text { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.15; }
+.mbox-name { font-weight: 900; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mbox-sub { font-size: 11px; color: var(--muted); font-weight: 700; }
+.mbox-row { display: flex; align-items: center; gap: 4px; }
+.mbox-btn { width: 30px; height: 28px; flex: none; border: 2px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font-size: 13px; cursor: pointer; padding: 0; display: grid; place-items: center; box-shadow: 0 2px 0 var(--line); }
+.mbox-btn:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--line); }
+.mbox-top .mbox-btn { width: 26px; height: 24px; }
+.mbox-pick { flex: 1; width: 0; min-width: 0; font: 700 12px Nunito, system-ui, sans-serif; padding: 3px 4px; border: 2px solid var(--line); border-radius: 8px; background: var(--field); color: var(--text); }
+@media (max-width: 720px) {
+  /* phones: under the Players button (the top middle is busy) */
+  .w3-stage > .mbox { top: 52px; left: auto; right: 10px; }
+  .w3-stage.tycoon > .mbox { top: 128px; }
+  .w3-stage.has-compass.tycoon > .mbox { top: 166px; }
+  #stage > .mbox { top: 30px; left: 6px; }
+  #stage > .mbox .mbox-open { width: 30px; height: 30px; font-size: 14px; border-width: 2px; border-radius: 9px; }
+  .mbox-full { width: 180px; }
+}
+.play-mates { background: var(--grass); color: var(--ink); font-weight: 800; }

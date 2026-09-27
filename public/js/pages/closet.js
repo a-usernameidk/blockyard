@@ -8,7 +8,7 @@ import { setWallet, openAccount } from './account.js';
 import { SPECIAL_TITLES } from '../names.js';
 
 let tab = 'shop', kind = 'hat', pick = null, raf = 0, shopInfo = null, jumpTo = null;
-const KIND_LABEL = { hat: 'Hats', color: 'Colors', trail: 'Trails', pet: 'Pets', gear: 'Gear' };
+const KIND_LABEL = { hat: 'Hats', color: 'Colors', trail: 'Trails', pet: 'Pets', gear: 'Gear', music: 'Music' };
 onLeave('closet', () => cancelAnimationFrame(raf));
 
 /* ---------------- drawing items ---------------- */
@@ -43,7 +43,14 @@ export function itemPreview(k, item, size = 64) {
   cv.width = cv.height = size * dpr; cv.style.width = cv.style.height = size + 'px';
   const c = cv.getContext('2d'); c.scale(dpr, dpr); c.scale(size / 64, size / 64);
   const eq = progress.data.equip;
-  if (k === 'gear') {
+  if (k === 'music') {
+    // a music note on a colored record, colored by the song
+    let hsh = 0; for (const ch of item.id) hsh = (hsh * 31 + ch.charCodeAt(0)) % 360;
+    c.fillStyle = item.id === 'none' ? '#c8d0e0' : `hsl(${hsh}, 75%, 62%)`; c.strokeStyle = '#1d2340'; c.lineWidth = 3;
+    c.beginPath(); c.arc(32, 32, 25, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.fillStyle = '#1d2340'; c.beginPath(); c.ellipse(26, 42, 7, 5.5, -0.4, 0, Math.PI * 2); c.fill();
+    c.fillRect(31, 17, 3.5, 26); c.beginPath(); c.moveTo(34, 17); c.quadraticCurveTo(44, 21, 42, 31); c.quadraticCurveTo(40, 24, 34, 24); c.fill();
+  } else if (k === 'gear') {
     c.save(); c.translate(32, 36); drawGear(c, item.id, 40); c.restore();
   } else if (k === 'pet') {
     c.save(); c.translate(22, 42); drawPip(c, 22, eq.color, { t: 1, hat: 'none' }); c.restore();
@@ -165,7 +172,7 @@ function render() {
       el('div', { class: 'shelf' }, el('div', { class: 'shelf-head' }, el('h3', {}, 'Everything'), chips),
         ...(kind === 'gear'
           ? [['none'], ...Object.values(GEAR_CATS).map((C) => C.items)].map((ids, i) => { const list = SHOP.gear.filter((g) => ids.includes(g.id) && !gone('gear', g)); return list.length ? el('div', {}, i ? el('h4', { class: 'gear-group' }, Object.values(GEAR_CATS)[i - 1].name) : null, el('div', { class: 'items' }, ...list.map((item) => itemButton('gear', item, { status: statusOf('gear', item), onclick: choose('gear', item) })))) : null; })
-          : [el('div', { class: 'items' }, ...variantGroups(kind).map((g) => {
+          : [el('div', { class: 'items' }, ...variantGroups(kind).filter((g) => !(kind === 'music' && g.base.id === 'none')).map((g) => {
             // one card per item: its variants (recolors) are picked in the caption
             const list = g.list.filter((item) => !gone(kind, item) || g.list.length > 1);
             if (!list.length) return null;
@@ -195,7 +202,8 @@ function renderCaption() {
   const owned = progress.owns(k, id), wearing = progress.data.equip[k] === id;
   const w = progress.wallet;
   const buttons = [];
-  if (owned) buttons.push(el('button', { class: 'btn btn-grass', type: 'button', disabled: wearing, onclick: () => wear(k, id) }, wearing ? 'Wearing it' : 'Wear it'));
+  if (k === 'music') { if (id !== 'none') buttons.push(listenBtn(id)); }
+  else if (owned) buttons.push(el('button', { class: 'btn btn-grass', type: 'button', disabled: wearing, onclick: () => wear(k, id) }, wearing ? 'Wearing it' : 'Wear it'));
   if (owned && w && canTrade(item) && (w.items[key] || 0) > 0) {
     if (!item.stock) buttons.push(el('button', { class: 'btn btn-danger', type: 'button', onclick: () => sell(key, item) }, `Sell for ${sellPrice(item)}`));
     buttons.push(el('button', { class: 'btn', type: 'button', onclick: () => resell(key, item) }, 'Sell on Reseller shop'));
@@ -233,6 +241,19 @@ function renderCaption() {
   })) : null;
   cap.append(el('b', {}, item.name), item.need && !owned ? el('span', { class: 'small' }, ` ${item.hint}.`) : null, statsLine(key, item), styles, el('div', { class: 'row' }, ...buttons));
 }
+// songs: listen before you buy (plays until you press Stop or leave the Shop)
+function listenBtn(id) {
+  const on = () => audioMod && audioMod.previewing() === id;
+  const b = el('button', { class: 'btn btn-grass', type: 'button', onclick: async () => {
+    audioMod = audioMod || await import('../audio.js');
+    audioMod.unlockAudio();
+    audioMod.previewSong(on() ? null : id);
+    b.textContent = on() ? '⏹ Stop' : '▶ Listen';
+  } }, on() ? '⏹ Stop' : '▶ Listen');
+  return b;
+}
+let audioMod = null;
+onLeave('closet', () => { if (audioMod) audioMod.previewSong(null); });
 async function wear(k, id) {
   if (progress.wallet) {
     try { const r = await api.look({ [k]: id }); setWallet(r.wallet); } catch (e) { toast(e.message); return; }
@@ -245,7 +266,7 @@ async function buy(key, item, qty = 1, expect) {
     const r = await api.buy(key, qty, expect);
     setWallet(r.wallet);
     const f = findItem(key);
-    await api.look({ [f.kind]: f.id }).then((x) => setWallet(x.wallet)).catch(() => {});
+    if (f.kind !== 'music') await api.look({ [f.kind]: f.id }).then((x) => setWallet(x.wallet)).catch(() => {});
     progress.stat('bought'); progress.flush();
     import('../audio.js').then((a) => a.sfx('buy')).catch(() => {});
     toast(qty > 1 ? `You got ${qty} ${item.name}!` : `New ${f.kind === 'color' ? 'color' : f.kind}: ${item.name}!`);

@@ -1,14 +1,65 @@
 // Runs a 2D level: game loop, controls, camera, effects, in-game HUD and the end screens.
 // Modes: 'level' (normal), 'endless' (one life, go as far as you can), 'daily' (one life per attempt, retries forever).
 import { actionOf } from './controls.js';
-import { createGame, step, restart, T, STEP } from './engine2d.js';
+import { createGame, step, restart, dropCheckpoint, T, STEP } from './engine2d.js';
 import { drawBackground, drawMap, drawPlayer, drawWalker, drawPlatform, drawTile, INK } from './render2d.js';
 import { drawIcon } from './art.js';
-import { FORM_INFO } from './format.js';
+import { FORM_INFO, FORMS } from './format.js';
 import { inputBits, encodeReplay } from './replay.js';
 import { sfx, unlockAudio, startMusic, stopMusic } from './audio.js';
+import { mountMusicBox, unmountMusicBox } from './musicbox.js';
 import { progress } from './progress.js';
-import { store } from './api.js';
+import { store, api } from './api.js';
+import { openRoom, loggedIn } from './net.js';
+
+/* ---------------- playing together: see everyone else on the same level ----------------
+   Built-in and published levels have live servers (world '2:<level id>'). Other players are see-through Pips
+   with name tags: just to see, they can't touch you, and your run still counts only for you. */
+let net = null, mates = new Map(), myId = null, sentAt = 0, sent = '';
+const mateOf = (pl) => ({ name: pl.dn || pl.name, look: pl.look || {}, x: pl.p ? pl.p[0] : null, y: pl.p ? pl.p[1] : 0, tx: pl.p ? pl.p[0] : null, ty: pl.p ? pl.p[1] : 0, face: pl.r || 1, a: pl.a || 0 });
+function netStart(room) {
+  netStop();
+  if (!room || !loggedIn()) return;
+  net = openRoom(() => api.joinRoom({ world: room }), {
+    message(m) {
+      if (m.t === 'hello') { myId = m.you; mates = new Map(m.players.filter((x) => x.id !== m.you).map((x) => [x.id, mateOf(x)])); drawCount(); }
+      else if (m.t === 'join' && m.player.id !== myId) { mates.set(m.player.id, mateOf(m.player)); drawCount(); }
+      else if (m.t === 'leave') { mates.delete(m.id); drawCount(); }
+      else if (m.t === 'st') { const o = mates.get(m.id); if (o) { if (o.tx == null) { o.x = m.p[0]; o.y = m.p[1]; } o.tx = m.p[0]; o.ty = m.p[1]; o.face = m.r; o.a = m.a; } }
+    },
+    drop() { mates.clear(); drawCount(); },
+    closed() { mates.clear(); drawCount(); },
+    error() { /* playing alone is fine */ },
+  });
+}
+function netStop() { if (net) net.close(); net = null; mates.clear(); myId = null; sent = ''; drawCount(); }
+function drawCount() { const el = $('#play-mates'); if (!el) return; const n = mates.size; el.hidden = !net || !n; el.textContent = `👥 ${n + 1} playing here`; }
+// what I send: where I am, which way I face, and a byte: form (0-7) + 16 flipped + 32 dead + 64 mini
+function netTick(now) {
+  if (!net || !net.ready || !G) return;
+  const p = G.p, a = Math.max(0, FORMS.indexOf(p.form)) | (p.grav < 0 ? 16 : 0) | (G.dead ? 32 : 0) | (p.mini ? 64 : 0);
+  const msg = [Math.round(p.x), Math.round(p.y), p.face < 0 ? -1 : 1, a].join();
+  if (now - sentAt < 100 || (msg === sent && now - sentAt < 2000)) return;
+  sentAt = now; sent = msg;
+  net.send({ t: 'st', p: [Math.round(p.x), Math.round(p.y), 0], r: p.face < 0 ? -1 : 1, a });
+}
+function drawMates(t, dt) {
+  if (!mates.size) return;
+  const k = Math.min(1, dt * 12);
+  for (const o of mates.values()) {
+    if (o.tx == null || (o.a & 32)) continue;
+    o.x += (o.tx - o.x) * k; o.y += (o.ty - o.y) * k;
+    const form = FORMS[o.a & 7] || 'hopper';
+    const w = G.rush ? (o.a & 64 ? 16 : 26) : 22, h = G.rush ? (o.a & 64 ? 16 : 26) : 28;
+    const fake = { x: o.x, y: o.y, w, h, face: o.face, form: G.rush ? form : 'hopper', grav: o.a & 16 ? -1 : 1, onGround: true, rot: 0, vx: G.rush ? 1 : 0, vy: 0, mini: !!(o.a & 64) };
+    ctx.save(); ctx.globalAlpha = 0.5;
+    drawPlayer(ctx, fake, o.look.color || '#ff6b35', t, G.rush, { hat: o.look.hat || 'none' });
+    ctx.restore();
+    ctx.save(); ctx.globalAlpha = 0.85;
+    outlined(o.name, o.x + w / 2, (o.a & 16) ? o.y + h + 20 : o.y - 16, 13, '#fff', 'center');
+    ctx.restore();
+  }
+}
 
 /* ---------------- tips: the first time you get near something new, it says what it is ---------------- */
 const TIP2D = {
@@ -90,7 +141,8 @@ export function startPlay(level, o) {
   opts = o || {};
   opts.mode = opts.mode || 'level';
   look = { ...progress.data.equip };
-  G = createGame(level);
+  opts.practice = !!opts.practice && level.style === 'rush' && opts.mode === 'level';
+  G = createGame(level, { practice: opts.practice });
   parts = []; rings = []; beams = []; trail = []; flyers = []; cosmetic = []; toast = null; shake = 0; endTimer = 0; landFx = 0; coinBump = 0; over = false;
   frames = [];
   oldBest = progress.level(opts.key || 'x');
@@ -101,22 +153,32 @@ export function startPlay(level, o) {
   $('#touch-rush').hidden = !G.rush;
   $('#play-report').hidden = !opts.onReport;
   $('#play-restart').hidden = opts.mode === 'endless';
+  // Rush levels: practice mode (checkpoints, but no stars or coins)
+  const pb = $('#play-practice');
+  pb.hidden = !(G.rush && opts.mode === 'level');
+  pb.textContent = opts.practice ? 'Normal mode' : 'Practice';
+  pb.classList.toggle('btn-sun', !!opts.practice);
+  $('#touch-cp').hidden = !opts.practice;
   const f = FORM_INFO[G.p.form];
   $('#play-hint').textContent = G.rush
-    ? `One button: Space, Up, W, click or tap. You start as the ${f.name}. ${f.how}${opts.mode === 'level' ? ' R restarts.' : ''} Esc goes back.`
+    ? `One button: Space, Up, W, click or tap. You start as the ${f.name}. ${f.how}${opts.mode === 'level' ? ' R restarts.' : ''}${opts.practice ? ' Practice: flags are checkpoints, and C drops one where you stand.' : ''} Esc goes back.`
     : 'Arrow keys or WASD to move. Space or Up to jump. R restarts. Esc goes back.';
-  const title = opts.mode === 'endless' ? 'Endless Rush' : opts.mode === 'daily' ? 'Daily challenge' : 'Ready?';
-  const text = opts.mode === 'endless' ? 'One life. The further you go, the faster it gets.' : opts.mode === 'daily' ? 'Same course for everyone today. Your best run goes on the board.' : `${f.name}: ${f.how}`;
+  const title = opts.mode === 'endless' ? 'Endless Rush' : opts.mode === 'daily' ? 'Daily challenge' : opts.practice ? 'Practice mode' : 'Ready?';
+  const text = opts.mode === 'endless' ? 'One life. The further you go, the faster it gets.' : opts.mode === 'daily' ? 'Same course for everyone today. Your best run goes on the board.' : opts.practice ? 'Checkpoints are on (press C or tap ⚑ to drop your own). Practice runs don\'t give stars or coins.' : `${f.name}: ${f.how}`;
   if (G.rush) showReady(title, text); else { waiting = false; $('#ready').hidden = true; }
   snapCamera();
   releaseAll();
   fitCanvas();
   running = true; last = performance.now(); acc = 0;
+  mountMusicBox($('#stage'));
+  if (opts.room && opts.mode === 'level' && opts.room !== netRoom) { netRoom = opts.room; netStart(opts.room); } else if (!opts.room) { netRoom = null; netStop(); }
+  if (location.search.includes('w3test')) window.__p2 = { mates: () => [...mates.values()].map((o) => ({ name: o.name, x: o.tx, y: o.ty })), flags: () => G.map.filter((c) => c === 'P').length, practice: () => !!G.practice, cp: () => !!G.cp, ground: () => G.p.onGround, x: () => G.p.x };
   if (!G.rush) startMusic(songFor());
   requestAnimationFrame(frame);
 }
 
-export function stopPlay() { running = false; releaseAll(); stopMusic(); progress.flush(); if (tipEl) { tipEl.classList.remove('on'); tipT = 0; } }
+let netRoom = null;
+export function stopPlay() { unmountMusicBox(); netStop(); netRoom = null; if (document.fullscreenElement === $('#view-play')) document.exitFullscreen().catch(() => {}); running = false; releaseAll(); stopMusic(); progress.flush(); if (tipEl) { tipEl.classList.remove('on'); tipT = 0; } }
 
 function showReady(title, text) {
   waiting = true;
@@ -130,10 +192,12 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------------- loop ---------------- */
+let lastDt = 0.016;
 function frame(ts) {
   if (!running) return;
   try {
-    const dt = Math.min(0.05, Math.max(0, (ts - last) / 1000)); last = ts;
+    const dt = Math.min(0.05, Math.max(0, (ts - last) / 1000)); last = ts; lastDt = dt;
+    netTick(ts);
     if (!waiting && !G.won && !over) {
       acc += dt;
       while (acc >= STEP) {
@@ -190,7 +254,7 @@ function handleEvents() {
           if (r && r.newBest) showToast(`New best! ${Math.floor(G.best * 100)}%`);
           break;
         }
-        if (G.rush) {
+        if (G.rush && !opts.practice) {
           const prev = oldBest ? oldBest.progress : 0;
           if (G.best > prev + 0.005 && G.best > 0.05) showToast(`New best! ${Math.floor(G.best * 100)}%`);
           if (opts.key && opts.key !== 'test') progress.finish(opts.key, { won: false, progress: Math.round(G.best * 100) / 100 });
@@ -327,7 +391,7 @@ function render(t) {
     if (e.type === 'plat') drawPlatform(ctx, e.x, e.y, e.w);
     else if (e.type === 'walker' && e.alive) drawWalker(ctx, e, t);
   }
-  if (G.rush && opts.mode === 'level') outlined(`Attempt ${G.attempt}`, G.spawnTile.x * T + 70, Math.max(60, G.spawnTile.y * T - 70), 34);
+  if (G.rush && opts.mode === 'level') outlined(opts.practice ? 'Practice' : `Attempt ${G.attempt}`, G.spawnTile.x * T + 70, Math.max(60, G.spawnTile.y * T - 70), 34);
   if (opts.mode === 'endless' && progress.data.stats.endlessBest > 20) {
     const bx = progress.data.stats.endlessBest * T;
     if (bx > cx - 20 && bx < cx + VW + 20) { ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fillRect(bx - 2, 64, 4, G.h * T - 128); outlined('Best', bx, 84, 20, '#ffd23f', 'center'); }
@@ -354,6 +418,7 @@ function render(t) {
     ctx.beginPath(); ctx.ellipse(r.x, r.y, 8 + k * 30, 3 + k * 8, 0, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  drawMates(t, lastDt);
   if (!G.dead) drawPlayer(ctx, G.p, look.color, t, G.rush, { land: landFx, hat: look.hat });
   for (const p of parts) {
     ctx.globalAlpha = Math.max(0, Math.min(1, p.life / p.max * 1.5));
@@ -391,7 +456,7 @@ function drawHud() {
     outlined(`${Math.floor(G.p.x / T)} m`, VW - 18, y + 1, 30, '#fff', 'right');
     outlined(`Best ${Math.floor(progress.data.stats.endlessBest)} m`, VW - 18, y + 32, 18, '#ffd23f', 'right');
   } else if (G.rush) {
-    outlined(`Attempt ${G.attempt}`, VW - 18, y + 1, 24, '#fff', 'right');
+    outlined(opts.practice ? `Practice · attempt ${G.attempt}` : `Attempt ${G.attempt}`, VW - 18, y + 1, 24, opts.practice ? '#ffd23f' : '#fff', 'right');
     const w = 260, bx = (VW - w) / 2, by = 18;
     ctx.fillStyle = 'rgba(29,35,64,.55)'; ctx.fillRect(bx - 3, by - 3, w + 6, 20);
     ctx.fillStyle = '#fff'; ctx.fillRect(bx, by, w, 14);
@@ -433,6 +498,10 @@ function showEnd() {
     stats = `You made it ${dist} m${r.newBest ? '' : ` (best ${Math.floor(r.best)} m)`}.`;
     if (r.earned) reward.textContent = `+${r.earned} coins`;
     againLabel = 'Run again';
+  } else if (opts.practice) {
+    title = 'Practice done!';
+    stats = `You made it to the end in practice (attempt ${G.attempt}). Now beat it for real, with no checkpoints, for stars and coins.`;
+    againLabel = 'Try it for real';
   } else if (opts.mode === 'daily') {
     const r = opts.onAttempt ? opts.onAttempt({ won: true, progress: 1, replay }) : null;
     title = 'Daily cleared!';
@@ -482,7 +551,9 @@ function press() {
   input.hold = true;
 }
 function doRestart() { if (!G || G.won || over || opts.mode === 'endless') return; restart(G); acc = 0; frames = []; }
-function again() { if (opts.onAgain) opts.onAgain(); else startPlay(G.lv, opts); }
+function again() { if (opts.practice) { setPractice(false); return; } if (opts.onAgain) opts.onAgain(); else startPlay(G.lv, opts); }
+function setPractice(on) { stopMusic(); startPlay(G.lv, { ...opts, practice: on }); }
+function dropCp() { if (running && G && G.practice && !waiting) dropCheckpoint(G); }
 
 // your keys from Settings > Controls (the arrow keys always work too)
 const KEY2D = { left: 'left', right: 'right', jump: 'jump', fwd: 'jump' };
@@ -499,6 +570,7 @@ addEventListener('keydown', (e) => {
     if (k === 'jump' || waiting) press();
     if (k !== 'jump') input[k] = true;
   } else if (actionOf(e.code) === 'respawn') doRestart();
+  else if (e.code === 'KeyC' && G && G.practice) { e.preventDefault(); if (!e.repeat) dropCp(); }
   else if (e.code === 'Escape' && opts.onExit) opts.onExit();
 });
 addEventListener('keyup', (e) => {
@@ -527,6 +599,13 @@ document.querySelectorAll('.tbtn[data-k]').forEach((b) => {
 });
 
 $('#play-restart').addEventListener('click', () => { doRestart(); $('#play-restart').blur(); });
+$('#play-practice').addEventListener('click', () => { $('#play-practice').blur(); if (G) setPractice(!opts.practice); });
+$('#touch-cp').addEventListener('pointerdown', (e) => { e.preventDefault(); dropCp(); });
+// full screen: the whole play area (bar, game and touch buttons)
+const view = $('#view-play'), fsBtn = $('#play-full');
+if (!view.requestFullscreen) fsBtn.hidden = true;
+fsBtn.addEventListener('click', () => { fsBtn.blur(); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); else view.requestFullscreen().catch(() => {}); });
+document.addEventListener('fullscreenchange', () => { fsBtn.textContent = document.fullscreenElement === view ? 'Exit full screen' : 'Full screen'; });
 $('#win-again').addEventListener('click', again);
 $('#win-next').addEventListener('click', () => opts.onNext && opts.onNext());
 $('#win-back').addEventListener('click', () => opts.onExit && opts.onExit());
