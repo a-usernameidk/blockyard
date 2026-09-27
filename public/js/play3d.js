@@ -902,7 +902,7 @@ export function startWorld(root, opts) {
       h('p', { class: 'small' }, (s.b.hall || 0) ? 'Higher taxes = more coins, but people get unhappy (and might protest).' : 'Build the Town Hall to collect taxes.'),
       h('h4', {}, `Decisions${evs.length ? ` (${evs.length})` : ''}`),
       ...(evs.length ? evs.map((e) => h('div', { class: 'gov-card' }, h('p', {}, eventText(e)),
-        h('div', { class: 'gov-choices' }, ...TY_EVENTS[e.k].choices.map((c, i) => { const why = choiceBlock(s, e, i); return h('button', { class: 'btn', type: 'button', disabled: !mine || !!why, title: why || '', onclick: () => govDo(() => TYW.decide(e.id, i)) }, h('b', {}, c.label), fxTags(e, c.fx)); }))))
+        h('div', { class: 'gov-choices' }, ...TY_EVENTS[e.k].choices.map((c, i) => { const why = choiceBlock(s, e, i, walletCoins()); return h('button', { class: 'btn', type: 'button', disabled: !mine || !!why, title: why || '', onclick: () => govDo(() => TYW.decide(e.id, i)) }, h('b', {}, c.label), fxTags(e, c.fx), mine && why ? h('span', { class: 'small gov-why' }, why) : null); }))))
         : [h('p', { class: 'small' }, 'Nothing to decide right now. Something new comes up every 45 minutes or so.')]),
       h('h4', {}, `Court${cases.length ? ` (${cases.length})` : ''}`),
       ...(!police ? [h('p', { class: 'small' }, 'Build a Police station (in the west part of town, once you\'re a Town) and crimes come to your court. You\'re the judge!')]
@@ -922,7 +922,7 @@ export function startWorld(root, opts) {
       const label = `🏛️ Government${waiting ? ` (${waiting})` : ''}`;
       if (govBtn.textContent !== label) govBtn.textContent = label;
       govBtn.classList.toggle('gov-new', waiting > 0);
-      const sig = JSON.stringify([ty.tycoon.ev, ty.tycoon.cases, ty.tycoon.tax, ty.tycoon.log, ty.tycoon.stage, tyAt]);
+      const sig = JSON.stringify([ty.tycoon.ev, ty.tycoon.cases, ty.tycoon.tax, ty.tycoon.log, ty.tycoon.stage, tyAt, walletCoins()]);
       if (!gov.hidden && sig !== govSig) { govSig = sig; drawGov(); }
     }
     const s = tyNow();

@@ -1165,3 +1165,4 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
   .road-step > :last-child { grid-column: 1 / -1; justify-self: stretch; text-align: center; }
   .road-lv { width: 36px; height: 36px; font-size: 15px; }
 }
+.gov-why { font-weight: 700; color: var(--pink); }

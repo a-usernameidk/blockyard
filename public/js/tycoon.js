@@ -218,27 +218,30 @@ function makeEvent(s, st) {
 }
 export const eventText = (e) => EVENTS[e.k].text(e);
 // Can you pick this choice right now? ('' = yes, or why not)
-export function choiceBlock(s, e, i) {
+// Costs come out of the town vault first; whatever the vault can't cover comes from your own coins (`coins`).
+export function choiceBlock(s, e, i, coins = 0) {
   const c = EVENTS[e.k].choices[i];
   if (!c) return 'Unknown choice.';
   if (c.need && !SPOTS.some((x) => x.kind === c.need && s.b[x.id])) return `You need a ${KINDS[c.need].name}.`;
   const cost = c.fx.coins === '-a' ? e.a : c.fx.coins === '-b' ? e.b : 0;
-  if (cost && s.vault < cost) return `Not enough coins in the vault (${cost} needed).`;
+  if (cost && Math.floor(s.vault) + Math.max(0, coins) < cost) return `Not enough coins: ${cost} needed (vault + your coins).`;
   return '';
 }
 const meters = (s, fx) => { for (const m of ['happy', 'crime', 'corrupt']) if (fx[m]) s[m] = clamp(s[m] + fx[m]); };
 // Makes a decision. Returns an error message, or { text } saying what happened.
-export function decide(s, id, i) {
+// Returns { text, pay } where pay = coins to take from your wallet (the part the vault couldn't cover).
+export function decide(s, id, i, coins = 0) {
   const e = s.ev.find((x) => x.id === id);
   if (!e) return { error: 'That decision is gone.' };
-  const block = choiceBlock(s, e, i);
+  const block = choiceBlock(s, e, i, coins);
   if (block) return { error: block };
   const c = EVENTS[e.k].choices[i], fx = c.fx;
   s.ev = s.ev.filter((x) => x !== e);
   let text = `You chose: ${c.label}.`;
   if (fx.coins === 'a') { s.vault += e.a; text += ` +${e.a} coins in the vault.`; }
-  if (fx.coins === '-a') s.vault -= e.a;
-  if (fx.coins === '-b') s.vault -= e.b;
+  let pay = 0;
+  const cost = fx.coins === '-a' ? e.a : fx.coins === '-b' ? e.b : 0;
+  if (cost) { const fromVault = Math.min(Math.floor(s.vault), cost); s.vault -= fromVault; pay = cost - fromVault; if (pay) text += fromVault ? ` Paid ${fromVault} from the vault and ${pay} from your coins.` : ` Paid ${pay} from your coins.`; }
   if (fx.tax) s.tax = Math.max(0, Math.min(4, s.tax + fx.tax));
   meters(s, fx);
   if (fx.fair) {
@@ -251,7 +254,7 @@ export function decide(s, id, i) {
     text = s.happy >= 50 ? `The show loved your town! Tourists came: +${got} coins.` : `The show saw a grumpy town. Only a few tourists came (+${got} coins).`;
   }
   note(s, text);
-  return { text };
+  return { text, pay };
 }
 
 /* ---------------- court ---------------- */

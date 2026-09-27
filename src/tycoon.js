@@ -110,11 +110,16 @@ async function change(ctx, input, what) {
     const rate = Math.floor(Number(input.rate));
     if (!(rate >= 0 && rate <= 4)) fail(400, 'Pick a tax rate from 0 to 4.');
     s.tax = rate;
-  } else if (what === 'decide') r = decide(s, String(input.id || ''), Math.floor(Number(input.choice)));
+  } else if (what === 'decide') r = decide(s, String(input.id || ''), Math.floor(Number(input.choice)), (await getWallet(db, user.id)).coins);
   else r = judge(s, String(input.id || ''), String(input.verdict || ''));
   if (r.error) fail(400, r.error);
-  if (!(await save(db, user.id, s, version))) fail(409, 'Your town just changed. Try again.');
-  return json(out(s, { said: r.text, today: await todayGot(db, user.id) }));
+  // the part the vault couldn't cover comes from your coins (the coins CHECK stops the whole thing if you spent them meanwhile)
+  const pay = r.pay ? coinStmts(db, user.id, -r.pay, 'tycoon decision') : [];
+  if (!(await save(db, user.id, s, version, pay))) {
+    if (r.pay && (await getWallet(db, user.id)).coins < r.pay) fail(409, "You don't have enough coins for that anymore.");
+    fail(409, 'Your town just changed. Try again.');
+  }
+  return json(out(s, { said: r.text, today: await todayGot(db, user.id), ...(r.pay ? { wallet: await getWallet(db, user.id) } : {}) }));
 }
 
 /* ---------------- admin: look at and change anyone's town ---------------- */
