@@ -1,7 +1,7 @@
 // The 3D builder: fly around, place and break blocks, paint, pick, fill boxes, test your obby,
 // and build together with friends live (their edits show up as they make them).
 import { createRenderer, M4, hexRGB, raycast } from './gl.js';
-import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, PALETTE, SKIES, MODES, GAME_TYPES, SX, SY, SZ, idx, MAX_BLOCKS, normalizeWorld } from './world.js';
+import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, PALETTE, SKIES, MODES, GAME_TYPES, SX, SY, SZ, idx, MAX_BLOCKS, normalizeWorld, WORLD_ITEMS, WORLD_SHOP, cleanShop } from './world.js';
 import { avatarParts } from './avatar3d.js';
 import { openRoom } from './net.js';
 import { sfx, unlockAudio } from './audio.js';
@@ -10,6 +10,7 @@ import { logicEditor } from './logicEditor.js';
 import { cleanLogic } from './logic.js';
 import { GEAR_CATS, GEAR_TIER, TIER_NAME, cleanGearBan } from './cosmetics.js';
 import { SHOP } from './cosmetics.js';
+import { actionOf, sensitivity, invertY, keyName } from './controls.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -27,11 +28,12 @@ const TOOLS = [['place', 'Place', '1'], ['break', 'Break', '2'], ['paint', 'Pain
 const ORDER = ['grass', 'dirt', 'stone', 'wood', 'brick', 'sand', 'snow', 'leaves', 'metal', 'plastic', 'neon', 'glass', 'ghost', 'ice', 'lava', 'bounce', 'speed', 'crumble', 'checkpoint', 'beltN', 'beltE', 'beltS', 'beltW', 'teleport', 'moveX', 'moveZ', 'moveY', 'disco', 'goal', 'spawn', 'coin'];
 const LOGIC_ORDER = ['trigger', 'switchOn', 'switchOff', 'marker'];
 const TYCOON_ORDER = ['tclaim', 'tbutton', 'tbuild'];
+const SHOP_ORDER = ['shopstand'];
 export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') + '|' + (w.b || ''); for (let i = 0; i < s.length; i++) { hh ^= s.charCodeAt(i); hh = Math.imul(hh, 16777619) >>> 0; } return hh.toString(36) + ':' + s.length; };
 
 // opts: { world, title, me, look, room (ticket fn or null), canPublish, onChange(world), onPublish(world, proof), onFriends(), onExit(), low }
 export function startBuilder(root, opts) {
-  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(opts.world.gearBan), logic: cleanLogic(opts.world.logic) };
+  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(opts.world.gearBan), logic: cleanLogic(opts.world.logic), hotbar: opts.world.hotbar === true, shop: cleanShop(opts.world.shop) };
   const typeOf = (m) => (m.game || m.mode);
   let grid = decodeBlocks(opts.world.b || '');
   let proof = opts.proof || null;
@@ -91,6 +93,35 @@ export function startBuilder(root, opts) {
     }));
   }
   drawGearBox();
+  // the hotbar switch and the creator shop (hangouts and minigames only)
+  const hotbarBox = h('input', { type: 'checkbox' });
+  hotbarBox.addEventListener('change', () => setMeta({ hotbar: hotbarBox.checked }));
+  const shopBox = h('div', { class: 'b3-shop' });
+  function drawShopBox() {
+    hotbarBox.checked = !!meta.hotbar;
+    const hang = meta.mode === 'hangout';
+    const list = meta.shop || [];
+    const edit = (i, f) => { const l = list.map((x) => ({ ...x })); Object.assign(l[i], f); setMeta({ shop: cleanShop(l) }); drawShopBox(); };
+    const rows = list.map((x, i) => {
+      const type = h('select', { 'aria-label': 'What it is' }, ...Object.entries(WORLD_ITEMS).map(([k, v]) => h('option', { value: k, disabled: k !== x.i && list.some((y) => y.i === k) }, (v.kind === 'blaster' ? 'Blaster: ' : 'Gear: ') + v.name)));
+      type.value = x.i;
+      type.addEventListener('change', () => edit(i, { i: type.value, n: WORLD_ITEMS[type.value].name }));
+      const name = h('input', { maxlength: String(WORLD_SHOP.name), value: x.n, 'aria-label': 'Name in the shop' });
+      name.addEventListener('change', () => edit(i, { n: name.value }));
+      const price = h('input', { type: 'number', min: String(WORLD_SHOP.minPrice), max: String(WORLD_SHOP.maxPrice), value: String(x.p), 'aria-label': 'Price in coins' });
+      price.addEventListener('change', () => { const p = Math.max(WORLD_SHOP.minPrice, Math.min(WORLD_SHOP.maxPrice, Math.floor(Number(price.value) || 0))); edit(i, { p }); });
+      return h('div', { class: 'b3-shoprow' }, type, name, h('label', { class: 'b3-price' }, price, ' coins'), h('button', { class: 'btn btn-ghost', type: 'button', 'aria-label': 'Remove', onclick: () => { setMeta({ shop: list.filter((_, k) => k !== i) }); drawShopBox(); } }, 'Remove'));
+    });
+    const free = Object.keys(WORLD_ITEMS).find((k) => !list.some((y) => y.i === k));
+    const stand = [...grid.each()].some((b) => b[3] === B.shopstand);
+    shopBox.replaceChildren(h('h3', {}, 'Shop'),
+      !hang ? h('p', { class: 'small' }, 'Shops and the hotbar work in hangouts and minigames (Type), not in obbies.') : null,
+      h('p', { class: 'small' }, 'Sell gear and blasters in your world for coins. The coins go to you. Players keep what they buy, but it only works in this world (even if Gear is set to No gear). Blasters you sell are locked in Paintball until someone buys them.'),
+      ...rows,
+      h('div', { class: 'row' }, h('button', { class: 'btn btn-sun', type: 'button', disabled: !free || list.length >= WORLD_SHOP.max, onclick: () => { setMeta({ shop: cleanShop([...list, { i: free, n: WORLD_ITEMS[free].name, p: 100 }]) }); drawShopBox(); } }, 'Add something to sell'),
+        list.length && !stand ? h('span', { class: 'small warn-line' }, 'Place a Shop stand block (Build tab) so players can buy!') : null));
+  }
+  drawShopBox();
   const panes = {
     build: h('div', { class: 'b3-pane b3-pane-build' },
       h('div', { class: 'b3-tools' }, toolRow, boxBtn, undoBtn, redoBtn, blockTip),
@@ -98,6 +129,8 @@ export function startBuilder(root, opts) {
     world: h('div', { class: 'b3-pane', hidden: true },
       h('div', { class: 'b3-world' }, h('label', {}, 'Type ', modeSel), h('label', {}, 'Sky ', skySel), h('label', {}, 'Gear ', gearSel)),
       gearBox,
+      h('label', { class: 'check b3-hotbar' }, hotbarBox, ' Hotbar: gear only works when players put it in a numbered slot and hold it (1, 2, 3…), like Roblox'),
+      shopBox,
       h('p', { class: 'small' }, 'Minigame worlds run rounds for everyone in a server. Tycoon needs claim pads and buy buttons (Build tab, Tycoon blocks): each color is one plot. Gear (speed coils, jetpacks...) works in hangouts, Tag and Paintball unless you turn it off, and Logic can lend gear for a while in any world.')),
     logic: h('div', { class: 'b3-pane', hidden: true }, logicEd.el),
     view: h('div', { class: 'b3-pane', hidden: true }, h('div', { class: 'row' }, specBtn), viewNote,
@@ -106,7 +139,7 @@ export function startBuilder(root, opts) {
   const tabBtns = Object.keys(panes).map((k) => h('button', { class: 'tab', role: 'tab', type: 'button', 'data-dock': k, 'aria-selected': String(k === 'build'), onclick: () => setDock(k) }, { build: 'Build', world: 'World', logic: 'Logic', view: 'View' }[k]));
   function setDock(k) { for (const b of tabBtns) b.setAttribute('aria-selected', String(b.dataset.dock === k)); for (const [n, p] of Object.entries(panes)) p.hidden = n !== k; }
   const dock = h('div', { class: 'b3-dock' }, h('div', { class: 'tabs b3-dock-tabs', role: 'tablist', 'aria-label': 'Builder tools' }, ...tabBtns), ...Object.values(panes));
-  const hint = h('p', { class: 'hint' }, 'Click to use the tool, drag to look around. W A S D fly, Space up, Shift down, scroll to zoom. Right-click breaks. Keys: 1 Place, 2 Break, 3 Paint, 4 Pick, B box fill, T test, V spectate, Ctrl+Z undo.');
+  const hint = h('p', { class: 'hint' }, `Click to use the tool, drag to look around. ${['fwd', 'left', 'back', 'right'].map(keyName).join(' ')} fly, ${keyName('jump')} up, ${keyName('shift')} down, scroll to zoom. Right-click breaks. Keys: 1 Place, 2 Break, 3 Paint, 4 Pick, B box fill, T test, V spectate, Ctrl+Z undo.`);
   const layout = h('div', { class: 'b3 b3-docked' }, stage, moveRow, dock);
   root.replaceChildren(bar, layout, hint);
 
@@ -125,7 +158,8 @@ export function startBuilder(root, opts) {
     };
     palette.replaceChildren(h('h3', {}, 'Blocks'), h('div', { class: 'b3-grid' }, ...ORDER.map(btn)),
       h('h3', {}, 'Logic blocks'), h('div', { class: 'b3-grid' }, ...LOGIC_ORDER.map(btn)),
-      h('h3', {}, 'Tycoon blocks'), h('div', { class: 'b3-grid' }, ...TYCOON_ORDER.map(btn)));
+      h('h3', {}, 'Tycoon blocks'), h('div', { class: 'b3-grid' }, ...TYCOON_ORDER.map(btn)),
+      h('h3', {}, 'Shop blocks'), h('div', { class: 'b3-grid' }, ...SHOP_ORDER.map(btn)));
     swatches.replaceChildren(...PALETTE.map((c, i) => h('button', { class: 'swatch', type: 'button', style: `background:${c}`, 'aria-label': 'Color ' + (i + 1), 'aria-pressed': String(ed.color === i), onclick: () => { ed.color = i; renderPalette(); } })));
     const b = BLOCKS[ed.block];
     blockTip.textContent = b.tip || (b.tint ? 'Pick a color for this block below.' : '');
@@ -158,6 +192,9 @@ export function startBuilder(root, opts) {
     const mod = e.ctrlKey || e.metaKey;
     if (down && mod && e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (down && mod && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
+    // your movement keys (Settings > Controls) win over the builder's letter shortcuts
+    const mk = mod ? null : { fwd: 'f', back: 'b', left: 'l', right: 'r', jump: 'up', shift: 'down', camL: 'tl', camR: 'tr' }[actionOf(e.code)];
+    if (mk && !(spec && (mk === 'l' || mk === 'r'))) { e.preventDefault(); if (down) keys.add(mk); else keys.delete(mk); return; }
     if (down && !mod) {
       const t = { Digit1: 'place', Digit2: 'break', Digit3: 'paint', Digit4: 'pick' }[e.code];
       if (t) { setTool(t); return; }
@@ -167,10 +204,6 @@ export function startBuilder(root, opts) {
       if (spec && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) { e.preventDefault(); nextSpec(e.code === 'ArrowLeft' ? -1 : 1); return; }
       if (e.key === 'Enter' && opts.room) { e.preventDefault(); chatInput.focus(); return; }
     }
-    const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'up', ShiftLeft: 'down', ShiftRight: 'down', KeyQ: 'tl', KeyE: 'tr' }[e.code];
-    if (!k || mod) return;
-    e.preventDefault();
-    if (down) keys.add(k); else keys.delete(k);
   }
   addEventListener('keydown', onKey); addEventListener('keyup', onKey);
   const clear = () => { keys.clear(); mv.clear(); };
@@ -207,8 +240,9 @@ export function startBuilder(root, opts) {
     if (drag && drag.id === e.pointerId) {
       if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 6) drag.moved = true;
       if (drag.moved) {
-        cam.yaw += (e.clientX - drag.x) * 0.006;
-        cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - (e.clientY - drag.y) * 0.005));
+        const sn = sensitivity();
+        cam.yaw += (e.clientX - drag.x) * 0.006 * sn;
+        cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - (e.clientY - drag.y) * 0.005 * sn * (invertY() ? -1 : 1)));
       }
       drag.x = e.clientX; drag.y = e.clientY;
     }
@@ -316,6 +350,7 @@ export function startBuilder(root, opts) {
     if (f.mode || f.game != null) modeSel.value = typeOf(meta);
     if (f.n && document.activeElement !== nameIn) nameIn.value = meta.n;
     if (f.logic && !send) logicEd.set(meta.logic);
+    if (f.hotbar != null || f.shop || f.mode) drawShopBox();
     if (send && room) room.send({ t: 'op', op: { k: 'meta', f }, n: ++seq });
     changed();
   }
@@ -325,7 +360,7 @@ export function startBuilder(root, opts) {
   let nameT = 0;
   nameIn.addEventListener('input', () => { meta.n = nameIn.value.trim().slice(0, 40) || 'My world'; clearTimeout(nameT); nameT = setTimeout(() => setMeta({ n: meta.n }), 500); });
 
-  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), ...(meta.gear !== 'off' && meta.gearBan && meta.gearBan.length ? { gearBan: meta.gearBan } : {}), ...(meta.logic && meta.logic.length ? { logic: meta.logic } : {}), b: encodeBlocks(grid) }; }
+  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), ...(meta.gear !== 'off' && meta.gearBan && meta.gearBan.length ? { gearBan: meta.gearBan } : {}), ...(meta.logic && meta.logic.length ? { logic: meta.logic } : {}), ...(meta.hotbar ? { hotbar: true } : {}), ...(meta.shop && meta.shop.length ? { shop: meta.shop } : {}), b: encodeBlocks(grid) }; }
   let changeT = 0;
   function changed() {
     clearTimeout(changeT);
@@ -365,7 +400,8 @@ export function startBuilder(root, opts) {
           // the room's copy is the real one: load it, then re-send anything we did while disconnected
           const mine = pending.size ? [...pending.keys()].map((i) => [i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ, grid.t[i], grid.c[i]]) : [];
           grid = decodeBlocks(m.doc.b); R.setGrid(grid);
-          meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky, game: m.doc.game || '', gear: m.doc.gear === 'off' ? 'off' : 'on', logic: cleanLogic(m.doc.logic) };
+          meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky, game: m.doc.game || '', gear: m.doc.gear === 'off' ? 'off' : 'on', logic: cleanLogic(m.doc.logic), hotbar: m.doc.hotbar === true, shop: cleanShop(m.doc.shop) };
+          drawShopBox();
           meta.gearBan = cleanGearBan(m.doc.gearBan); logicEd.set(meta.logic); gearSel.value = meta.gear; drawGearBox();
           R.setSky(meta.sky); skySel.value = meta.sky; modeSel.value = typeOf(meta); if (document.activeElement !== nameIn) nameIn.value = meta.n;
           pending.clear();

@@ -3,12 +3,15 @@
 import { json, fail, body, needUser, randomId, isConstraint, DAY } from './util.js';
 import { findItem, canTrade, valueOf, SHOP, KINDS, itemKey } from '../public/js/cosmetics.js';
 import { coinStmts, getWallet, giveItem, takeItem, tidy, fixLook, mail, transferStmt, checkFarm } from './econ.js';
+import { cleanShop, WORLD_ITEMS } from '../public/js/world.js';
 
 export const MARKET_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS listings (id TEXT PRIMARY KEY, seller TEXT NOT NULL, item TEXT NOT NULL, price INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'open', buyer TEXT, at INTEGER NOT NULL, sold_at INTEGER)`,
   'CREATE INDEX IF NOT EXISTS listings_item ON listings (item, status, price)',
   'CREATE INDEX IF NOT EXISTS listings_seller ON listings (seller, status)',
+  // creator shops: things bought in a player's 3D world (they only work in that world)
+  'CREATE TABLE IF NOT EXISTS world_items (user_id TEXT NOT NULL, game_id TEXT NOT NULL, item TEXT NOT NULL, price INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user_id, game_id, item))',
 ];
 export const MARKET = { fee: 0, maxPrice: 1000000, perUser: 20 }; // no fee: the seller gets the whole price
 
@@ -22,6 +25,8 @@ export async function marketRoute(ctx, path, method) {
   if (path === '/chests' && method === 'GET') return json({ chests: CHESTS.map(chestOut) });
   if ((m = path.match(/^\/chests\/([a-z]+)\/open$/)) && method === 'POST') return openChest(ctx, m[1]);
   if (path === '/leaderboard' && method === 'GET') return leaderboard(ctx);
+  if ((m = path.match(/^\/worlds\/([A-Za-z0-9]{8})\/shop$/)) && method === 'GET') return worldShop(ctx, m[1]);
+  if ((m = path.match(/^\/worlds\/([A-Za-z0-9]{8})\/shop$/)) && method === 'POST') return buyWorldItem(ctx, m[1], await body(ctx.request));
   return null;
 }
 
@@ -92,6 +97,51 @@ async function cancelListing(ctx, id) {
   if (!r.meta.changes) fail(409, 'That one already sold.');
   await giveItem(db, user.id, l.item).run();
   return json({ ok: true, wallet: await getWallet(db, user.id) });
+}
+
+/* ---------------- creator shops ---------------- */
+// World makers sell things in their 3D world's shop (gear, blasters). Buyers pay real coins and the maker gets all of them.
+// What you buy is yours forever, but only in that world.
+async function shopWorld(db, id) {
+  const g = await db.prepare("SELECT id, user_id, data, hidden, visibility FROM games WHERE id = ? AND kind = '3d'").bind(id).first();
+  if (!g || g.hidden) fail(404, 'That world was not found.');
+  let shop = [];
+  try { shop = cleanShop(JSON.parse(g.data).shop); } catch (e) { /* no shop */ }
+  return { g, shop };
+}
+async function worldShop(ctx, id) {
+  const { db, user } = ctx;
+  const { g, shop } = await shopWorld(db, id);
+  const mine = !!user && user.id === g.user_id;
+  const owned = !user ? [] : mine ? shop.map((x) => x.i) : (await db.prepare('SELECT item FROM world_items WHERE user_id = ? AND game_id = ?').bind(user.id, id).all()).results.map((r) => r.item);
+  return json({ shop, owned, mine });
+}
+async function buyWorldItem(ctx, id, input) {
+  const user = needUser(ctx), { db } = ctx;
+  const { g, shop } = await shopWorld(db, id);
+  const x = shop.find((s) => s.i === input.item);
+  if (!x) fail(404, "That isn't sold here anymore.");
+  if (g.user_id === user.id) fail(400, "It's your world, so you have everything in your shop already.");
+  if (!g.user_id) fail(400, 'This world has no maker to pay.');
+  const have = await db.prepare('SELECT 1 FROM world_items WHERE user_id = ? AND game_id = ? AND item = ?').bind(user.id, id, x.i).first();
+  if (have) fail(409, 'You already have that.');
+  const price = x.p;
+  try {
+    await db.batch([
+      db.prepare('INSERT INTO world_items (user_id, game_id, item, price, at) VALUES (?, ?, ?, ?, ?)').bind(user.id, id, x.i, price, Date.now()),
+      ...coinStmts(db, user.id, -price, 'world shop ' + id),
+      ...coinStmts(db, g.user_id, price, 'shop sale ' + id),
+      transferStmt(db, user.id, g.user_id, price, 'shop'),
+    ]);
+  } catch (e) {
+    if (!isConstraint(e)) throw e;
+    const w = await getWallet(db, user.id);
+    if (w.coins < price) fail(402, `You need ${price} coins for that.`);
+    fail(409, 'You already have that.');
+  }
+  // lots of coins from your own extra accounts buying junk counts as farming
+  await checkFarm(ctx, g.user_id);
+  return json({ ok: true, item: x.i, name: x.n || WORLD_ITEMS[x.i].name, price, wallet: await getWallet(db, user.id) });
 }
 
 /* ---------------- item stats: rarity and what things are really worth ---------------- */

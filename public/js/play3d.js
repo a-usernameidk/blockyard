@@ -1,6 +1,6 @@
 // Playing a 3D world: your Pip, the camera, other players, chat, emotes, coins, checkpoints and the goal.
-import { createRenderer, M4, hexRGB } from './gl.js';
-import { decodeBlocks, Grid, BLOCKS, B, SX, SY, SZ, PALETTE } from './world.js';
+import { createRenderer, M4, hexRGB, raycast } from './gl.js';
+import { decodeBlocks, Grid, BLOCKS, B, SX, SY, SZ, PALETTE, COLOR_NAMES, idx, cleanShop, shopBlasters, WORLD_ITEMS } from './world.js';
 import { createSim, step3, STEP3, packInput, yawIndex, KEY, P3, moverOffset } from './physics3d.js';
 import { encodeReplay } from './replay.js';
 import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
@@ -14,11 +14,13 @@ const titleName = (id) => titleText(id);
 // the name everyone sees (display name, or the username)
 const label = (o) => (o && (o.dn || o.name)) || 'Someone';
 const tagBits = (tags) => tagPills(tags, (t, name) => h('span', { class: 'lvl tag-' + t }, name));
-import { GEAR_MODS, gearAllowed } from './cosmetics.js';
+import { GEAR, GEAR_MODS, gearAllowed } from './cosmetics.js';
 import { GFX, GFX_ORDER, gfxMode, setGfx } from './settings.js';
 import { emojiNodes, emojiButton } from './emoji.js';
 import { createBots } from './bots3d.js';
 import { BOTS, BOT_SKILL } from './games.js';
+import { LIVE_BLOCKS as LIVE } from './world.js';
+import { actionOf, keyName, sensitivity, invertY } from './controls.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -38,6 +40,8 @@ export function setMutedPlayer(name, on) {
   store.set('muted-players', [...m]);
 }
 const isMutedPlayer = (name) => muted().has(String(name).toLowerCase());
+const PERM_NAME = { owner: 'Owner', admin: 'Admin', builder: 'Builder' };
+const PERM_INFO = { '': 'No special powers', builder: 'Can place and break blocks in this server', admin: 'Builder, plus can fly, shout, remove players and undo building' };
 const EMOTE_LABEL = { wave: 'Wave', dance: 'Dance', cheer: 'Cheer', sit: 'Sit', point: 'Point', flip: 'Flip', spin: 'Spin' };
 
 // opts: { world, title, by, mode, look, me, room (async ticket fn or null), onWin, onExit, onProfile, onTrade, test, low, note }
@@ -110,27 +114,48 @@ export function startWorld(root, opts) {
     h('button', { class: 'btn', type: 'button', onclick: () => opts.onExit && opts.onExit() }, opts.test ? 'Back to building' : 'Leave'),
     h('div', { class: 'bar-title' }, h('h2', {}, opts.title || world.n), h('span', { class: 'by' }, opts.by ? 'by ' + opts.by : opts.game ? 'Minigames' : obby ? 'Obby' : 'Hangout')),
     obby ? restartBtn : null, resetBtn, inviteBtn, specBtn, lockBtn, gfxBtn, fullBtn);
-  /* ---------------- admin tools (only for admins) ---------------- */
+  /* ---------------- admin tools (admins, and the owner / admins of a private server) ---------------- */
   const isAdminMe = !!(opts.me && opts.me.admin);
+  let myPerm = ''; // in a private server: 'owner', 'admin', 'builder' or ''
+  const srvAdminMe = () => myPerm === 'owner' || myPerm === 'admin';
+  const canFly = () => isAdminMe || srvAdminMe();
+  const canBuild = () => !!room && (isAdminMe || !!myPerm);
   let fly = false, flySpeed = 12, noProof = false;
   const flyBtn = h('button', { class: 'btn', type: 'button', onclick: () => setFly(!fly) }, 'Fly: off');
   const speedBtns = [6, 12, 24].map((v) => h('button', { class: 'btn' + (v === flySpeed ? ' on' : ''), type: 'button', onclick: (e) => { flySpeed = v; speedBtns.forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, v === 6 ? 'Slow' : v === 12 ? 'Fast' : 'Zoom'));
   const shoutIn = h('input', { maxlength: '200', placeholder: 'Big message to this server', 'aria-label': 'Message to everyone in this server' });
+  const adminTitle = h('h3', {}, 'Admin');
+  const adminNote = h('p', { class: 'small' });
+  const undoBuildBtn = h('button', { class: 'btn btn-danger', type: 'button', hidden: true, onclick: async () => { if (room) { room.send({ t: 'buildreset' }); adminBox.hidden = true; } } }, 'Undo all building here');
   const adminBox = h('div', { class: 'w3-admin panel', hidden: true },
-    h('h3', {}, 'Admin'),
+    adminTitle,
     h('div', { class: 'row' }, flyBtn, ...speedBtns),
-    h('p', { class: 'small' }, 'F turns flying on and off. Space goes up, C goes down. Runs where you flew don\'t count.'),
+    h('p', { class: 'small' }, `${keyName('fly')} turns flying on and off. ${keyName('jump')} goes up, ${keyName('down')} goes down. Runs where you flew don't count.`),
     h('form', { class: 'row', onsubmit: (e) => { e.preventDefault(); const m = shoutIn.value.trim(); if (m && room) { room.send({ t: 'shout', m }); shoutIn.value = ''; } shoutIn.blur(); } }, shoutIn, h('button', { class: 'btn btn-sun', type: 'submit' }, 'Shout')),
-    h('p', { class: 'small' }, 'Click a player in the Players list to go to them, kick them, or manage them.'));
+    h('div', { class: 'row' }, undoBuildBtn),
+    adminNote);
+  const adminBtn = h('button', { class: 'btn btn-sun', type: 'button', hidden: true, onclick: () => { adminBox.hidden = !adminBox.hidden; adminBtn.blur(); } }, 'Admin');
+  // Build mode (Builders in a private server): place and break blocks that only this server sees
+  const buildBtn = h('button', { class: 'btn', type: 'button', hidden: true, title: `Build in this server (${keyName('build')})`, onclick: () => { setBuild(!building); buildBtn.blur(); } }, 'Build');
   function setFly(on) {
     fly = on; flyBtn.textContent = on ? 'Fly: on' : 'Fly: off'; flyBtn.classList.toggle('on', on);
     if (on) { noProof = true; S.v.x = S.v.y = S.v.z = 0; toast('Flying!', 1); } else { S.onGround = false; toast('Landing…', 1); }
   }
-  if (isAdminMe) {
-    bar.append(h('button', { class: 'btn btn-sun', type: 'button', onclick: () => { adminBox.hidden = !adminBox.hidden; } }, 'Admin'));
-    stage.append(adminBox);
+  bar.append(buildBtn, adminBtn);
+  stage.append(adminBox);
+  function drawPowers() {
+    adminBtn.hidden = !canFly();
+    adminBtn.textContent = isAdminMe ? 'Admin' : 'Server';
+    adminTitle.textContent = isAdminMe ? 'Admin' : myPerm === 'owner' ? 'Your server' : 'Server admin';
+    adminNote.textContent = isAdminMe ? 'Click a player in the Players list to go to them, kick them, or manage them.'
+      : myPerm === 'owner' ? 'Click a player in the Players list to make them a Builder or an Admin here, or to remove them from your server.'
+      : 'Click a player in the Players list to remove them from this server.';
+    undoBuildBtn.hidden = !(room && (isAdminMe || srvAdminMe()));
+    buildBtn.hidden = !canBuild();
+    if (!canBuild() && building) setBuild(false);
+    if (!canFly() && fly) setFly(false);
   }
-  const hint = h('p', { class: 'hint hint-keys' }, 'W A S D or arrows to move, Space to jump, drag to look around, scroll to zoom, Q and E turn the camera. Shift turns shift lock on and off. R respawns. Enter to chat, 1 to 7 for emotes.');
+  const hint = h('p', { class: 'hint hint-keys' }, `${['fwd', 'left', 'back', 'right'].map(keyName).join(' ')} or arrows to move, ${keyName('jump')} to jump, drag to look around, scroll to zoom, ${keyName('camL')} and ${keyName('camR')} turn the camera. ${keyName('shift')} turns shift lock on and off. ${keyName('respawn')} respawns. Enter to chat, 1 to 7 for emotes. Change keys in Settings.`);
   root.replaceChildren(bar, stage, hint);
 
   let R;
@@ -173,15 +198,19 @@ export function startWorld(root, opts) {
       return;
     }
     if (down && (e.key === 'Enter' || e.key === '/') && room) { e.preventDefault(); chatInput.focus(); return; }
-    if (down && e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) { resetPress = true; }
+    const act = actionOf(e.code);
+    if (down && act === 'respawn' && !e.ctrlKey && !e.metaKey) { resetPress = true; }
     if (shopOpen) { if (down && e.key === 'Escape') closeShop(); return; }
-    if (down && /^Digit[1-7]$/.test(e.code)) { const n = Number(e.code.slice(5)); if (paintWorld && n <= WEAPON_IDS.length) pickWeapon(WEAPON_IDS[n - 1]); else emote(EMOTES[n - 1]); return; }
-    if (down && (e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) { setShiftLock(!shiftLock); return; }
-    if (down && e.code === 'KeyB' && nearShop) { openShop(); return; }
-    if (down && e.code === 'KeyF' && isAdminMe && !e.repeat) { setFly(!fly); return; }
-    if (down && e.code === 'KeyV' && !e.repeat) { setSpec(!spec); return; }
-    if (spec && down && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD')) { e.preventDefault(); nextSpec(e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : 1); return; }
-    const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'j', KeyQ: 'ql', KeyE: 'qr', KeyC: 'dn', ControlLeft: 'dn' }[e.code];
+    if (down && /^Digit[1-9]$/.test(e.code)) { const n = Number(e.code.slice(5)); if (digitKey(n)) return; if (paintWorld && n <= WEAPON_IDS.length) pickWeapon(WEAPON_IDS[n - 1]); else if (n <= EMOTES.length) emote(EMOTES[n - 1]); return; }
+    if (down && act === 'shift' && !e.repeat) { setShiftLock(!shiftLock); return; }
+    if (down && act === 'shop' && (nearShop || nearStand)) { if (nearStand) openStand(); else openShop(); return; }
+    if (down && act === 'fly' && canFly() && !e.repeat) { setFly(!fly); return; }
+    if (down && act === 'spec' && !e.repeat) { setSpec(!spec); return; }
+    if (down && act === 'bag' && !e.repeat) { toggleBag(); return; }
+    if (down && act === 'build' && !e.repeat && canBuild()) { setBuild(!building); return; }
+    if (down && act === 'shoot' && !e.repeat) { if (paintOn()) shoot(); else if (snowOn()) throwSnow(); return; }
+    if (spec && down && (act === 'left' || act === 'right')) { e.preventDefault(); nextSpec(act === 'left' ? -1 : 1); return; }
+    const k = { fwd: 'f', back: 'b', left: 'l', right: 'r', jump: 'j', camL: 'ql', camR: 'qr', down: 'dn' }[act];
     if (!k) return;
     e.preventDefault();
     unlockAudio();
@@ -203,7 +232,7 @@ export function startWorld(root, opts) {
     if (e.pointerType === 'touch' && e.clientX - r.left < r.width * 0.42 && joyId === null) {
       joyId = e.pointerId; joyVec = { ox: e.clientX, oy: e.clientY, x: 0, y: 0 };
       joy.style.left = e.clientX - r.left + 'px'; joy.style.top = e.clientY - r.top + 'px'; joy.classList.add('on');
-    } else camDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() };
+    } else camDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), button: e.button };
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ok */ }
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -212,8 +241,9 @@ export function startWorld(root, opts) {
       joyVec.x = dx * m / 44; joyVec.y = dy * m / 44;
       joy.firstChild.style.transform = `translate(${dx * m}px, ${dy * m}px)`;
     } else if (camDrag && camDrag.id === e.pointerId) {
-      cam.yaw += (e.clientX - camDrag.x) * 0.008;
-      cam.pitch = Math.max(-0.25, Math.min(1.35, cam.pitch + (e.clientY - camDrag.y) * 0.006));
+      const sn = sensitivity();
+      cam.yaw += (e.clientX - camDrag.x) * 0.008 * sn;
+      cam.pitch = Math.max(-0.25, Math.min(1.35, cam.pitch + (e.clientY - camDrag.y) * 0.006 * sn * (invertY() ? -1 : 1)));
       camDrag.x = e.clientX; camDrag.y = e.clientY;
     }
   });
@@ -221,26 +251,34 @@ export function startWorld(root, opts) {
     if (joyId === e.pointerId) { joyId = null; joyVec = null; joy.classList.remove('on'); joy.firstChild.style.transform = ''; }
     if (camDrag && camDrag.id === e.pointerId) {
       // a quick click (not a drag) shoots in Paintball
-      if (Math.hypot(e.clientX - camDrag.sx, e.clientY - camDrag.sy) < 7 && performance.now() - camDrag.t < 350) { if (paintOn()) shoot(); else if (snowOn()) throwSnow(); }
+      if (Math.hypot(e.clientX - camDrag.sx, e.clientY - camDrag.sy) < 7 && performance.now() - camDrag.t < 350) {
+        const r = canvas.getBoundingClientRect();
+        if (building) buildAt(e.clientX - r.left, e.clientY - r.top, camDrag.button === 2);
+        else if (paintOn()) shoot(); else if (snowOn()) throwSnow();
+      }
       camDrag = null;
     }
   };
   canvas.addEventListener('pointerup', endPointer); canvas.addEventListener('pointercancel', endPointer);
+  let mouseAt = null; // where the mouse is over the world (for the build outline)
+  canvas.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') { const r = canvas.getBoundingClientRect(); mouseAt = { x: e.clientX - r.left, y: e.clientY - r.top }; } });
+  canvas.addEventListener('pointerleave', () => { mouseAt = null; });
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.dist = Math.max(2.5, Math.min(18, cam.dist * (e.deltaY > 0 ? 1.1 : 0.9))); }, { passive: false });
   /* ----- shift lock: the mouse turns the camera (no dragging) and Pip faces where you look ----- */
   let shiftLock = false, shoulder = 0;
   function setShiftLock(on) {
     shiftLock = on; lockBtn.textContent = on ? 'Shift lock: on' : 'Shift lock'; lockBtn.classList.toggle('on', on);
     stage.classList.toggle('locked', on);
-    if (on) { try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* drag still works */ } toast('Shift lock on. Press Shift or Esc to turn it off.', 1.8); }
+    if (on) { try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* drag still works */ } toast(`Shift lock on. Press ${keyName('shift')} or Esc to turn it off.`, 1.8); }
     else if (document.pointerLockElement === canvas) document.exitPointerLock();
   }
   lockBtn.addEventListener('click', () => { setShiftLock(!shiftLock); lockBtn.blur(); });
   const onLockChange = () => { if (document.pointerLockElement !== canvas && shiftLock) setShiftLock(false); };
   const onMouseMove = (e) => {
     if (document.pointerLockElement !== canvas) return;
-    cam.yaw += e.movementX * 0.0035;
-    cam.pitch = Math.max(-0.25, Math.min(1.35, cam.pitch + e.movementY * 0.003));
+    const sn = sensitivity();
+    cam.yaw += e.movementX * 0.0035 * sn;
+    cam.pitch = Math.max(-0.25, Math.min(1.35, cam.pitch + e.movementY * 0.003 * sn * (invertY() ? -1 : 1)));
   };
   document.addEventListener('pointerlockchange', onLockChange);
   document.addEventListener('mousemove', onMouseMove);
@@ -332,8 +370,8 @@ export function startWorld(root, opts) {
   function removePlayer(id) { const o = others.get(id); if (!o) return; o.tag.remove(); others.delete(id); renderList(); }
   function renderList() {
     listBtn.textContent = `Players ${others.size + 1}`;
-    list.replaceChildren(h('li', { class: 'me' }, h('span', { class: 'dot', style: `background:${look.color}` }), (opts.me && (opts.me.display || opts.me.name)) || 'You', ' (you)'),
-      ...[...others.values()].map((o) => h('li', {}, h('button', { class: 'linkish', type: 'button', onclick: (e) => openMenu(o, e) }, h('span', { class: 'dot', style: `background:${(o.look && o.look.color) || '#ff6b35'}` }), label(o), o.dn ? h('span', { class: 'small' }, ' @' + o.name) : null, isMutedPlayer(o.name) ? ' (muted)' : ''))));
+    list.replaceChildren(h('li', { class: 'me' }, h('span', { class: 'dot', style: `background:${look.color}` }), (opts.me && (opts.me.display || opts.me.name)) || 'You', ' (you)', myPerm ? h('span', { class: 'lvl perm-' + myPerm }, PERM_NAME[myPerm]) : null),
+      ...[...others.values()].map((o) => h('li', {}, h('button', { class: 'linkish', type: 'button', onclick: (e) => openMenu(o, e) }, h('span', { class: 'dot', style: `background:${(o.look && o.look.color) || '#ff6b35'}` }), label(o), o.dn ? h('span', { class: 'small' }, ' @' + o.name) : null, o.pm ? h('span', { class: 'lvl perm-' + o.pm }, PERM_NAME[o.pm]) : null, isMutedPlayer(o.name) ? ' (muted)' : ''))));
   }
   listBtn.addEventListener('click', () => { list.hidden = !list.hidden; listBtn.setAttribute('aria-expanded', String(!list.hidden)); });
   function closeMenu() { menu.hidden = true; }
@@ -355,6 +393,11 @@ export function startWorld(root, opts) {
         h('button', { class: 'btn', type: 'button', onclick: () => { if (o.pos) { noProof = true; S.p.x = o.pos[0]; S.p.y = o.pos[1] + 0.2; S.p.z = o.pos[2]; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; toast(`Went to ${o.name}`, 1.2); } closeMenu(); } }, 'Go to them'),
         opts.onKick ? h('button', { class: 'btn btn-danger', type: 'button', onclick: () => { opts.onKick(o.name); closeMenu(); } }, 'Kick') : null,
         opts.onManage ? h('button', { class: 'btn', type: 'button', onclick: () => { clearKeys(); opts.onManage(o.name); closeMenu(); } }, 'Manage') : null) : null,
+      // private servers: the owner hands out powers, the owner and admins can remove people
+      myPerm === 'owner' && o.pm !== 'owner' ? h('div', { class: 'w3-menu-row w3-perms' }, h('span', { class: 'small' }, 'Powers here:'),
+        ...[['', 'None'], ['builder', 'Builder'], ['admin', 'Admin']].map(([p, l]) => h('button', { class: 'btn' + ((o.pm || '') === p ? ' on' : ''), type: 'button', 'aria-pressed': String((o.pm || '') === p), title: PERM_INFO[p], onclick: () => { if (room) room.send({ t: 'perm', id: o.id, p }); closeMenu(); } }, l))) : null,
+      (srvAdminMe() || isAdminMe) && room && myPerm && o.pm !== 'owner' && !o.admin && !(o.pm === 'admin' && myPerm !== 'owner') ? h('div', { class: 'w3-menu-row' },
+        h('button', { class: 'btn btn-danger', type: 'button', onclick: () => { if (room) room.send({ t: 'skick', id: o.id }); closeMenu(); } }, 'Remove from this server')) : null,
       reportRow,
       h('button', { class: 'btn w3-menu-x', type: 'button', onclick: closeMenu, 'aria-label': 'Close' }, 'Close'));
     menu.hidden = false;
@@ -363,6 +406,8 @@ export function startWorld(root, opts) {
     switch (m.t) {
       case 'hello':
         myId = m.you; online = true;
+        myPerm = m.perm || ''; drawPowers();
+        resetEdits(); if (m.edits) applyEdits(m.edits);
         for (const o of [...others.keys()]) removePlayer(o);
         for (const p of m.players) addPlayer(p);
         log.replaceChildren();
@@ -391,6 +436,15 @@ export function startWorld(root, opts) {
       }
       case 'emote': { const o = others.get(m.id); if (o) { o.emote = m.e; o.et = 0; } break; }
       case 'look': { const o = others.get(m.id); if (o) { o.look = m.look; renderList(); } break; }
+      case 'perm': {
+        if (m.id === myId) {
+          myPerm = m.p || ''; drawPowers(); renderList();
+          if (myPerm) { toast(myPerm === 'admin' ? `You're an Admin in this server! Build (${keyName('build')}), fly and more.` : `You're a Builder in this server! Press Build (${keyName('build')}) to build.`, 3); sfx('badge'); }
+        } else { const o = others.get(m.id); if (o) { o.pm = m.p || undefined; renderList(); } }
+        break;
+      }
+      case 'build': applyEdits(m.b); break;
+      case 'buildreset': resetEdits(); toast('All the building here was undone.', 1.8); break;
       case 'sys': addLine(null, m.m, null, m.big ? 'big' : true); break;
       case 'kicked': case 'full': case 'error': showMsg(m.m, true); break;
       case 'round': onRound(m); break;
@@ -558,28 +612,245 @@ export function startWorld(root, opts) {
   const nameOf = (id) => (id === myId ? 'You' : label(others.get(id)));
   const toXYZ = (a, spread) => ({ x: a[0] + (spread ? (Math.random() - 0.5) * spread : 0), y: a[1], z: a[2] + (spread ? (Math.random() - 0.5) * spread : 0) });
   // gear works in hangouts, Tag and Paintball. Never in obbies (timed and checked) or the other minigames (fair play).
+  // Hotbar worlds: gear only works while you hold it (press its number). Gear bought in the world's shop works even
+  // where players' own gear is turned off (the maker sells it on purpose).
   function applyGear() {
-    // hangouts (and Test in the builder) unless the maker turned gear off; in minigames only Tag and Paintball
-    const ok = world.mode === 'hangout' && world.gear !== 'off' && (!inRound || rs.mode === 'tag' || rs.mode === 'paint');
-    S.mods = ok && gearAllowed(world, look.gear) ? GEAR_MODS[look.gear] || null : null;
+    const ok = world.mode === 'hangout' && (!inRound || rs.mode === 'tag' || rs.mode === 'paint');
+    const t = heldTool();
+    let mods = null;
+    if (ok && t) mods = t.from === 'shop' || gearAllowed(world, t.gear) ? GEAR_MODS[t.gear] || null : null;
+    else if (ok && !hotbarOn) mods = gearAllowed(world, look.gear) ? GEAR_MODS[look.gear] || null : null;
+    S.mods = mods;
   }
+  const shownLook = () => (hotbarOn || heldTool() ? { ...look, gear: heldTool() ? heldTool().gear : 'none' } : look);
+
+  /* ----- the hotbar: gear goes in numbered slots, press the number to hold it (like Roblox) ----- */
+  const hotbarOn = !!world.hotbar && world.mode === 'hangout';
+  const wShop = world.mode === 'hangout' ? cleanShop(world.shop) : [];
+  const wOwned = new Set(opts.test ? wShop.map((x) => x.i) : []);
+  const lockedBlasters = shopBlasters(world.mode === 'hangout' ? world : null);
+  const blasterOk = (id) => !lockedBlasters.has(id) || wOwned.has('b-' + id);
+  const slotBase = () => (paintWorld ? WEAPON_IDS.length : 0); // Paintball keeps 1-4 for blasters
+  const maxSlots = () => 9 - slotBase();
+  const barKey = 'hotbar:' + (opts.worldId || world.n || 'world');
+  let bar0 = store.get(barKey, null);
+  let slots = Array.isArray(bar0 && bar0.slots) ? bar0.slots.filter((k) => typeof k === 'string').slice(0, 9) : [];
+  const putAway = new Set(Array.isArray(bar0 && bar0.out) ? bar0.out : []);
+  let held = -1;
+  function tools() {
+    const out = [];
+    if (hotbarOn && opts.ownsGear) for (const g of GEAR) if (GEAR_MODS[g.id] && opts.ownsGear(g.id) && gearAllowed(world, g.id)) out.push({ key: 'g:' + g.id, gear: g.id, name: g.name, from: 'closet' });
+    for (const x of wShop) if (wOwned.has(x.i) && WORLD_ITEMS[x.i].kind === 'gear') out.push({ key: 's:' + x.i, gear: x.i, name: x.n, from: 'shop' });
+    return out;
+  }
+  const toolOf = (key) => tools().find((t) => t.key === key) || null;
+  const heldTool = () => (held >= 0 && slots[held] ? toolOf(slots[held]) : null);
+  const barShown = () => hotbarOn || tools().length > 0;
+  function saveBar() { store.set(barKey, { slots, out: [...putAway] }); }
+  function fillSlots() {
+    const all = tools(), keysNow = new Set(all.map((t) => t.key));
+    const heldKey = held >= 0 ? slots[held] : null;
+    slots = slots.filter((k) => keysNow.has(k)).slice(0, maxSlots());
+    for (const t of all) if (!slots.includes(t.key) && !putAway.has(t.key) && slots.length < maxSlots()) slots.push(t.key);
+    held = heldKey ? slots.indexOf(heldKey) : -1;
+    saveBar(); drawHotbar(); applyGear();
+  }
+  const hotbar = h('div', { class: 'w3-hotbar', role: 'toolbar', 'aria-label': 'Hotbar', hidden: true });
+  const bag = h('div', { class: 'w3-admin panel w3-bag', hidden: true });
+  function drawHotbar() {
+    hotbar.hidden = !barShown();
+    hotbar.classList.toggle('paint', paintWorld);
+    const cells = slots.map((k, i) => {
+      const t = toolOf(k);
+      return h('button', { class: 'w3-slot' + (held === i ? ' on' : ''), type: 'button', title: t ? `${t.name} (${i + 1 + slotBase()})` : '', onclick: (e) => { hold(i); e.currentTarget.blur(); } }, h('b', {}, String(i + 1 + slotBase())), h('span', {}, t ? t.name : '?'));
+    });
+    if (!slots.length) cells.push(h('span', { class: 'w3-slot empty' }, hotbarOn ? 'Hotbar: put gear here' : ''));
+    hotbar.replaceChildren(...cells, h('button', { class: 'w3-slot w3-bagbtn', type: 'button', title: `Backpack (${keyName('bag')})`, 'aria-label': 'Backpack', onclick: (e) => { toggleBag(); e.currentTarget.blur(); } }, '🎒'));
+    if (!bag.hidden) drawBag();
+  }
+  function hold(i) {
+    if (i < 0 || i >= slots.length) return;
+    held = held === i ? -1 : i;
+    const t = heldTool();
+    toast(t ? `Holding: ${t.name}` : 'Put it away.', 1); sfx(t ? 'pop' : 'close');
+    drawHotbar(); applyGear();
+  }
+  // number keys: the hotbar gets them first (after the blasters in Paintball worlds)
+  function digitKey(n) {
+    if (!barShown()) return false;
+    const i = n - 1 - slotBase();
+    if (i < 0) return false;
+    if (i < slots.length) hold(i);
+    return true;
+  }
+  function toggleBag() { if (!barShown()) { if (hotbarOn) toast('Your backpack is empty.', 1.2); return; } bag.hidden = !bag.hidden; if (!bag.hidden) { drawBag(); sfx('open'); } }
+  function drawBag() {
+    const all = tools();
+    bag.replaceChildren(h('h3', {}, 'Backpack'),
+      h('p', { class: 'small' }, hotbarOn ? 'In this world gear only works while you hold it: put it in your hotbar, then press its number (or tap it).' : 'Things you bought in this world. Put them in your hotbar and press the number to use one.'),
+      all.length ? h('ul', { class: 'w3-invite-list' }, ...all.map((t) => {
+        const at = slots.indexOf(t.key);
+        return h('li', {}, h('span', {}, h('b', {}, t.name), h('span', { class: 'small' }, at >= 0 ? ` slot ${at + 1 + slotBase()}` : ' in the backpack', t.from === 'shop' ? ' (from this shop)' : '')),
+          at > 0 ? h('button', { class: 'btn', type: 'button', title: 'Move left', onclick: () => { [slots[at - 1], slots[at]] = [slots[at], slots[at - 1]]; if (held === at) held--; else if (held === at - 1) held++; saveBar(); drawHotbar(); } }, '◀') : null,
+          at >= 0
+            ? h('button', { class: 'btn', type: 'button', onclick: () => { if (held === at) held = -1; else if (held > at) held--; slots.splice(at, 1); putAway.add(t.key); saveBar(); drawHotbar(); applyGear(); } }, 'Take out')
+            : h('button', { class: 'btn btn-sun', type: 'button', onclick: () => { if (slots.length >= maxSlots()) { toast('Your hotbar is full. Take something out first.', 1.6); return; } putAway.delete(t.key); slots.push(t.key); saveBar(); drawHotbar(); } }, 'Put in hotbar'));
+      })) : h('p', { class: 'small' }, hotbarOn ? "You don't have any gear that works here. Get some in the Shop, or buy some at this world's shop stand." : 'Nothing yet.'),
+      h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => { bag.hidden = true; } }, 'Close')));
+  }
+  stage.append(hotbar, bag);
+  if (hotbarOn) setTimeout(() => { if (!stopped) toast(`This world has a hotbar: press 1, 2, 3… to hold your gear. ${keyName('bag')} opens your backpack.`, 3.2); }, 2500);
+
+  /* ----- creator shops: a shop keeper on each Shop stand sells what the maker picked, for real coins ----- */
+  const stands = [];
+  if (wShop.length) for (const [x, y, z, t] of viewGrid.each()) {
+    if (t !== B.shopstand || viewGrid.get(x, y + 1, z) === B.shopstand || viewGrid.get(x - 1, y, z) === B.shopstand || viewGrid.get(x, y, z - 1) === B.shopstand) continue;
+    if (stands.length >= 8) break;
+    const tag = h('div', { class: 'w3-tag shopkeep' }, h('span', { class: 'w3-name' }, 'Shop'), h('span', { class: 'w3-bubble' }, opts.by ? `${opts.by}'s shop` : 'Shop'));
+    tags.append(tag);
+    stands.push({ x: x + 0.5, y: y + 1, z: z + 0.5, tag });
+  }
+  const STAND_KEEP = { color: '#44c06a', hat: 'cap', trail: 'none', pet: 'none', gear: 'none' };
+  const standBtn = h('button', { class: 'btn btn-sun w3-shopbtn', type: 'button', hidden: true }, `Shop (${keyName('shop')})`);
+  standBtn.addEventListener('click', () => { openStand(); standBtn.blur(); });
+  let nearStand = false;
+  const gearInfo = (id) => { const m = GEAR_MODS[id] || {}; return [m.speed && m.speed > 1 && 'run faster', m.grav && 'floaty jumps', m.jumps && (m.jumps > 1 ? 'triple jump' : 'double jump'), m.jet && 'hold jump to fly up'].filter(Boolean).join(', '); };
+  const itemInfo = (x) => { const w = WORLD_ITEMS[x.i]; return w.kind === 'blaster' ? `Paintball blaster: ${WEAPONS[w.blaster].info}` : `Gear: ${gearInfo(x.i)}.${barShown() || hotbarOn ? ' Goes in your hotbar.' : ''}`; };
+  function openStand() {
+    if (!wShop.length || shopOpen) return;
+    shopOpen = true; clearKeys(); if (shiftLock) setShiftLock(false);
+    const confirmFor = { i: null };
+    const coins = h('span', { class: 'tag tag-pay' });
+    const list = h('div', { class: 'wshop-list' });
+    const draw = () => {
+      const w = opts.wallet ? opts.wallet() : null;
+      coins.textContent = opts.test ? 'Test: free' : w ? `${w.coins} coins` : 'Guest';
+      list.replaceChildren(...wShop.map((x) => {
+        const own = wOwned.has(x.i);
+        let btn;
+        if (own) btn = h('button', { class: 'btn', type: 'button', disabled: true }, 'Yours');
+        else if (opts.test) btn = h('button', { class: 'btn btn-sun', type: 'button', onclick: () => { wOwned.add(x.i); afterBuy(x); draw(); } }, 'Try it (free in Test)');
+        else if (!opts.onShopBuy) btn = h('button', { class: 'btn', type: 'button', disabled: true }, 'Log in to buy');
+        else if (confirmFor.i === x.i) btn = h('button', { class: 'btn btn-grass', type: 'button', onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true; b.textContent = 'Buying…';
+          try { await opts.onShopBuy(x.i); wOwned.add(x.i); afterBuy(x); confirmFor.i = null; draw(); }
+          catch (err) { confirmFor.i = null; draw(); toast(err.message, 2.2); sfx('error'); }
+        } }, `Yes, buy for ${x.p}`);
+        else btn = h('button', { class: 'btn btn-sun', type: 'button', disabled: !!(w && w.coins < x.p), onclick: () => { confirmFor.i = x.i; draw(); } }, w && w.coins < x.p ? `Need ${x.p - w.coins} more` : `Buy: ${x.p} coins`);
+        return h('div', { class: 'wshop-item' + (own ? ' own' : '') }, h('div', {}, h('b', {}, x.n), h('span', { class: 'small' }, itemInfo(x))), btn);
+      }));
+    };
+    shopBox.replaceChildren(h('div', { class: 'panel shop-panel', role: 'dialog', 'aria-label': 'Shop' },
+      h('div', { class: 'shop-head' }, h('h2', {}, 'Shop'), coins, h('button', { class: 'btn', type: 'button', onclick: closeShop }, 'Close')),
+      h('p', { class: 'small' }, opts.by ? `${opts.by} made this world and gets the coins. What you buy is yours forever, but only works in this world.` : 'What you buy only works in this world.'),
+      list));
+    shopBox.hidden = false; sfx('open');
+    draw();
+  }
+  function afterBuy(x) {
+    sfx('buy');
+    const w = WORLD_ITEMS[x.i];
+    if (w.kind === 'blaster') { drawWeapons(); if (room) room.send({ t: 'owned' }); toast(`You got the ${x.n}! Pick it in Paintball rounds.`, 2.4); }
+    else { fillSlots(); const at = slots.indexOf('s:' + x.i); toast(at >= 0 ? `You got the ${x.n}! Press ${at + 1 + slotBase()} to hold it.` : `You got the ${x.n}! It's in your backpack.`, 2.6); }
+  }
+  function standTick(px, py, pz, scene) {
+    if (!stands.length) return;
+    let near = false;
+    for (const st of stands) {
+      const d = Math.hypot(px - st.x, pz - st.z);
+      avatarParts({ x: st.x, y: st.y, z: st.z, yaw: d < 12 ? Math.atan2(px - st.x, pz - st.z) : 0, walk: 0, move: 0, air: false, emote: d < 5 ? 'wave' : null, et: clock, t: clock, look: STAND_KEEP }, scene);
+      placeTag(st.tag, st.x, st.y + 2.05, st.z, false, 40);
+      if (d < 3.6 && Math.abs(py - st.y) < 2.5) near = true;
+    }
+    near = near && !(inRound && rs.phase === 'play');
+    if (near !== nearStand) { nearStand = near; standBtn.hidden = !near; }
+  }
+  if (wShop.length && !opts.test && opts.shopOwned) opts.shopOwned().then((r) => { for (const i of (r && r.owned) || []) wOwned.add(i); fillSlots(); drawWeapons(); }).catch(() => {});
+
+  /* ----- build mode: Builders place and break blocks in this server (the published world never changes) ----- */
+  let building = false, bMode = 'place', bBlock = LIVE[0], bColor = 9, bHover = null;
+  const buildDock = h('div', { class: 'w3-admin panel w3-build', hidden: true });
+  function drawBuildDock() {
+    const bl = BLOCKS[bBlock];
+    buildDock.replaceChildren(h('h3', {}, 'Build'),
+      h('div', { class: 'seg', role: 'group', 'aria-label': 'Place or break' }, ...[['place', 'Place'], ['break', 'Break']].map(([m, l]) => h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(bMode === m), onclick: () => { bMode = m; drawBuildDock(); } }, l))),
+      h('div', { class: 'w3-build-blocks' }, ...LIVE.map((t) => h('button', { class: 'b3-block', type: 'button', 'aria-pressed': String(bBlock === t), title: BLOCKS[t].name, onclick: () => { bBlock = t; bMode = 'place'; drawBuildDock(); } }, h('span', { class: 'b3-chip' + (BLOCKS[t].glow ? ' glow' : '') + (BLOCKS[t].see ? ' see' : ''), style: `--c:${BLOCKS[t].tint ? PALETTE[bColor] : BLOCKS[t].color}` }), BLOCKS[t].name))),
+      bl.tint ? h('div', { class: 'swatches' }, ...PALETTE.map((c, i) => h('button', { class: 'swatch', type: 'button', style: `background:${c}`, 'aria-label': COLOR_NAMES[i], 'aria-pressed': String(bColor === i), onclick: () => { bColor = i; drawBuildDock(); } }))) : null,
+      h('p', { class: 'small' }, 'Click to place, right-click to break. Only this server sees it, and it stays until the owner undoes it.'));
+  }
+  function setBuild(on) {
+    building = !!on && canBuild();
+    buildBtn.classList.toggle('on', building); buildBtn.textContent = building ? 'Build: on' : 'Build';
+    buildDock.hidden = !building; stage.classList.toggle('building', building);
+    if (building) { drawBuildDock(); if (shiftLock) setShiftLock(false); toast('Build mode! Click to place blocks.', 1.4); }
+    bHover = null;
+  }
+  stage.append(buildDock);
+  function buildTarget(sx, sy) {
+    const r = R.ray(sx, sy);
+    const hit = raycast(physGrid, r.o, r.d, 40, (t) => t !== 0 && !BLOCKS[t].entity);
+    if (!hit) return null;
+    const cell = bMode === 'break' ? { x: hit.x, y: hit.y, z: hit.z } : { x: hit.x + hit.nx, y: hit.y + hit.ny, z: hit.z + hit.nz };
+    if (cell.x < 0 || cell.y < 0 || cell.z < 0 || cell.x >= SX || cell.y >= SY || cell.z >= SZ) return null;
+    if (Math.hypot(cell.x + 0.5 - S.p.x, cell.y + 0.5 - S.p.y, cell.z + 0.5 - S.p.z) > 24) return null;
+    return cell;
+  }
+  function buildAt(sx, sy, breakIt) {
+    if (!building || !room) return;
+    const was = bMode; if (breakIt) bMode = 'break';
+    const c = buildTarget(sx, sy);
+    bMode = was;
+    if (!c) return;
+    const del = breakIt || bMode === 'break';
+    if (!del) { // not inside yourself
+      const fx = Math.floor(S.p.x), fy = Math.floor(S.p.y), fz = Math.floor(S.p.z);
+      if (c.x === fx && c.z === fz && (c.y === fy || c.y === fy + 1)) { toast("That's where you're standing!", 1); return; }
+    }
+    room.send({ t: 'build', b: [[c.x, c.y, c.z, del ? 0 : bBlock, bColor]] });
+    sfx(del ? 'break' : 'place');
+  }
+  // live changes from the room
+  let baseGrid = null;
+  const edited = new Set();
+  function setCell(i, t, c) {
+    if (gone.has(i)) gone.delete(i);
+    physGrid.t[i] = viewGrid.t[i] = t; physGrid.c[i] = viewGrid.c[i] = c;
+    R.markDirty(i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ);
+  }
+  function applyEdits(list) {
+    for (const [i, t, c] of list || []) { if (!(i >= 0 && i < SX * SY * SZ) || !(t === 0 || BLOCKS[t])) continue; setCell(i, t, c); edited.add(i); }
+    if (edited.size && obby) noProof = true; // the world changed, so obby runs here don't count
+  }
+  function resetEdits() {
+    if (!edited.size) return;
+    baseGrid = baseGrid || decodeBlocks(world.b);
+    for (const i of edited) setCell(i, baseGrid.t[i], baseGrid.c[i]);
+    edited.clear();
+  }
+
   /* ----- paintball ----- */
   const aim = { from: [0, 0, 0], dir: [0, 0, 1] };
   const shots = [];
   let lastShot = 0, swapUntil = 0, lastW = 'blaster';
   const paintWorld = !!cfg && cfg.modes.includes('paint');
   let weapon = WEAPONS[store.get('paint-weapon', 'blaster')] ? store.get('paint-weapon', 'blaster') : 'blaster';
+  if (!blasterOk(weapon)) weapon = 'blaster';
   const reload = h('i', { class: 'w3-reload' });
   const cross = h('div', { class: 'w3-cross', hidden: true, 'aria-hidden': 'true' }, reload);
   const shootBtn = h('button', { class: 'tbtn w3-shoot', type: 'button', hidden: true, 'aria-label': 'Shoot paint' }, 'Shoot');
-  const weaponBar = h('div', { class: 'w3-weapons', hidden: !paintWorld, role: 'group', 'aria-label': 'Blasters' },
-    ...WEAPON_IDS.map((id, i) => h('button', { class: 'btn' + (id === weapon ? ' on' : ''), type: 'button', 'data-w': id, title: WEAPONS[id].info, onclick: (e) => { pickWeapon(id); e.currentTarget.blur(); } }, h('b', {}, String(i + 1)), ' ' + WEAPONS[id].name)));
+  const weaponBar = h('div', { class: 'w3-weapons', hidden: !paintWorld, role: 'group', 'aria-label': 'Blasters' });
+  // blasters this world's shop sells are locked until you buy them
+  function drawWeapons() {
+    if (!blasterOk(weapon)) weapon = 'blaster';
+    weaponBar.replaceChildren(...WEAPON_IDS.map((id, i) => h('button', { class: 'btn' + (id === weapon ? ' on' : '') + (blasterOk(id) ? '' : ' locked'), type: 'button', 'data-w': id, title: blasterOk(id) ? WEAPONS[id].info : 'Buy it at the shop stand', onclick: (e) => { pickWeapon(id); e.currentTarget.blur(); } }, h('b', {}, String(i + 1)), ' ' + (blasterOk(id) ? '' : '🔒 ') + WEAPONS[id].name)));
+  }
+  drawWeapons();
   stage.append(cross, shootBtn, weaponBar);
   shootBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); shoot(); });
-  addEventListener('keydown', (e) => { if (e.code !== 'KeyX' || typing() || !stage.isConnected || stopped || shopOpen) return; if (paintOn()) shoot(); else if (snowOn()) throwSnow(); });
   function paintOn() { return !!cfg && rs.phase === 'play' && rs.mode === 'paint' && inRound; }
   function pickWeapon(id) {
     if (!WEAPONS[id] || id === weapon) return;
+    if (!blasterOk(id)) { toast(`The ${WEAPONS[id].name} is sold at this world's shop stand.`, 1.8); sfx('error'); return; }
     weapon = id; store.set('paint-weapon', id);
     for (const b of weaponBar.children) b.classList.toggle('on', b.dataset.w === id);
     swapUntil = performance.now() + ROUND.swapMs;
@@ -752,7 +1023,8 @@ export function startWorld(root, opts) {
   const shopTag = h('div', { class: 'w3-tag shopkeep' }, h('span', { class: 'w3-name' }, 'Shop keeper'), h('span', { class: 'w3-bubble' }, 'Hats, pets and more!'));
   const shopBtn = h('button', { class: 'btn btn-sun w3-shopbtn', type: 'button', hidden: true }, 'Shop (B)');
   const shopBox = h('div', { class: 'overlay w3-shop', hidden: true });
-  if (shopAt) { tags.append(shopTag); stage.append(shopBtn, shopBox); }
+  if (shopAt) { tags.append(shopTag); stage.append(shopBtn); }
+  stage.append(standBtn, shopBox);
   shopBtn.addEventListener('click', () => { openShop(); shopBtn.blur(); });
   let nearShop = false, shopOpen = false;
   function openShop() {
@@ -772,7 +1044,7 @@ export function startWorld(root, opts) {
     if (near !== nearShop) { nearShop = near; shopBtn.hidden = !near; }
   }
   // automated tests can move the player (only with ?w3test in the address)
-  if (location.search.includes('w3test')) window.__w3 = { at: (x, y, z) => { S.p.x = x; S.p.y = y; S.p.z = z; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; } };
+  if (location.search.includes('w3test')) window.__w3 = { at: (x, y, z) => { S.p.x = x; S.p.y = y; S.p.z = z; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; }, pos: () => [S.p.x, S.p.y, S.p.z], mods: () => S.mods, cell: (x, y, z) => physGrid.get(x, y, z), yaw: () => cam.yaw, edits: () => edited.size };
   let lastHb = 0;
   function roundTick(px, py, pz, scene, clock) {
     if (!cfg || !rs.phase) return;
@@ -829,7 +1101,8 @@ export function startWorld(root, opts) {
     }
   }
 
-  applyGear();
+  fillSlots();
+  drawPowers();
 
   /* ---------------- winning ---------------- */
   let winShown = false;
@@ -881,8 +1154,8 @@ export function startWorld(root, opts) {
     if (paused || stopped) return;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now; clock += dt;
-    if (keys.has('ql')) cam.yaw -= dt * 2.2;
-    if (keys.has('qr')) cam.yaw += dt * 2.2;
+    if (keys.has('ql')) cam.yaw -= dt * 2.2 * sensitivity();
+    if (keys.has('qr')) cam.yaw += dt * 2.2 * sensitivity();
     if (fly) {
       // admin flying: no physics, just go where you point
       prevP = { ...S.p };
@@ -946,7 +1219,7 @@ export function startWorld(root, opts) {
     /* ----- build the scene ----- */
     const scene = [];
     const air = !S.onGround && S.air > 4;
-    avatarParts({ x: px, y: py, z: pz, yaw: facing, walk, move: Math.min(1, hv / P3.speed), air, emote: emoteNow, et: emoteAt, t: clock, look: kothKing && kothKing === myId ? { ...look, hat: 'crown' } : look }, scene);
+    avatarParts({ x: px, y: py, z: pz, yaw: facing, walk, move: Math.min(1, hv / P3.speed), air, emote: emoteNow, et: emoteAt, t: clock, look: kothKing && kothKing === myId ? { ...shownLook(), hat: 'crown' } : shownLook() }, scene);
     shadow(scene, px, py, pz);
     if (look.pet && look.pet !== 'none') { petFollow(myPet, px, py, pz, facing, dt); petParts(look.pet, myPet.x, myPet.y, myPet.z, myPet.yaw, clock, myPet.moving ? Math.abs(Math.sin(clock * 10)) : 0, scene); }
     if (moverDraw.length) {
@@ -1001,12 +1274,15 @@ export function startWorld(root, opts) {
     }
     roundTick(px, py, pz, scene, clock);
     shopTick(px, py, pz, scene);
+    standTick(px, py, pz, scene);
+    let lines = null;
+    if (building && mouseAt && !camDrag) { const c = buildTarget(mouseAt.x, mouseAt.y); if (c) lines = [{ pts: cellBox(c.x, c.y, c.z), color: bMode === 'break' ? [1, 0.3, 0.4, 1] : [1, 1, 1, 0.95] }]; }
     const pOn2 = paintOn();
     cross.hidden = !(pOn2 || (shiftLock && !shopOpen)); cross.classList.toggle('paint', pOn2);
     if (snowballs.length) snowTick(dt, scene);
     if (!fly) tipTick(dt);
     if (G3.auto) { const ch = G3.tick(dt); if (ch) gfxBtn.textContent = `Graphics: Auto (${GFX[ch].name})`; }
-    R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, far: G3.far || 230 });
+    R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, lines, far: G3.far || 230 });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 
     // name tags and chat bubbles
@@ -1032,6 +1308,11 @@ export function startWorld(root, opts) {
       const key = st.join(',');
       if (key !== lastSent) { room.send({ t: 'st', p: st.slice(0, 3), r: st[3], a }); lastSent = key; lastSend = nowMs; }
     }
+  }
+  function cellBox(x, y, z) {
+    const a = [x - 0.01, y - 0.01, z - 0.01], b = [x + 1.01, y + 1.01, z + 1.01];
+    const P = [[a[0], a[1], a[2]], [b[0], a[1], a[2]], [b[0], a[1], b[2]], [a[0], a[1], b[2]], [a[0], b[1], a[2]], [b[0], b[1], a[2]], [b[0], b[1], b[2]], [a[0], b[1], b[2]]];
+    return [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]].flatMap(([i, j]) => [...P[i], ...P[j]]);
   }
   function shadow(scene, x, y, z) {
     if (G3.shadows === false) return;

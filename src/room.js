@@ -10,12 +10,18 @@ import { runReplay3d } from '../public/js/physics3d.js';
 import { cleanLogic } from '../public/js/logic.js';
 import { cleanGearBan } from '../public/js/cosmetics.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
-import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES } from '../public/js/world.js';
+import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES, cleanShop, shopBlasters, idx, LIVE_BLOCKS } from '../public/js/world.js';
 import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, TYCOON, gameConfig, onHill, lavaLevel, inBox, nearBlock } from '../public/js/games.js';
 import { coinStmts, questBumps } from './econ.js';
 import { cleanDisplay, cleanTags } from '../public/js/names.js';
 
 const MAX_PLAYERS = 16;
+// In-server permissions (private servers): the owner makes players Builders or Admins while playing.
+//   builder: can place and break blocks in this server (only here, the published world never changes)
+//   admin:   builder + kick from this server, shout, fly, undo everyone's building
+const PERMS = ['builder', 'admin'];
+const MAX_EDITS = 4000;
+const KICK_MS = 15 * 60e3; // a server kick keeps you out for 15 minutes
 const CHAT_MAX = 200;
 const LOG_KEEP = 60;
 const SAVE_DELAY = 2000;
@@ -81,12 +87,22 @@ export class Room {
       try { await this.loadDoc(me.project); } catch (e) { send(server, { t: 'error', m: 'Could not open this project.' }); server.close(4004, 'no project'); return new Response(null, { status: 101, webSocket: client }); }
     }
     await this.loadLog();
-    if (me.kind === 'play') { await this.loadGame(me.world); await this.loadBots(me.code, me.world); }
+    if (me.kind === 'play') {
+      await this.loadGame(me.world); await this.loadBots(me.code, me.world); await this.loadServer(me.code);
+      if (this.isKicked(me.uid) && !me.admin) {
+        send(server, { t: 'kicked', m: 'You were removed from this private server. Try again in a few minutes.' }); me.left = true; server.serializeAttachment(me); server.close(4003, 'kicked');
+        return new Response(null, { status: 101, webSocket: client });
+      }
+      me.perm = this.permOf(me.uid);
+      me.wi = await this.ownedItems(me.uid);
+      server.serializeAttachment(me);
+      await this.loadEdits();
+    }
     // the private server's owner drives its bots
     const host = me.kind === 'play' && this.game && this.bots.owner && me.uid === this.bots.owner && !this.bots.host;
     if (host) this.bots.host = id;
     const players = [...live.map((ws) => pub(att(ws), this.pos)), ...this.botList().map((b) => pub(b, this.pos))];
-    send(server, { t: 'hello', you: id, players, chat: this.log.slice(-30), doc: me.kind === 'edit' ? this.docOut() : undefined, code: me.code, world: me.world, round: this.game ? this.roundOut() : undefined,
+    send(server, { t: 'hello', you: id, players, chat: this.log.slice(-30), perm: me.perm || undefined, edits: me.kind === 'play' && this.edits.size ? [...this.edits].map(([i, [t, c]]) => [i, t, c]) : undefined, doc: me.kind === 'edit' ? this.docOut() : undefined, code: me.code, world: me.world, round: this.game ? this.roundOut() : undefined,
       bots: this.game && this.bots.owner ? { n: this.bots.n, skill: this.bots.skill, owner: me.uid === this.bots.owner, host: host || this.bots.host === id } : undefined });
     this.broadcast({ t: 'join', player: pub(me, this.pos) }, server);
     if (host) for (const b of this.botList()) this.broadcast({ t: 'join', player: pub(b, this.pos) }, server);
@@ -102,6 +118,8 @@ export class Room {
     if (!msg || typeof msg !== 'object') return;
     if (me.kind === 'play' && this.game === undefined) await this.loadGame(me.world); // the room napped: set minigames up again
     if (me.kind === 'play' && !this.bots) await this.loadBots(me.code, me.world, true);
+    if (me.kind === 'play' && (!this.srv || this.srv.code !== me.code)) await this.loadServer(me.code);
+    if (me.kind === 'play' && !this.edits) await this.loadEdits();
     const lim = this.limits(me.id);
     switch (msg.t) {
       case 'st': { // where I am: position, facing, animation
@@ -144,10 +162,71 @@ export class Room {
         this.broadcast({ t: 'throw', id: me.id, o: o.map((v) => Math.round(v * 100) / 100), d: d.map((v) => Math.round(v * 1000) / 1000) }, ws);
         break;
       }
-      case 'shout': { // admins only: a big message everyone in this server sees
-        if (!me.admin) return;
+      case 'shout': { // admins (and this server's admins) only: a big message everyone in this server sees
+        if (!me.admin && !this.srvAdmin(me)) return;
         const m = cleanChat(msg.m);
-        if (m) this.broadcast({ t: 'sys', m: `${me.name} (admin): ${m}`, big: true });
+        if (m) this.broadcast({ t: 'sys', m: `${me.dn || me.name} (${me.admin ? 'admin' : me.perm === 'owner' ? 'server owner' : 'server admin'}): ${m}`, big: true });
+        break;
+      }
+      case 'perm': { // the private server's owner gives or takes Builder / Admin powers
+        if (me.kind !== 'play' || me.perm !== 'owner') return;
+        const ws2 = this.alive().find((x) => { const a = att(x); return a && a.id === msg.id; });
+        const t = ws2 && att(ws2);
+        if (!t || t.uid === me.uid) return;
+        const p = PERMS.includes(msg.p) ? msg.p : '';
+        if (p) this.srv.perms[t.uid] = p; else delete this.srv.perms[t.uid];
+        t.perm = p; ws2.serializeAttachment(t);
+        await this.saveServer();
+        this.broadcast({ t: 'perm', id: t.id, p });
+        this.broadcast({ t: 'sys', m: p ? `${t.dn || t.name} is now ${p === 'admin' ? 'an Admin' : 'a Builder'} in this server.` : `${t.dn || t.name} has no special powers here anymore.` });
+        break;
+      }
+      case 'skick': { // this server's owner and admins can remove someone from the server
+        if (me.kind !== 'play' || !this.srvAdmin(me)) return;
+        const ws2 = this.alive().find((x) => { const a = att(x); return a && a.id === msg.id; });
+        const t = ws2 && att(ws2);
+        if (!t || t.uid === me.uid || t.admin || t.perm === 'owner' || (t.perm === 'admin' && me.perm !== 'owner')) { send(ws, { t: 'sys', m: "You can't remove that player." }); return; }
+        this.srv.kicked = this.srv.kicked.filter((k) => k.u !== t.uid && Date.now() - k.at < KICK_MS).concat({ u: t.uid, at: Date.now() }).slice(-200);
+        await this.saveServer();
+        this.drop(ws2, t, `${me.dn || me.name} removed you from this private server. You can come back in 15 minutes.`, 4003);
+        this.broadcast({ t: 'sys', m: `${t.dn || t.name} was removed from this server.` });
+        break;
+      }
+      case 'build': { // Builders place and break blocks, only in this server
+        if (me.kind !== 'play' || !this.canBuild(me) || !Array.isArray(msg.b)) return;
+        const now = Date.now();
+        lim.build = (lim.build || []).filter((x) => now - x < 1000);
+        if (lim.build.length >= 12) return;
+        lim.build.push(now);
+        const out = [];
+        for (const e of msg.b.slice(0, 16)) {
+          if (!Array.isArray(e)) continue;
+          const x = e[0] | 0, y = e[1] | 0, z = e[2] | 0, t = e[3] | 0, c = (e[4] | 0) & 15;
+          if (x < 0 || y < 0 || z < 0 || x >= SX || y >= SY || z >= SZ || (t && !LIVE_BLOCKS.includes(t))) continue;
+          const i = idx(x, y, z);
+          if (!this.edits.has(i) && this.edits.size >= MAX_EDITS) { send(ws, { t: 'sys', m: 'This server has lots of building already. The owner can undo it all to start fresh.' }); break; }
+          this.edits.set(i, [t, BLOCKS[t] && BLOCKS[t].tint ? c : 0]);
+          out.push([i, t, BLOCKS[t] && BLOCKS[t].tint ? c : 0]);
+        }
+        if (!out.length) return;
+        this.broadcast({ t: 'build', b: out, by: me.id });
+        this.editsDirty = true;
+        if (!this.saveAt || this.saveAt < Date.now()) { this.saveAt = Date.now() + SAVE_DELAY; await this.state.storage.setAlarm(this.saveAt); }
+        break;
+      }
+      case 'buildreset': { // the owner or an admin undoes everyone's building
+        if (me.kind !== 'play' || !this.srvAdmin(me)) return;
+        this.edits = new Map(); this.editsDirty = true;
+        await this.state.storage.put('edits', []);
+        this.broadcast({ t: 'buildreset' });
+        this.broadcast({ t: 'sys', m: `${me.dn || me.name} undid all the building in this server.` });
+        break;
+      }
+      case 'owned': { // you bought something in this world's shop: check what you own again
+        if (me.kind !== 'play' || Date.now() - (lim.owned || 0) < 1500) return;
+        lim.owned = Date.now();
+        me.wi = await this.ownedItems(me.uid);
+        ws.serializeAttachment(me);
         break;
       }
       case 'emote': {
@@ -264,6 +343,7 @@ export class Room {
   }
   async alarm() {
     this.saveAt = 0;
+    if (this.editsDirty) { this.editsDirty = false; try { await this.state.storage.put('edits', [...this.edits].map(([i, v]) => [i, ...v])); } catch (e) { /* try later */ } }
     if (this.round) this.tick();
     await this.flush();
   }
@@ -308,6 +388,45 @@ export class Room {
     } catch (e) { /* the room still works without the counts */ }
   }
 
+  /* ---------- private servers: owner, powers, live building ---------- */
+  async loadServer(code) {
+    if (this.srv && this.srv.code === code) return;
+    this.srv = { code, owner: null, perms: {}, kicked: [] };
+    if (!code || !this.env.DB) return;
+    try {
+      const r = await this.env.DB.prepare('SELECT owner_id, private, perms FROM servers WHERE code = ?').bind(code).first();
+      if (r && r.private && r.owner_id) {
+        this.srv.owner = r.owner_id;
+        const p = JSON.parse(r.perms || '{}');
+        for (const [u, v] of Object.entries(p && typeof p === 'object' ? p : {})) if (PERMS.includes(v)) this.srv.perms[u] = v;
+      }
+      const k = await this.state.storage.get('kicked');
+      if (Array.isArray(k)) this.srv.kicked = k.filter((x) => x && Date.now() - x.at < KICK_MS).slice(-200);
+    } catch (e) { /* no powers then */ }
+  }
+  async saveServer() {
+    try {
+      await this.state.storage.put('kicked', this.srv.kicked);
+      if (this.env.DB) await this.env.DB.prepare('UPDATE servers SET perms = ? WHERE code = ?').bind(JSON.stringify(this.srv.perms), this.srv.code).run();
+    } catch (e) { /* powers still work until the room naps */ }
+  }
+  isKicked(uid) { return this.srv.kicked.some((k) => k.u === uid && Date.now() - k.at < KICK_MS); }
+  permOf(uid) { return !this.srv || !this.srv.owner ? '' : uid === this.srv.owner ? 'owner' : this.srv.perms[uid] || ''; }
+  srvAdmin(me) { return !!me.admin || me.perm === 'owner' || me.perm === 'admin'; }
+  canBuild(me) { return me.admin || me.perm === 'owner' || PERMS.includes(me.perm); }
+  async loadEdits() {
+    if (this.edits) return;
+    this.edits = new Map();
+    try { const e = await this.state.storage.get('edits'); if (Array.isArray(e)) for (const [i, t, c] of e) this.edits.set(i, [t, c]); } catch (e) { /* start fresh */ }
+  }
+  // which of this world's shop items you bought (the maker owns all of them)
+  async ownedItems(uid) {
+    if (!this.shopLock || !this.shopLock.size || !uid || !this.env.DB) return [];
+    if (uid === this.creator) return ['*'];
+    try { return (await this.env.DB.prepare('SELECT item FROM world_items WHERE user_id = ? AND game_id = ?').bind(uid, this.worldId).all()).results.map((r) => r.item); } catch (e) { return []; }
+  }
+  ownsBlaster(me, w) { return !this.shopLock || !this.shopLock.has(w) || (me.wi && (me.wi.includes('*') || me.wi.includes('b-' + w))); }
+
   /* ---------- minigames ---------- */
   async loadGame(worldId) {
     if (this.game !== undefined) return;
@@ -316,8 +435,13 @@ export class Room {
       const b = builtinWorld(worldId);
       if (b) this.game = b.game ? gameConfig(null, b) : null;
       else if (worldId && this.env.DB) {
-        const row = await this.env.DB.prepare("SELECT data FROM games WHERE id = ? AND kind = '3d'").bind(worldId).first();
-        if (row) this.game = gameConfig(JSON.parse(row.data));
+        const row = await this.env.DB.prepare("SELECT data, user_id FROM games WHERE id = ? AND kind = '3d'").bind(worldId).first();
+        if (row) {
+          const data = JSON.parse(row.data);
+          this.game = gameConfig(data);
+          // blasters this world sells are locked until you buy them
+          this.shopLock = shopBlasters(data); this.creator = row.user_id; this.worldId = worldId;
+        }
       }
     } catch (e) { this.game = null; }
     if (this.game) this.round = { phase: 'wait', n: 0 };
@@ -432,7 +556,9 @@ export class Room {
     }
     else if (msg.t === 'hit' && R.mode === 'paint' && msg.id !== me.id && R.ids.has(msg.id)) {
       // the blaster decides how often you can hit, how far, and how much paint
-      const wid = Object.hasOwn(WEAPONS, msg.w) ? msg.w : 'blaster', wp = WEAPONS[wid], now = Date.now();
+      let wid = Object.hasOwn(WEAPONS, msg.w) ? msg.w : 'blaster';
+      if (!this.ownsBlaster(me, wid)) wid = 'blaster'; // a blaster from the world's shop you didn't buy
+      const wp = WEAPONS[wid], now = Date.now();
       const last = R.lastShot.get(me.id) || { at: 0, w: wid };
       // reload time is the blaster you last hit with; switching blasters takes a moment too
       if (now - last.at < WEAPONS[last.w].every - 60 || (last.w !== wid && now - last.at < ROUND.swapMs)) return;
@@ -527,7 +653,7 @@ export class Room {
     if (row.kind === '3d') {
       let grid;
       try { grid = decodeBlocks(String(data.b || '')); } catch (e) { grid = new Grid(); }
-      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(data.gearBan), logic: cleanLogic(data.logic) }, grid };
+      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(data.gearBan), logic: cleanLogic(data.logic), hotbar: data.hotbar === true, shop: cleanShop(data.shop) }, grid };
     } else {
       const lv = { n: row.name, style: 'adventure', theme: 'meadow', form: 'hopper', speed: '~', w: 48, h: 12, d: '', ...data };
       this.doc = { id: row.id, kind: '2d', meta: { n: cleanText(lv.n, LIMITS.name) || row.name, style: lv.style === 'rush' ? 'rush' : 'adventure', theme: THEMES.includes(lv.theme) ? lv.theme : 'meadow', form: FORMS.includes(lv.form) ? lv.form : 'hopper', speed: Object.hasOwn(SPEED_NAMES, lv.speed) ? lv.speed : '~' }, w: lv.w | 0, h: lv.h | 0, a: String(lv.d || '').split('') };
@@ -537,7 +663,7 @@ export class Room {
   docOut() {
     const d = this.doc;
     if (!d) return null;
-    if (d.kind === '3d') { const { game, gear, logic, gearBan, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), ...(gearBan && gearBan.length ? { gearBan } : {}), ...(logic && logic.length ? { logic } : {}), b: encodeBlocks(d.grid) }; }
+    if (d.kind === '3d') { const { game, gear, logic, gearBan, hotbar, shop, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), ...(gearBan && gearBan.length ? { gearBan } : {}), ...(logic && logic.length ? { logic } : {}), ...(hotbar ? { hotbar: true } : {}), ...(shop && shop.length ? { shop } : {}), b: encodeBlocks(d.grid) }; }
     return { kind: '2d', ...d.meta, w: d.w, h: d.h, d: d.a.join('') };
   }
   // Checks one change, applies it, and returns the version to send to everyone (or null).
@@ -554,6 +680,8 @@ export class Room {
         if (op.f.gear === 'on' || op.f.gear === 'off') f.gear = op.f.gear;
         if (Array.isArray(op.f.gearBan)) f.gearBan = cleanGearBan(op.f.gearBan);
         if (Array.isArray(op.f.logic) && JSON.stringify(op.f.logic).length < 60000) f.logic = cleanLogic(op.f.logic);
+        if (typeof op.f.hotbar === 'boolean') f.hotbar = op.f.hotbar;
+        if (Array.isArray(op.f.shop)) f.shop = cleanShop(op.f.shop);
       } else {
         if (op.f.style === 'rush' || op.f.style === 'adventure') f.style = op.f.style;
         if (THEMES.includes(op.f.theme)) f.theme = op.f.theme;
@@ -639,7 +767,7 @@ function att(ws) { try { return ws.deserializeAttachment(); } catch (e) { return
 function send(ws, msg) { try { ws.send(JSON.stringify(msg)); } catch (e) { /* closed */ } }
 function pub(a, pos) {
   const st = pos.get(a.id) || (a.p ? { p: a.p, r: a.r, a: a.a } : {});
-  return { id: a.id, name: a.name, look: a.look, lvl: a.lvl || 1, role: a.role || undefined, title: a.title || undefined, dn: a.dn || undefined, tags: a.tags && a.tags.length ? a.tags : undefined, admin: a.admin || undefined, p: st.p || null, r: st.r || 0, a: st.a || 0 };
+  return { id: a.id, name: a.name, look: a.look, lvl: a.lvl || 1, role: a.role || undefined, title: a.title || undefined, dn: a.dn || undefined, tags: a.tags && a.tags.length ? a.tags : undefined, admin: a.admin || undefined, pm: a.perm || undefined, p: st.p || null, r: st.r || 0, a: st.a || 0 };
 }
 // No word filter (Blockyard's choice), just tidy: no invisible characters, no giant messages.
 export function cleanChat(m) {

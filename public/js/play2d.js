@@ -1,5 +1,6 @@
 // Runs a 2D level: game loop, controls, camera, effects, in-game HUD and the end screens.
 // Modes: 'level' (normal), 'endless' (one life, go as far as you can), 'daily' (one life per attempt, retries forever).
+import { actionOf } from './controls.js';
 import { createGame, step, restart, T, STEP } from './engine2d.js';
 import { drawBackground, drawMap, drawPlayer, drawWalker, drawPlatform, drawTile, INK } from './render2d.js';
 import { drawIcon } from './art.js';
@@ -225,9 +226,9 @@ function showToast(text) { toast = { text, life: 1.4 }; }
 const TRAIL_COLORS = { sparkle: ['#ffffff', '#ffd23f'], bubbles: ['#bfefff'], hearts: ['#ff5d8f'], notes: ['#1d2340'], fire: ['#ff5a1f', '#ffb02e', '#ffd23f'], stars: ['#ffd23f', '#fff6c9'], lightning: ['#7cc8ff', '#ffffff', '#ffe66d'], confetti: ['#ff5d8f', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], snow: ['#ffffff', '#dff4ff'], galaxy: ['#5a3fd6', '#b06cff', '#ffffff', '#7cc8ff'],
   leaves: ['#44c06a', '#2a8a45', '#a7e163'], mint: ['#2ec4b6', '#bff5ee'], lava: ['#ff5a1f', '#b5121b', '#ffb02e'], ice: ['#bfe6ff', '#ffffff', '#7cc8ff'],
   candy: ['#ff5d8f', '#ffffff', '#7cc8ff'], ocean: ['#0077b6', '#48cae4', '#caf0f8'], toxic: ['#39ff14', '#9dff7a', '#1d2340'], sakura: ['#ffb7c5', '#ff8fb1', '#fff0f5'],
-  shadow: ['#1d2340', '#3d405b'], sunset: ['#ff9f1c', '#ff5d8f', '#b06cff'], goldtrail: ['#ffd23f', '#e0b12a', '#fff6c9'], void: ['#14161f', '#5a3fd6', '#b06cff'] };
+  shadow: ['#1d2340', '#3d405b'], sunset: ['#ff9f1c', '#ff5d8f', '#b06cff'], goldtrail: ['#ffd23f', '#e0b12a', '#fff6c9'], void: ['#14161f', '#5a3fd6', '#b06cff'], paintsplat: ['#ff5d8f', '#3a86ff', '#ffd23f', '#44c06a'], frost: ['#dff4ff', '#7cc8ff', '#ffffff'], nebula: ['#5a3fd6', '#ff5d8f', '#7cc8ff', '#ffffff'], chosen: ['#ffd23f', '#ffffff', '#fff6c9'] };
 // trails drawn as soft round blobs (the rest have their own shapes, or squares)
-const ROUND_TRAILS = new Set(['leaves', 'mint', 'lava', 'candy', 'ocean', 'toxic', 'sakura', 'shadow', 'sunset', 'goldtrail', 'void']);
+const ROUND_TRAILS = new Set(['paintsplat', 'nebula', 'chosen', 'frost', 'leaves', 'mint', 'lava', 'candy', 'ocean', 'toxic', 'sakura', 'shadow', 'sunset', 'goldtrail', 'void']);
 function spawnTrail(dt) {
   const kind = look.trail, p = G.p;
   if (!kind || kind === 'none' || G.dead || kind === 'rainbow') return;
@@ -483,23 +484,25 @@ function press() {
 function doRestart() { if (!G || G.won || over || opts.mode === 'endless') return; restart(G); acc = 0; frames = []; }
 function again() { if (opts.onAgain) opts.onAgain(); else startPlay(G.lv, opts); }
 
-const KEYS = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'jump', KeyW: 'jump', Space: 'jump' };
+// your keys from Settings > Controls (the arrow keys always work too)
+const KEY2D = { left: 'left', right: 'right', jump: 'jump', fwd: 'jump' };
+const keyFor = (code) => KEY2D[actionOf(code)] || null;
 addEventListener('keydown', (e) => {
   if (!running) return;
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
   if (document.querySelector('.modal:not([hidden])')) return;
-  const k = KEYS[e.code];
+  const k = keyFor(e.code);
   if (k) {
     e.preventDefault();
     if (e.repeat) return;
     if (G.won || over) { if (k === 'jump' && !$('#win').hidden && document.activeElement === document.body) again(); return; }
     if (k === 'jump' || waiting) press();
     if (k !== 'jump') input[k] = true;
-  } else if (e.code === 'KeyR') doRestart();
+  } else if (actionOf(e.code) === 'respawn') doRestart();
   else if (e.code === 'Escape' && opts.onExit) opts.onExit();
 });
 addEventListener('keyup', (e) => {
-  const k = KEYS[e.code];
+  const k = keyFor(e.code);
   if (!k) return;
   if (k === 'jump') input.hold = false; else input[k] = false;
 });

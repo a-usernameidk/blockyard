@@ -2,7 +2,7 @@
 // Shared by the browser (renderer, builder, game) and the server (checking runs, collaborative editing).
 import { cleanText, isRude } from './format.js';
 import { cleanLogic } from './logic.js';
-import { cleanGearBan } from './cosmetics.js';
+import { cleanGearBan, GEAR, GEAR_MODS } from './cosmetics.js';
 
 export const SX = 128, SY = 64, SZ = 128;
 export const MAX_BLOCKS = 24000;
@@ -55,6 +55,8 @@ export const BLOCKS = [
   { id: 'tclaim', name: 'Claim pad', pat: 18, tint: true, glow: true, tycoon: true, tip: 'Tycoon: step on it to claim the plot of this color.' },
   { id: 'tbutton', name: 'Buy button', pat: 11, tint: true, glow: true, tycoon: true, tip: 'Tycoon: the plot owner buys it to build the Tycoon blocks of its color near it. Closer to the claim pad = cheaper.' },
   { id: 'tbuild', name: 'Tycoon block', pat: 10, tint: true, tycoon: true, tip: 'Tycoon: hidden until the owner of this color buys the nearest buy button.' },
+  // creator shops: a shop keeper stands on it and sells what you set up in the World tab
+  { id: 'shopstand', name: 'Shop stand', pat: 4, color: '#e0b12a', tip: 'Your shop: a shop keeper stands here and sells the things you pick in the World tab (Shop). The coins go to you.' },
 ];
 export const B = Object.fromEntries(BLOCKS.map((b, i) => [b ? b.id : 'air', i]));
 BLOCKS.forEach((b, i) => { if (b) b.n = i; });
@@ -74,6 +76,36 @@ export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just ch
 export const GAME_TYPES = ['race', 'tag', 'koth', 'lava', 'paint', 'tycoon'];
 
 export const solidType = (t) => t !== 0 && !BLOCKS[t].entity && !BLOCKS[t].ghost;
+
+// Blocks that Builders can place while playing in a private server (only that server sees them).
+export const LIVE_BLOCKS = ['plastic', 'wood', 'stone', 'brick', 'grass', 'dirt', 'sand', 'snow', 'leaves', 'metal', 'neon', 'glass', 'ice', 'bounce', 'speed', 'lava', 'disco'].map((id) => B[id]);
+
+/* ---------------- creator shops and the hotbar ---------------- */
+// What world makers can sell in their shop (for real coins, which go to them). Gear works like closet gear
+// (in hangouts, and in Tag and Paintball rounds) even if the world turned players' own gear off.
+// Blasters: in Paintball rounds, a blaster the shop sells is locked until you buy it (the Blaster is always free).
+export const WORLD_ITEMS = {
+  ...Object.fromEntries(GEAR.filter((g) => GEAR_MODS[g.id]).map((g) => [g.id, { kind: 'gear', name: g.name }])),
+  'b-rapid': { kind: 'blaster', blaster: 'rapid', name: 'Rapid blaster' },
+  'b-sniper': { kind: 'blaster', blaster: 'sniper', name: 'Sniper blaster' },
+  'b-splatter': { kind: 'blaster', blaster: 'splatter', name: 'Splatter blaster' },
+};
+export const WORLD_SHOP = { max: 12, minPrice: 1, maxPrice: 10000, name: 24 };
+// Cleans the shop list from a world: [{ i: item type, n: name, p: price }]
+export function cleanShop(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [], seen = new Set();
+  for (const x of list) {
+    if (!x || typeof x !== 'object' || !Object.hasOwn(WORLD_ITEMS, x.i) || seen.has(x.i)) continue;
+    const p = Math.floor(Number(x.p));
+    if (!(p >= WORLD_SHOP.minPrice && p <= WORLD_SHOP.maxPrice)) continue;
+    seen.add(x.i);
+    out.push({ i: x.i, n: cleanText(x.n, WORLD_SHOP.name) || WORLD_ITEMS[x.i].name, p });
+    if (out.length >= WORLD_SHOP.max) break;
+  }
+  return out;
+}
+export const shopBlasters = (world) => new Set(cleanShop(world && world.shop).filter((x) => WORLD_ITEMS[x.i].kind === 'blaster').map((x) => WORLD_ITEMS[x.i].blaster));
 
 /* ---------------- grid ---------------- */
 export const idx = (x, y, z) => x + z * SX + y * SX * SZ;
@@ -181,6 +213,15 @@ export function normalizeWorld(w, { needGoal } = {}) {
   if (game === 'tycoon' && !grid.t.some((t) => t === B.tclaim)) throw new Error('Tycoon worlds need at least one Tycoon claim pad (and buy buttons of the same color).');
   const logic = cleanLogic(w.logic);
   if (logic.length) world.logic = logic;
+  // hotbar and creator shop: only in hangouts (and minigames), where gear works
+  if (mode === 'hangout') {
+    if (w.hotbar === true) world.hotbar = true;
+    const shop = cleanShop(w.shop);
+    if (shop.length) {
+      if (!grid.t.some((t) => t === B.shopstand)) throw new Error('Your world sells things in its shop, so it needs a Shop stand block (Build tab, Shop blocks).');
+      world.shop = shop;
+    }
+  }
   return { world, grid, info };
 }
 export function worldNameOk(n) { return !isRude(n); }

@@ -108,6 +108,7 @@ const COLUMNS = [
   'ALTER TABLE users ADD COLUMN seen INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE servers ADD COLUMN bots INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE servers ADD COLUMN bot_skill TEXT NOT NULL DEFAULT 'normal'",
+  "ALTER TABLE servers ADD COLUMN perms TEXT NOT NULL DEFAULT '{}'",
   'ALTER TABLE games ADD COLUMN suggested INTEGER NOT NULL DEFAULT 0',
   ...PEOPLE_COLUMNS,
 ];
@@ -621,6 +622,7 @@ async function checkFields(ctx, input) {
   // the heavy part (checking every block, replaying the run) happens in a Durable Object
   const w = await verify(env, { type: 'publish3d', world: input.world, replay: String(input.replay || ''), opts: { maxSteps: maxSteps3d(env) } });
   if (isRude(w.world.n) || isRude(desc)) fail(400, 'Something in the name or description has a blocked word.');
+  if ((w.world.shop || []).some((x) => isRude(x.n))) fail(400, 'Something in your shop has a blocked word.');
   if (w.world.mode === 'obby' && !(w.run && w.run.won)) fail(400, "Your recorded run didn't reach the goal. Beat your obby in Test, then publish right away.");
   return { kind, desc, visibility, name: w.world.n, style: w.world.mode, theme: w.world.sky, w: w.blocks, h: w.coins, data: w.world, thumb: w.thumb };
 }

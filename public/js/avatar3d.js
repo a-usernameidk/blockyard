@@ -266,7 +266,7 @@ export const TRAIL3D = {
   confetti: ['#ff5d8f', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], snow: ['#ffffff', '#dff4ff'], galaxy: ['#5a3fd6', '#b06cff', '#ffffff', '#7cc8ff'],
   leaves: ['#44c06a', '#2a8a45', '#a7e163'], mint: ['#2ec4b6', '#bff5ee'], lava: ['#ff5a1f', '#b5121b', '#ffb02e'], ice: ['#bfe6ff', '#ffffff', '#7cc8ff'],
   candy: ['#ff5d8f', '#ffffff', '#7cc8ff'], ocean: ['#0077b6', '#48cae4', '#caf0f8'], toxic: ['#39ff14', '#9dff7a', '#1d2340'], sakura: ['#ffb7c5', '#ff8fb1', '#fff0f5'],
-  shadow: ['#1d2340', '#3d405b'], sunset: ['#ff9f1c', '#ff5d8f', '#b06cff'], goldtrail: ['#ffd23f', '#e0b12a', '#fff6c9'], void: ['#14161f', '#5a3fd6', '#b06cff'],
+  shadow: ['#1d2340', '#3d405b'], sunset: ['#ff9f1c', '#ff5d8f', '#b06cff'], goldtrail: ['#ffd23f', '#e0b12a', '#fff6c9'], void: ['#14161f', '#5a3fd6', '#b06cff'], paintsplat: ['#ff5d8f', '#3a86ff', '#ffd23f', '#44c06a'], frost: ['#dff4ff', '#7cc8ff', '#ffffff'], nebula: ['#5a3fd6', '#ff5d8f', '#7cc8ff', '#ffffff'], chosen: ['#ffd23f', '#ffffff', '#fff6c9'],
 };
 
 // A pet at (x, y, z) facing yaw. hop: 0..1 how high it's hopping. Built from boxes like Pip.

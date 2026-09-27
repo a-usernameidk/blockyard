@@ -111,6 +111,8 @@ export const api = {
   deleteMe: () => request('DELETE', '/me'),
   saveProgress: (progress) => request('PUT', '/me/progress', { progress }),
   myGames: () => request('GET', '/me/games'),
+  worldShop: (id) => request('GET', `/worlds/${id}/shop`),
+  buyWorldItem: (id, item) => request('POST', `/worlds/${id}/shop`, { item }),
   list: ({ kind = '2d', sort = 'new', style = '', q = '', page = 0, creator = '', rewarding = '' } = {}) => request('GET', `/games?${qs({ kind, sort, style, q, page, creator, rewarding })}`),
   get: (id) => request('GET', `/games/${enc(id)}`),
   publish: (lv, desc, replay, extra = {}) => request('POST', '/games', { level: toWire(lv), desc, replay, ...extra }),

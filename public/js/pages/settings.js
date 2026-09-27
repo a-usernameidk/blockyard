@@ -3,7 +3,8 @@
 import { $, el, session, show, addRoute, toast, plural, needLogin } from '../app.js';
 import { api, store } from '../api.js';
 import { THEMES, themeMode, setTheme, GFX, GFX_ORDER, gfxMode, setGfx } from '../settings.js';
-import { isMuted, setMuted, isMusicOn, setMusicOn, unlockAudio } from '../audio.js';
+import { isMuted, setMuted, isMusicOn, setMusicOn, unlockAudio, VOLUMES, getVolume, setVolume, sfx } from '../audio.js';
+import { ACTIONS, keyOf, keyLabel, setKey, resetKeys, RESERVED, SENS, sensitivity, setSensitivity, invertY, setInvertY } from '../controls.js';
 import { NOTIFY, notifyOn } from './social.js';
 import { renderMute } from './account.js';
 
@@ -21,6 +22,46 @@ const choice = (name, options, current, change) => el('div', { class: 'choices',
   return el('label', { class: 'choice' }, r, el('span', {}, el('b', {}, label), info ? el('span', { class: 'small' }, info) : null));
 }));
 
+// a labeled slider: change(v) while you drag, done() when you let go
+function slider(label, min, max, step, value, fmt, change, done) {
+  const out = el('output', {}, fmt(value));
+  const r = el('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(value), 'aria-label': label });
+  r.addEventListener('input', () => { out.textContent = fmt(Number(r.value)); change(Number(r.value)); });
+  if (done) r.addEventListener('change', done);
+  return el('label', { class: 'slider' }, el('span', { class: 'slider-top' }, el('b', {}, label), out), r);
+}
+// Controls: pick your own keys, how fast the camera turns, and flipping up/down.
+function controlsBox() {
+  const list = el('div', { class: 'keys' });
+  let waiting = null; // { action, btn }
+  const stopWaiting = () => { if (waiting) { waiting.btn.classList.remove('wait'); removeEventListener('keydown', grab, true); waiting = null; } };
+  function grab(e) {
+    if (!list.isConnected) { stopWaiting(); return; } // left the page
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.code === 'Escape') { stopWaiting(); draw(); return; }
+    if (RESERVED.test(e.code)) { toast(`${keyLabel(e.code)} is already used for chat, emotes or the hotbar. Pick another key.`); return; }
+    const { action } = waiting; stopWaiting();
+    const other = setKey(action, e.code);
+    const name = (a) => ACTIONS.find((x) => x[0] === a)[1];
+    toast(other ? `${name(action)}: ${keyLabel(e.code)}. (${name(other)} moved to ${keyLabel(keyOf(other))}.)` : `${name(action)}: ${keyLabel(e.code)}`);
+    draw();
+  }
+  function draw() {
+    list.replaceChildren(...ACTIONS.map(([a, label]) => {
+      const b = el('button', { class: 'btn key-btn', type: 'button', 'aria-label': `${label}: ${keyLabel(keyOf(a))}. Click to change.` }, keyLabel(keyOf(a)));
+      b.addEventListener('click', () => { stopWaiting(); waiting = { action: a, btn: b }; b.textContent = 'Press a key…'; b.classList.add('wait'); addEventListener('keydown', grab, true); });
+      return el('div', { class: 'key-row' }, el('span', {}, label), b);
+    }));
+  }
+  draw();
+  return section('Controls',
+    el('p', { class: 'small' }, 'Click a key, then press the new key you want. Esc cancels. The arrow keys always work too.'),
+    slider('Camera sensitivity (mouse and touch)', SENS.min * 100, SENS.max * 100, 5, Math.round(sensitivity() * 100), (v) => `${v}%`, (v) => setSensitivity(v / 100)),
+    check('Flip camera up and down', invertY(), (on) => setInvertY(on)),
+    list,
+    el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', onclick: () => { stopWaiting(); resetKeys(); draw(); toast('Keys are back to normal.'); } }, 'Reset keys')));
+}
+
 async function showSettings() {
   show('settings', '');
   const body = $('#settings-body');
@@ -31,8 +72,12 @@ async function showSettings() {
     section('3D graphics', el('p', { class: 'small' }, 'How worlds are drawn. If 3D feels slow or choppy, pick a faster one. You can also switch with the Graphics button inside a world.'),
       choice('gfx', GFX_ORDER.map((k) => [k, GFX[k].name, GFX[k].info]), gfxMode(), (v) => { setGfx(v); toast(`Graphics: ${GFX[v].name}`); })),
     section('Sound',
-      check('Sound effects', !isMuted(), (on) => { setMuted(!on); renderMute(); unlockAudio(); }),
-      check('Music', isMusicOn(), (on) => { setMusicOn(on); renderMute(); unlockAudio(); })),
+      check('Sound on', !isMuted(), (on) => { setMuted(!on); renderMute(); unlockAudio(); }),
+      check('Music on', isMusicOn(), (on) => { setMusicOn(on); renderMute(); unlockAudio(); }),
+      el('p', { class: 'small' }, 'How loud each kind of sound is.'),
+      ...VOLUMES.map(([bus, label]) => slider(label, 0, 100, 5, Math.round(getVolume(bus) * 100), (v) => `${v}%`, (v) => setVolume(bus, v / 100),
+        () => { unlockAudio(); sfx(bus === 'ui' ? 'pop' : bus === 'music' ? 'checkpoint' : 'coin'); }))),
+    controlsBox(),
     section('Pop-up notifications', el('p', { class: 'small' }, 'Pick which little pop-ups you get. Your mailbox and messages still keep everything.'), ...notes),
   );
   if (session.user) {

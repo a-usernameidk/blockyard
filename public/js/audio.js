@@ -5,6 +5,14 @@ let ac = null;
 let muted = store.get('muted', false);
 
 export function isMuted() { return muted; }
+
+// Three volume sliders (Settings > Sound): music, game sound effects, and menu / chat / pop-up sounds.
+export const VOLUMES = [['music', 'Music'], ['sfx', 'Sound effects'], ['ui', 'Menus, chat and pop-ups']];
+let vol = { music: 1, sfx: 1, ui: 1, ...(store.get('vol', {}) || {}) };
+for (const k of Object.keys(vol)) { const v = Number(vol[k]); vol[k] = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1; }
+export const getVolume = (bus) => vol[bus] ?? 1;
+export function setVolume(bus, v) { vol = { ...vol, [bus]: Math.max(0, Math.min(1, Number(v) || 0)) }; store.set('vol', vol); }
+const UI_SOUNDS = new Set(['chat', 'send', 'open', 'close', 'pop', 'notify', 'leave', 'join', 'error', 'buy', 'badge']);
 export function setMuted(m) { muted = m; store.set('muted', m); if (m) stopMusic(); }
 
 // Browsers only allow sound after a click or key press.
@@ -13,8 +21,11 @@ export function unlockAudio() {
   try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; }
 }
 
-function tone(freq, dur, { type = 'square', vol = 0.06, slide = 0, delay = 0 } = {}) {
+let bus = 'sfx'; // which slider the sound being played right now listens to
+function tone(freq, dur, { type = 'square', vol: loud = 0.06, slide = 0, delay = 0, on = bus } = {}) {
   if (!ac || muted) return;
+  const vol = loud * (vol0(on));
+  if (vol <= 0.0002) return;
   const t0 = ac.currentTime + delay;
   const o = ac.createOscillator(), g = ac.createGain();
   o.type = type;
@@ -68,7 +79,8 @@ const SOUNDS = {
   whoosh: () => tone(200, 0.25, { type: 'sawtooth', slide: 900, vol: 0.03 }),
 };
 
-export function sfx(name) { const s = SOUNDS[name]; if (s) s(); }
+const vol0 = (b) => { const v = getVolume(b); return v * v; }; // squared: the slider feels even from quiet to loud
+export function sfx(name) { const s = SOUNDS[name]; if (!s) return; bus = UI_SOUNDS.has(name) ? 'ui' : 'sfx'; try { s(); } finally { bus = 'sfx'; } }
 
 /* ---------------- music: tiny looping tunes made from beeps ---------------- */
 let musicOn = store.get('music', true);
@@ -134,9 +146,9 @@ function schedule() {
   while (nextTime < ac.currentTime + 0.25) {
     const d = nextTime - ac.currentTime;
     const l = song.lead[stepN % song.lead.length], b = song.bass[stepN % song.bass.length];
-    if (l !== null) tone(freq(l), len * 0.9, { type: 'square', vol: 0.018, delay: d });
-    if (b !== null) tone(freq(b), len * 1.8, { type: 'triangle', vol: 0.05, delay: d });
-    if (stepN % 4 === 0) tone(60, 0.05, { type: 'sine', vol: 0.05, delay: d, slide: -20 });
+    if (l !== null) tone(freq(l), len * 0.9, { type: 'square', vol: 0.018, delay: d, on: 'music' });
+    if (b !== null) tone(freq(b), len * 1.8, { type: 'triangle', vol: 0.05, delay: d, on: 'music' });
+    if (stepN % 4 === 0) tone(60, 0.05, { type: 'sine', vol: 0.05, delay: d, slide: -20, on: 'music' });
     nextTime += len; stepN++;
   }
 }

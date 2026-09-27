@@ -907,3 +907,131 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .b3-gearitem { padding-left: 18px; }
 .gear-group { margin: 10px 0 6px; font-size: 16px; }
 .gear-cat { color: var(--text); }
+
+/* ---------- settings: sliders and your own keys ---------- */
+.panel .choice, .panel .check { display: flex; margin: 0; }
+.panel .check { margin-top: 10px; align-items: center; }
+.panel .choice input[type=radio] { width: 20px; height: 20px; accent-color: var(--ink); }
+.panel .slider { display: grid; gap: 4px; margin: 12px 0 0; }
+.slider-top { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; }
+.slider-top output { font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; }
+.panel input[type=range] { width: 100%; padding: 0; border: 0; background: transparent; accent-color: var(--pink); height: 28px; }
+.keys { display: grid; gap: 6px; margin-top: 12px; }
+.key-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 700; font-size: 15px; border-bottom: 2px dashed color-mix(in srgb, var(--line) 25%, transparent); padding-bottom: 6px; }
+.key-btn { min-width: 92px; padding: 5px 10px; font-size: 14px; box-shadow: 0 3px 0 var(--line); }
+.key-btn.wait { background: var(--sun); }
+.ach-reward { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ach-reward .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 4px; font-size: 13px; }
+
+/* ---------- phones, tablets and PCs: tidier spacing, bigger things to tap ---------- */
+.settings { gap: 18px; }
+.settings-box > .small:first-of-type { margin-bottom: 4px; }
+@media (max-width: 640px) {
+  /* 3 items across in the shop on phones instead of 2 big ones */
+  .items { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; padding: 10px; }
+  .item-name { font-size: 13px; }
+  /* the world's buttons sit in one row you can swipe, so the game itself fits on the screen */
+  .w3-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px 2px 6px; margin-bottom: 8px; }
+  .w3-bar::-webkit-scrollbar { display: none; }
+  .w3-bar > * { flex: none; }
+  .w3-bar .bar-title { min-width: 0; max-width: 58vw; }
+  .w3-bar .bar-title h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w3-stage { max-height: 74vh; }
+  h2 { font-size: 24px; margin-top: 26px; }
+  .panel { padding: 16px; }
+}
+/* fingers: everything you tap is at least 44px, and the game buttons are bigger */
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  .chip, .tab { min-height: 42px; }
+  .w3-bar .btn, .b3-bar .btn { min-height: 42px; }
+  .tbtn { width: 86px; height: 76px; font-size: 24px; border-radius: 16px; }
+  .tbtn-jump { width: auto; flex: 0 1 190px; }
+  .tbtn-wide { height: 96px; }
+  .w3-jump { width: 118px; height: 96px; right: 16px; bottom: 74px; font-size: 22px; }
+  .w3-shoot { width: 110px; height: 92px; right: 146px; bottom: 74px; }
+  .w3-joy { width: 124px; height: 124px; margin: -62px 0 0 -62px; }
+  .w3-knob { width: 56px; height: 56px; margin: -28px 0 0 -28px; }
+  .w3-emotes .btn, .w3-weapons .btn { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+  .w3-players-btn { min-height: 40px; }
+  .w3-chat-form .btn, .w3-chat-form input { min-height: 40px; }
+  .w3-shopbtn { font-size: 19px; padding: 10px 20px; bottom: 120px; }
+  .w3-weapons { bottom: 180px; }
+  .b3-move .tbtn { height: 56px; font-size: 16px; }
+  .key-btn { min-height: 40px; }
+}
+@media (pointer: coarse) and (max-width: 640px) { .w3-emotes { bottom: 184px; } }
+
+/* ---------- hotbar, backpack, creator shops, server powers, build mode ---------- */
+.w3-hotbar { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%); display: flex; gap: 6px; z-index: 4; max-width: calc(100% - 20px); }
+.w3-hotbar.paint { bottom: 104px; }
+.w3-slot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; min-width: 62px; max-width: 110px; height: 52px; padding: 2px 8px; font: 800 12px/1.1 Nunito, system-ui, sans-serif; color: var(--ink); background: rgba(255,255,255,.92); border: 3px solid var(--line); border-radius: 12px; box-shadow: 0 3px 0 var(--line); cursor: pointer; }
+.w3-slot b { font-size: 11px; opacity: .6; }
+.w3-slot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.w3-slot.on { background: var(--sun); transform: translateY(-4px); }
+.w3-slot.empty { cursor: default; color: var(--muted); font-weight: 700; min-width: 150px; box-shadow: none; border-style: dashed; }
+.w3-bagbtn { min-width: 48px; font-size: 22px; }
+.w3-bag { top: auto; bottom: 120px; left: 50%; transform: translateX(-50%); width: 340px; max-height: 60%; overflow: auto; }
+.w3-bag li { flex-wrap: wrap; }
+.w3-bag li > span:first-child { flex: 1; min-width: 120px; }
+.w3-weapons .btn.locked { opacity: .7; background: #e8ebf5; }
+.wshop-list { display: grid; gap: 8px; margin-top: 10px; }
+.wshop-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 3px solid var(--line); border-radius: 12px; padding: 8px 10px; background: var(--bg); }
+.wshop-item > div { display: flex; flex-direction: column; min-width: 0; }
+.wshop-item .small { margin: 0; }
+.wshop-item .btn { flex: none; }
+.wshop-item.own { background: #dcf5e3; color: var(--ink); }
+.wshop-item.own .small { color: var(--ink); }
+.w3-list .lvl, .w3-name .lvl.perm-owner, .w3-name .lvl.perm-admin, .w3-name .lvl.perm-builder { display: inline-block; border-radius: 6px; padding: 0 5px; font-size: 11px; background: var(--sun); color: var(--ink); }
+.lvl.perm-owner { background: var(--pink) !important; color: #fff !important; }
+.lvl.perm-admin { background: #b06cff !important; color: #fff !important; }
+.lvl.perm-builder { background: var(--grass) !important; color: var(--ink) !important; }
+.w3-perms { align-items: center; margin-top: 8px; }
+.w3-perms .btn.on { background: var(--sun); }
+.w3-build { width: 280px; max-height: calc(100% - 70px); overflow: auto; }
+.w3-build .seg { box-shadow: 0 3px 0 var(--line); margin-bottom: 8px; }
+.w3-build .seg-btn { padding: 5px 12px; font-size: 13px; }
+.w3-build-blocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 4px; }
+.w3-build .b3-block[aria-pressed="true"] { background: var(--sun); }
+.w3-build .swatches { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.w3-build .swatch { width: 24px; height: 24px; border-radius: 7px; border-width: 2px; box-shadow: 0 2px 0 var(--line); }
+.w3-build .swatch[aria-pressed="true"] { outline: 3px solid var(--pink); outline-offset: 1px; }
+.w3-stage.building .w3-canvas { cursor: crosshair; }
+.b3-hotbar { margin-top: 12px; font-size: 14px; }
+.b3-shop { margin-top: 12px; display: grid; gap: 8px; }
+.b3-shoprow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.b3-shoprow select { flex: 1 1 180px; font-size: 14px; }
+.b3-shoprow input { flex: 1 1 140px; font-size: 14px; padding: 5px 8px; }
+.b3-price { display: inline-flex; align-items: center; gap: 4px; font-weight: 800; font-size: 14px; }
+.b3-price input { width: 96px; flex: none; }
+@media (pointer: coarse) {
+  .w3-slot { min-width: 70px; height: 60px; font-size: 13px; }
+  .w3-hotbar { bottom: 74px; left: 42%; }
+  .w3-hotbar.paint { bottom: 230px; left: 50%; }
+  .w3-bag { bottom: 150px; }
+}
+@media (max-width: 640px) {
+  .w3-hotbar { bottom: 64px; left: 10px; transform: none; max-width: calc(100% - 150px); overflow-x: auto; }
+  .w3-build { width: calc(100% - 20px); max-height: 45%; }
+  .w3-bag { width: calc(100% - 20px); }
+}
+.w3-shopbtn { bottom: 122px; }
+@media (pointer: coarse) { .w3-shopbtn { bottom: 150px; } }
+.w3-menu-row + .w3-menu-row { margin-top: 8px; }
+.w3-perms .small { width: 100%; margin: 0; }
+.w3-build { width: 316px; }
+.w3-build-blocks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.w3-build .b3-block { font-size: 11.5px; padding: 4px 5px; }
+/* medium screens: the emotes wrap to two rows, so the blasters sit above them */
+@media (max-width: 1100px) and (min-width: 641px) and (pointer: fine) {
+  .w3-weapons { bottom: 108px; }
+  .w3-hotbar.paint { bottom: 158px; }
+}
+/* touch screens: emotes go top-right (under Players) so the bottom stays free for Jump, blasters and the hotbar */
+@media (pointer: coarse) {
+  .w3-emotes { top: 62px; bottom: auto; right: 10px; max-width: 34%; }
+  .w3-players { z-index: 5; }
+  .w3-emotes .btn { min-height: 36px; padding: 4px 10px; font-size: 13px; }
+}
+@media (pointer: coarse) { .w3-emotes { top: 112px; } }
+@media (orientation: portrait) and (min-width: 641px) { .w3-stage { aspect-ratio: 4 / 3; } }

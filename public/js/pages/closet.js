@@ -7,13 +7,13 @@ import { drawPip, drawPet, drawGear } from '../art.js';
 import { setWallet, openAccount } from './account.js';
 import { SPECIAL_TITLES } from '../names.js';
 
-let tab = 'shop', kind = 'hat', pick = null, raf = 0, shopInfo = null;
+let tab = 'shop', kind = 'hat', pick = null, raf = 0, shopInfo = null, jumpTo = null;
 const KIND_LABEL = { hat: 'Hats', color: 'Colors', trail: 'Trails', pet: 'Pets', gear: 'Gear' };
 onLeave('closet', () => cancelAnimationFrame(raf));
 
 /* ---------------- drawing items ---------------- */
 const TRAIL_SAMPLE = { confetti: '#ff5d8f', snow: '#8fd3ff', galaxy: '#b06cff', sparkle: '#ffd23f', bubbles: '#7cc8ff', hearts: '#ff5d8f', notes: '#1d2340', fire: '#ff5a1f', rainbow: null, stars: '#ffd23f', lightning: '#7cc8ff',
-  leaves: '#44c06a', mint: '#2ec4b6', lava: '#ff5a1f', ice: '#7cc8ff', candy: '#ff5d8f', ocean: '#0077b6', toxic: '#39ff14', sakura: '#ffb7c5', shadow: '#3d405b', sunset: '#ff9f1c', goldtrail: '#e0b12a', void: '#5a3fd6' };
+  leaves: '#44c06a', mint: '#2ec4b6', lava: '#ff5a1f', ice: '#7cc8ff', candy: '#ff5d8f', ocean: '#0077b6', toxic: '#39ff14', sakura: '#ffb7c5', shadow: '#3d405b', sunset: '#ff9f1c', goldtrail: '#e0b12a', void: '#5a3fd6', paintsplat: '#ff5d8f', frost: '#7cc8ff', nebula: '#5a3fd6', chosen: '#ffd23f' };
 function drawTrailSample(c, k, x, y, t) {
   if (k === 'rainbow') {
     ['#ff5d8f', '#ff9f1c', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'].forEach((col, i) => {
@@ -98,7 +98,7 @@ async function showCloset(t = 'shop', tradeWith) {
   renderWallet();
   loadStats();
   if (tab === 'shop' || tab === 'mine') {
-    pick = null;
+    pick = tab === 'shop' ? jumpTo : null; jumpTo = null;
     closetLoop();
     if (!shopInfo && (await isOnline())) { try { shopInfo = await api.shop(); } catch (e) { /* no deals then */ } }
     render();
@@ -348,8 +348,13 @@ function renderBadges() {
     };
   }
   $('#ach-count').textContent = `${Object.keys(got).filter((k) => ACHIEVEMENTS.some((a) => a.id === k)).length} of ${ACHIEVEMENTS.length}`;
+  // badge-only items: which badge unlocks what
+  const rewards = {};
+  for (const k of KINDS) for (const item of SHOP[k]) if (item.need && item.need.ach) (rewards[item.need.ach] ||= []).push({ k, item });
   for (const a of ACHIEVEMENTS) {
-    list.append(el('div', { class: 'ach' + (got[a.id] ? ' got' : '') + (a.hard ? ' hard' : '') + (a.chosen ? ' chosen' : '') }, pipBadge(got[a.id]), el('div', {}, el('b', {}, a.name, a.hard ? el('span', { class: 'hard-tag' }, a.chosen ? 'LEGENDARY' : 'HARD') : null), el('span', { class: 'small' }, a.text))));
+    const rw = rewards[a.id];
+    list.append(el('div', { class: 'ach' + (got[a.id] ? ' got' : '') + (a.hard ? ' hard' : '') + (a.chosen ? ' chosen' : '') }, pipBadge(got[a.id]), el('div', {}, el('b', {}, a.name, a.hard ? el('span', { class: 'hard-tag' }, a.chosen ? 'LEGENDARY' : 'HARD') : null), el('span', { class: 'small' }, a.text),
+      rw ? el('span', { class: 'ach-reward' }, ...rw.map(({ k, item }) => el('button', { class: 'chip', type: 'button', title: got[a.id] ? 'Unlock it in the shop' : 'Earn this badge to unlock it', onclick: () => { kind = k; jumpTo = { kind: k, id: item.id, key: itemKey(k, item.id), item }; go('#/closet'); } }, itemPreview(k, item, 22), `${got[a.id] ? '🎁' : '🔒'} ${item.name}`))) : null)));
   }
   const s = progress.data.stats;
   $('#stats-list').innerHTML = '';

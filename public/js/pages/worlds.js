@@ -241,6 +241,12 @@ async function enterWorld(id, code) {
     music: w.builtin ? (builtinWorld(id).snow ? 'snow' : builtinWorld(id).game ? 'game' : w.sky === 'night' && w.mode !== 'hangout' ? 'space' : null) : null,
     shop: w.builtin ? builtinWorld(id).shop || null : null,
     onShop: shopPanel,
+    worldId: id,
+    ownsGear: (gid) => progress.owns('gear', gid),
+    wallet: () => progress.wallet,
+    // this world's own shop (player worlds only): what you bought, and buying more
+    shopOwned: !w.builtin && session.user ? () => api.worldShop(id) : null,
+    onShopBuy: !w.builtin && session.user ? async (item) => { const r = await api.buyWorldItem(id, item); if (r.wallet) setWallet(r.wallet); return r; } : null,
     onKick: async (name) => { try { await api.adminAct(name, 'kick'); toast(`${name} was kicked.`); } catch (e) { toast(e.message); } },
     room: multi ? async () => { if (first) { const f = first; first = null; return f; } return api.joinRoom(joined ? { code: joined } : { world: id }); } : null,
     soloNote: !session.user ? 'You are playing solo. Log in to see other players and chat.' : !session.rooms ? 'Multiplayer is off on this server, so you are playing solo.' : null,
@@ -256,7 +262,7 @@ async function enterWorld(id, code) {
     onWin: async (r) => {
       progress.finishWorld(id, r);
       if (!session.user) return { text: w.reward ? `Log in to earn coins from ${w.builtin ? 'Blockyard obbies' : 'this obby'} and get on the leaderboard.` : 'Log in to get on the leaderboard.' };
-      if (r.noProof) return { text: 'Admin flying was on, so this run does not count.' };
+      if (r.noProof) return { text: 'Flying or building was used in this server, so this run does not count.' };
       const res = await api.finish(w.builtin ? { kind: 'world', id, replay: r.replay } : { kind: 'game', id, replay: r.replay });
       if (res.wallet) setWallet(res.wallet);
       const coins = (res.earned ? `+${res.earned} coins${res.bonus ? ' (replay bonus)' : ''}! ` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '') + (res.rated ? `+${res.rated}★ difficulty stars! ` : '');

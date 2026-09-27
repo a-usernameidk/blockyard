@@ -97,6 +97,7 @@ CREATE TABLE servers (code TEXT PRIMARY KEY,
   players INTEGER NOT NULL DEFAULT 0,
   updated INTEGER NOT NULL,
   created_at INTEGER NOT NULL);
+-- added later by the server itself: bots, bot_skill, and perms (who is a Builder / Admin in a private server)
 CREATE INDEX servers_world ON servers (world, private, updated);
 
 CREATE TABLE presence (user_id TEXT PRIMARY KEY,
@@ -170,3 +171,5 @@ CREATE TABLE IF NOT EXISTS listings (id TEXT PRIMARY KEY, seller TEXT NOT NULL, 
   status TEXT NOT NULL DEFAULT 'open', buyer TEXT, at INTEGER NOT NULL, sold_at INTEGER);
 CREATE INDEX IF NOT EXISTS listings_item ON listings (item, status, price);
 CREATE INDEX IF NOT EXISTS listings_seller ON listings (seller, status);
+-- creator shops: what players bought in someone's 3D world (only works in that world)
+CREATE TABLE IF NOT EXISTS world_items (user_id TEXT NOT NULL, game_id TEXT NOT NULL, item TEXT NOT NULL, price INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user_id, game_id, item));

@@ -69,6 +69,13 @@ export const HATS = [
   { id: 'cowboy-black', name: 'Black cowboy hat', price: 320 }, { id: 'cowboy-white', name: 'White cowboy hat', price: 320 },
   { id: 'headphones-mint', name: 'Mint headphones', price: 200 }, { id: 'headphones-gold', name: 'Gold headphones', price: 900 },
   { id: 'horns-black', name: 'Shadow horns', price: 260 }, { id: 'horns-gold', name: 'Golden horns', price: 800 },
+  // badge-only: earn the badge to unlock them (they can't be bought or traded)
+  { id: 'crown-demon', name: 'Demon crown', need: { ach: 'demon' }, hint: 'Earn the Demon Slayer badge' },
+  { id: 'wizard-star', name: 'Starry wizard hat', need: { ach: 'rstars100' }, hint: 'Earn the Star Eater badge' },
+  { id: 'headphones-dj', name: 'DJ headphones', need: { ach: 'dance200' }, hint: 'Earn the Disco Inferno badge' },
+  { id: 'cap-racer', name: 'Racing cap', need: { ach: 'race25' }, hint: 'Earn the Photo Finish badge' },
+  { id: 'tophat-tycoon', name: 'Tycoon top hat', need: { ach: 'tycoon' }, hint: 'Earn the Tycoon badge' },
+  { id: 'horns-lava', name: 'Lava horns', need: { ach: 'lava10' }, hint: 'Earn the Floor Is Lava Pro badge' },
 ];
 
 export const TRAILS = [
@@ -88,6 +95,11 @@ export const TRAILS = [
   { id: 'ice', name: 'Ice shards', price: 300 }, { id: 'candy', name: 'Candy', price: 260 }, { id: 'ocean', name: 'Ocean spray', price: 280 },
   { id: 'toxic', name: 'Toxic goo', price: 350 }, { id: 'sakura', name: 'Cherry blossoms', price: 380 }, { id: 'shadow', name: 'Shadow', price: 400 },
   { id: 'sunset', name: 'Sunset', price: 420 }, { id: 'goldtrail', name: 'Gold dust', price: 1500, stock: 12 }, { id: 'void', name: 'The Void', price: 2500, stock: 8 },
+  // badge-only
+  { id: 'paintsplat', name: 'Paint splats', need: { ach: 'splat100' }, hint: 'Earn the Paint Picasso badge' },
+  { id: 'frost', name: 'Frostbite', need: { ach: 'snow50' }, hint: 'Earn the Snowball Sniper badge' },
+  { id: 'nebula', name: 'Nebula', need: { ach: 'nebula' }, hint: 'Earn the Treasure Hunter badge' },
+  { id: 'chosen', name: 'Chosen glow', need: { ach: 'chosen' }, hint: 'Earn The Chosen One badge' },
 ];
 
 // Pets follow you around in 3D worlds.
@@ -102,6 +114,11 @@ export const PETS = [
   { id: 'slime-blue', name: 'Blue slime', price: 300 }, { id: 'slime-lava', name: 'Lava slime', price: 450 }, { id: 'slime-ghost', name: 'Ghost', price: 600 },
   { id: 'kitty-black', name: 'Black cat', price: 450 }, { id: 'kitty-fox', name: 'Fox', price: 550 }, { id: 'pup-snow', name: 'Snow pup', price: 500 },
   { id: 'slime-gold', name: 'Golden slime', price: 4000, stock: 6 },
+  // badge-only
+  { id: 'slime-demon', name: 'Demon slime', need: { ach: 'insane' }, hint: 'Earn the Asylum Escapee badge' },
+  { id: 'kitty-tiger', name: 'Tiger', need: { ach: 'koth10' }, hint: 'Earn the Hill Hog badge' },
+  { id: 'pup-gold', name: 'Golden pup', need: { ach: 'friends10' }, hint: 'Earn the Popular Pip badge' },
+  { id: 'slime-star', name: 'Star slime', need: { ach: 'followers10' }, hint: 'Earn the Rising Star badge' },
 ];
 // Recolored items: [looks like, main color, second color]
 export const VARIANTS = {
@@ -116,6 +133,9 @@ export const VARIANTS = {
   'headphones-mint': ['headphones', '#2ec4b6'], 'headphones-gold': ['headphones', '#e0b12a'],
   'horns-black': ['horns', '#3d405b'], 'horns-gold': ['horns', '#e0b12a'],
   'slime-blue': ['slime', '#7cc8ff'], 'slime-lava': ['slime', '#ff5a1f'], 'slime-ghost': ['slime', '#f4f4f4'], 'slime-gold': ['slime', '#ffd23f'],
+  'crown-demon': ['crown', '#8a1020'], 'wizard-star': ['wizard', '#1b2a6b'], 'headphones-dj': ['headphones', '#b06cff'], 'cap-racer': ['cap', '#ffd23f', '#1d2340'],
+  'tophat-tycoon': ['tophat', '#2d6a4f', '#e0b12a'], 'horns-lava': ['horns', '#ff5a1f'],
+  'slime-demon': ['slime', '#8a1020'], 'kitty-tiger': ['kitty', '#ff9f1c', '#1d2340'], 'pup-gold': ['pup', '#ffd23f', '#e0b12a'], 'slime-star': ['slime', '#b06cff'],
   'kitty-black': ['kitty', '#3d405b', '#1d2340'], 'kitty-fox': ['kitty', '#ff8c42', '#c85a1e'], 'pup-snow': ['pup', '#f4f4f4', '#c8d0e0'],
 };
 export const variant = (id) => VARIANTS[id] || [id, null, null];
