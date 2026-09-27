@@ -1052,10 +1052,52 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .ty-tag .w3-bubble { font-size: 12px; background: #f1f3fa; }
 .ty-tag.ty-can .w3-bubble { background: var(--grass); color: var(--ink); }
 .ty-tag.ty-max .w3-bubble { background: var(--sun); }
-.w3-stage.tycoon .w3-toast { top: 92px; }
 .w3-ty { pointer-events: auto; cursor: pointer; font-family: Nunito, system-ui, sans-serif; font-weight: 800; line-height: 1.35; }
 .w3-tyreport { top: 64px; left: 50%; transform: translateX(-50%); width: min(420px, calc(100% - 20px)); }
 .ty-list { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 6px; }
 .ty-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; border-bottom: 2px dashed color-mix(in srgb, var(--line) 25%, transparent); padding-bottom: 4px; }
 .ty-list li > span { display: flex; flex-direction: column; }
 .ty-list .small { margin: 0; }
+/* the government: a button under the town bar, and its panel */
+.w3-govbtn { position: absolute; top: 54px; left: 50%; transform: translateX(-50%); z-index: 5; padding: 4px 12px; font-size: 14px; }
+.w3-govbtn:active { transform: translate(-50%, 3px); }
+.w3-govbtn.gov-new { animation: gov-pulse 1.2s ease-in-out infinite; }
+@keyframes gov-pulse { 50% { background: var(--grass); } }
+@media (prefers-reduced-motion: reduce) { .w3-govbtn.gov-new { animation: none; background: var(--grass); } }
+.w3-stage.tycoon .w3-toast { top: 100px; }
+.w3-gov { top: 96px; left: 50%; transform: translateX(-50%); width: min(460px, calc(100% - 20px)); max-height: calc(100% - 110px); overflow-y: auto; z-index: 7; }
+.w3-gov h4 { font-size: 15px; margin: 10px 0 4px; }
+.w3-gov .small { margin: 2px 0; }
+.gov-meter { display: grid; grid-template-columns: 88px 1fr 30px; align-items: center; gap: 8px; font-weight: 800; margin: 4px 0; }
+.gov-meter i { display: block; height: 12px; border: 2px solid var(--line); border-radius: 8px; overflow: hidden; background: #f1f3fa; }
+.gov-meter b { display: block; height: 100%; background: var(--grass); }
+.gov-meter.m-crime b { background: var(--pink); }
+.gov-meter.m-corrupt b { background: var(--sun); }
+.gov-num { text-align: right; }
+.gov-tax { width: 100%; }
+.gov-tax .seg-btn { flex: 1; padding: 6px 4px; font-size: 12px; }
+.gov-tax .seg-btn:disabled { cursor: default; }
+.gov-card { border: 2px solid var(--line); border-radius: 10px; padding: 6px 8px; margin: 6px 0; background: color-mix(in srgb, var(--card) 92%, var(--sun)); }
+.gov-card p { margin: 0 0 6px; font-weight: 700; }
+.gov-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
+.w3-gov .gov-choices .btn { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding: 4px 8px; }
+.gov-fx { font-weight: 700; opacity: .8; }
+.gov-news { margin: 0; padding-left: 18px; font-size: 13px; display: grid; gap: 3px; }
+@media (max-width: 720px) {
+  .w3-govbtn { top: 86px; font-size: 13px; }
+  .w3-stage.tycoon .w3-toast { top: 126px; }
+  .w3-gov { top: 124px; max-height: calc(100% - 134px); }
+}
+
+/* ---------- the daily challenge window ---------- */
+.daily-window { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.daily-window h2 { margin: 0; font-size: 30px; }
+.daily-window .by-line { margin: 0; }
+.daily-window .card-meta { justify-content: center; }
+.daily-stage { position: relative; width: 100%; margin: 6px 0; }
+.daily-stage canvas { display: block; width: 100%; }
+.daily-playbtn { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 24px; padding: 14px 34px; box-shadow: 0 6px 0 var(--line); }
+.daily-playbtn:active { transform: translate(-50%, calc(-50% + 3px)); box-shadow: 0 2px 0 var(--line); }
+.daily-playbtn:disabled { transform: translate(-50%, -50%); }
+.daily-desc { max-width: 60ch; margin: 4px 0; font-weight: 700; overflow-wrap: anywhere; }
+.daily-rate { justify-content: center; }

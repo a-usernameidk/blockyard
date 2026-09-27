@@ -322,10 +322,15 @@
 <section id="view-daily" class="view" hidden>
   <div class="section-head"><h2 id="daily-title">Daily challenge</h2><span class="small" id="daily-reset"></span></div>
   <div class="daily-top">
-    <div class="daily-card">
-      <div class="detail-thumb"><canvas id="daily-thumb" aria-hidden="true"></canvas></div>
+    <div class="daily-card daily-window">
+      <p class="detail-kicker">Today's level</p>
+      <h2 id="daily-name">Loading…</h2>
+      <p class="by-line" id="daily-by"></p>
+      <div class="card-meta" id="daily-meta"></div>
+      <div class="daily-stage detail-thumb"><canvas id="daily-thumb" aria-hidden="true"></canvas><button class="btn btn-grass btn-big daily-playbtn" id="daily-play" type="button">▶ Play</button></div>
+      <p class="daily-desc" id="daily-desc"></p>
+      <div class="row daily-rate" id="daily-rate"></div>
       <p id="daily-mine"></p>
-      <div class="row"><button class="btn btn-grass btn-big" id="daily-play">Play today's course</button></div>
       <p class="small" id="daily-note"></p>
     </div>
     <div class="board">
@@ -359,6 +364,28 @@
   <div id="admin-log" class="admin-list" hidden></div>
   <div id="admin-site" hidden>
     <div class="admin-box">
+      <h2>Online right now</h2>
+      <p class="small">Everyone in a 3D world right now. Join their server or open Manage.</p>
+      <div class="row"><button class="btn" id="admin-online-go" type="button">Refresh</button><span class="small" id="admin-online-sum"></span></div>
+      <div id="admin-online" class="admin-list"></div>
+    </div>
+    <div class="admin-box">
+      <h2>Gift everyone</h2>
+      <p class="small">Give every player coins, an item, or both. They all get a mail. Great for a holiday or saying sorry after a bug.</p>
+      <div class="row"><label>Coins <input type="number" id="giftall-coins" min="0" max="100000" value="0" style="width:120px"></label><label>Item <select id="giftall-item"></select></label></div>
+      <div class="row" style="margin-top:8px"><input id="giftall-note" maxlength="200" placeholder="A note (like: Happy Halloween!)" aria-label="Note"><button class="btn btn-sun" id="giftall-go" type="button">Give to everyone</button></div>
+    </div>
+    <div class="admin-box">
+      <h2>Close all servers</h2>
+      <p class="small">Sends everyone out of every 3D server with your message (like before fixing something). They can come back right away.</p>
+      <div class="row"><input id="closeall-msg" maxlength="200" placeholder="Like: Quick fix, back in 5 minutes!" aria-label="Message"><button class="btn btn-danger" id="closeall-go" type="button">Close all servers</button></div>
+    </div>
+    <div class="admin-box">
+      <h2>Events</h2>
+      <p class="small">Turn on an event for a while. Everyone sees a banner at the top of the site while it runs. The extra coins show up as "event bonus" in coin histories.</p>
+      <div id="admin-events" class="admin-list"></div>
+    </div>
+    <div class="admin-box">
       <h2>Daily deals</h2>
       <p class="small">Deals change by themselves every day at midnight (UTC). Change the discount or how many items, pick the items for any day, or run a sale on the whole shop. Limited items are never on sale.</p>
       <div class="row"><label>Discount <select id="deal-off"></select></label><label>Items per day <select id="deal-count"></select></label><label>How many at the deal price (each) <select id="deal-stock"></select></label><button class="btn" id="deal-save" type="button">Save</button></div>
@@ -377,6 +404,8 @@
       <h2>Daily challenge</h2>
       <p class="small">Pick a player's 2D level for a day. Days you don't pick get a top-liked (or most played) player level that was never the daily before, or Blockyard's own course if there are none.</p>
       <div class="row"><input type="date" id="daily-pick-date" aria-label="Day"><input id="daily-pick-game" placeholder="Level link or ID" aria-label="Level link or ID"><button class="btn btn-sun" id="daily-pick-go" type="button">Pick it</button></div>
+      <div class="row" style="margin-top:8px"><input id="daily-find-q" placeholder="Or search levels by name or maker" aria-label="Search levels"><button class="btn" id="daily-find-go" type="button">Search</button></div>
+      <div class="admin-list" id="daily-find"></div>
       <div class="admin-list" id="daily-picks"></div>
     </div>
     <div class="admin-box">

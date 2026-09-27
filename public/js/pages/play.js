@@ -360,6 +360,7 @@ async function showDaily() {
   $('#daily-mine').textContent = d ? (d.won ? `You cleared it in ${plural(d.attempts, 'attempt')}.` : `Your best: ${Math.floor(d.best * 100)}% after ${plural(d.attempts, 'attempt')}.`) : 'Same course for everyone today. One life per attempt, as many attempts as you want. Clear it for 30 coins.';
   $('#daily-note').textContent = session.user ? 'Your best run goes on the board automatically.' : 'Playing as a guest. Log in to get on the board and earn coins.';
   $('#daily-play').onclick = () => playDaily(date, lv, dailyLevel && dailyLevel.date === date ? dailyLevel.by : 'Blockyard');
+  dailyWindow(dailyLevel && dailyLevel.date === date ? dailyLevel.game : null);
   const board = $('#daily-board'), bmsg = $('#daily-board-msg');
   board.innerHTML = ''; bmsg.textContent = 'Loading…';
   $('#daily-play').disabled = true; // wait to hear which course it is today
@@ -370,8 +371,8 @@ async function showDaily() {
     if (r.level) {
       try {
         lv = normalizeLevel(r.level);
-        dailyLevel = { date, lv, by: r.source.game.creator };
-        $('#daily-title').textContent = `Daily challenge: "${r.source.game.name}" by ${r.source.game.creator}`;
+        dailyLevel = { date, lv, by: r.source.game.creator, game: r.source.game };
+        dailyWindow(r.source.game);
         drawThumb($('#daily-thumb'), thumbWindow(lv, 60), 5);
         $('#daily-play').onclick = () => playDaily(date, lv, r.source.game.creator);
       } catch (e) { /* Blockyard's own course then */ }
@@ -386,6 +387,24 @@ async function showDaily() {
   } catch (e) { bmsg.textContent = e.message; $('#daily-play').disabled = false; }
 }
 let dailyLevel = null;
+// The daily's window: its name, who made it, how hard it is, what they wrote about it, like / dislike, and Play.
+function dailyWindow(g) {
+  $('#daily-name').textContent = g ? g.name : "Blockyard's daily course";
+  $('#daily-by').replaceChildren(...(g ? ['by ', el('a', { class: 'linkish', href: '#/u/' + encodeURIComponent(g.creator) }, g.creator)] : ['by Blockyard']));
+  $('#daily-meta').replaceChildren(g && g.stars ? diffTag(g.stars) : el('span', { class: 'tag' }, 'Not rated yet'), g ? el('span', { class: 'tag' }, `👍 ${g.likes || 0}  👎 ${g.dislikes || 0}`) : null, el('span', { class: 'tag tag-pay' }, 'Clear it for 30 coins'));
+  $('#daily-desc').textContent = g ? (g.descr || `${g.creator} didn't write anything about this level.`) : 'Made by Blockyard just for today. Same course for everyone.';
+  const box = $('#daily-rate');
+  if (!g) { box.replaceChildren(); return; }
+  const mine = store.get('liked:' + g.id, '');
+  const set = (k) => { like.disabled = k === 'like'; dis.disabled = k === 'dislike'; like.textContent = k === 'like' ? 'Liked 👍' : 'Like 👍'; dis.textContent = k === 'dislike' ? 'Disliked 👎' : 'Dislike 👎'; };
+  const act = (k) => async () => {
+    if (!session.user) { needLogin('Likes and dislikes need an account.'); return; }
+    try { const r = await (k === 'like' ? api.like(g.id) : api.dislike(g.id)); store.set('liked:' + g.id, k); set(k); g.likes = r.likes; g.dislikes = r.dislikes; toast(`👍 ${r.likes}  👎 ${r.dislikes}`); } catch (e) { toast(e.message); }
+  };
+  const like = el('button', { class: 'btn', type: 'button', onclick: act('like') }), dis = el('button', { class: 'btn', type: 'button', onclick: act('dislike') });
+  set(mine === true ? 'like' : mine);
+  box.replaceChildren(like, dis);
+}
 function playDaily(date, lv = dailyCourse(date), by = 'Blockyard') {
   const d = progress.data.daily[date];
   playLevel(lv, {

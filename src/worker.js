@@ -14,15 +14,15 @@ import { builtinWorld } from '../public/js/worlds3d.js';
 import { BOTS } from '../public/js/games.js';
 import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
-import { findItem } from '../public/js/cosmetics.js';
+import { findItem, xpFor } from '../public/js/cosmetics.js';
 import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
 import { MARKET_SCHEMA, marketRoute } from './market.js';
-import { TYCOON_SCHEMA, tycoonRoute } from './tycoon.js';
+import { TYCOON_SCHEMA, tycoonRoute, tycoonAdmin } from './tycoon.js';
 import { PEOPLE_SCHEMA, PEOPLE_COLUMNS, peopleRoute, followInfo, tellFollowers, rateGame, titleOk, setTag, isOwner } from './people.js';
 import { cleanTags } from '../public/js/names.js';
 import { COMMUNITY_SCHEMA, vote, voteSummary, facesBeaten, dailyPick, setDailyPick, dailyPicks } from './community.js';
 import { MOD, ROLES, ROLE_NAME, addWarning, creditReporters, checkPopular, adminNotify, setAdminNotify, mailAdmin, setPay } from './mod.js';
-import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool, ECON_COLUMNS, questBumps } from './econ.js';
+import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool, ECON_COLUMNS, questBumps, loadEvents, cleanEvents, EVENT_KINDS } from './econ.js';
 export { Room } from './room.js';
 
 const PAGE = 24;
@@ -111,6 +111,8 @@ const COLUMNS = [
   'ALTER TABLE servers ADD COLUMN bots INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE servers ADD COLUMN bot_skill TEXT NOT NULL DEFAULT 'normal'",
   "ALTER TABLE servers ADD COLUMN perms TEXT NOT NULL DEFAULT '{}'",
+  'ALTER TABLE users ADD COLUMN muted_until INTEGER NOT NULL DEFAULT 0', // the admin muted their chat until then
+  'ALTER TABLE users ADD COLUMN frozen INTEGER NOT NULL DEFAULT 0',      // the admin froze their trading
   'ALTER TABLE games ADD COLUMN suggested INTEGER NOT NULL DEFAULT 0',
   ...PEOPLE_COLUMNS,
 ];
@@ -170,6 +172,7 @@ async function handle(request, env, url) {
   await ensureSchema(env.DB);
   const db = env.DB;
   const ctx = { db, env, request, url, ip: await visitorId(request, env), user: await sessionUser(db, request, env) };
+  await loadEvents(db);
   ctx.ban = (u) => banUser(ctx, u);
   ctx.deleteAccount = (u, why) => deleteAccount(ctx, u, why);
   let m;
@@ -184,6 +187,11 @@ async function handle(request, env, url) {
   if (path === '/me/progress' && method === 'PUT') return saveProgress(ctx, await body(request));
   if (path === '/me/games' && method === 'GET') return myGames(ctx);
 
+  // the admin can mute someone's chat or freeze their trading for a while
+  if (ctx.user && method === 'POST') {
+    if (ctx.user.muted && /^\/dms\/[A-Za-z0-9_]{3,20}$/.test(path)) fail(403, `An admin muted your chat. You can send messages again in ${untilText(ctx.user.muted)}.`);
+    if (ctx.user.frozen && /^\/(trades|gift|live|market)(\/|$)/.test(path) && !/\/cancel$/.test(path)) fail(403, 'An admin froze your trading for now: no trades, gifts or Reseller shop. Check your mail.');
+  }
   // coins, shop, trades, rewards
   const e = await econRoute(ctx, path, method);
   if (e) return e;
@@ -311,13 +319,14 @@ async function sessionUser(db, request, env) {
   if (!token) { token = readCookie(request); viaCookie = !!token; }
   if (!token || token.length > 100) return null;
   const hash = await sha256(token);
-  const row = await db.prepare(`SELECT u.id, u.name, u.banned, u.role, u.display, s.expires FROM sessions s JOIN users u ON u.id = s.user_id
+  const row = await db.prepare(`SELECT u.id, u.name, u.banned, u.role, u.display, u.muted_until, u.frozen, s.expires FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires > ?`).bind(hash, Date.now()).first();
   if (!row || row.banned) return null;
   // logins you keep using never run out
   if (row.expires - Date.now() < (SESSION_DAYS - 30) * DAY) await db.prepare('UPDATE sessions SET expires = ? WHERE token_hash = ?').bind(Date.now() + SESSION_DAYS * DAY, hash).run();
-  return { id: row.id, name: row.name, token, viaCookie, admin: isAdmin(env, row), role: row.role || '', display: row.display || null };
+  return { id: row.id, name: row.name, token, viaCookie, admin: isAdmin(env, row), role: row.role || '', display: row.display || null, muted: row.muted_until > Date.now() ? row.muted_until : 0, frozen: !!row.frozen };
 }
+const untilText = (t) => { const m = Math.ceil((t - Date.now()) / 60e3); return m >= 1440 ? `${Math.round(m / 1440)} day${m >= 2880 ? 's' : ''}` : m >= 60 ? `${Math.round(m / 60)} hour${m >= 120 ? 's' : ''}` : `${m} minute${m === 1 ? '' : 's'}`; };
 // "Keep me logged in": the login also goes in a cookie. Otherwise only this tab remembers it.
 const remember = (resp, input, token) => (input && input.remember === false ? resp : withCookie(resp, token, SESSION_DAYS));
 async function newSession(db, userId) {
@@ -550,7 +559,7 @@ async function friendsList(ctx) {
       const on = r.world && r.seen > Date.now() - FRESH;
       // on the site (the page checks in every few seconds) but not in a world
       const site = !on && r.site > Date.now() - 3 * 60e3;
-      out.friends.push({ name: r.name, display: r.display || undefined, pfp: r.pfp || undefined, look: lookOf(r.look), online: on ? { world: r.world, code: r.code, name: worldName(r.world) || names[r.world] || 'a player world' } : site ? { world: null, code: null, name: null, site: true } : null });
+      out.friends.push({ name: r.name, display: r.display || undefined, pfp: r.pfp || undefined, look: lookOf(r.look), online: on ? { world: r.world, code: r.code, name: builtinWorld(r.world) && builtinWorld(r.world).own ? 'their Tycoon town' : worldName(r.world) || names[r.world] || 'a player world' } : site ? { world: null, code: null, name: null, site: true } : null });
     } else if (r.b === user.id) out.incoming.push({ name: r.name, look: lookOf(r.look) });
     else out.outgoing.push({ name: r.name, look: lookOf(r.look) });
   }
@@ -894,7 +903,7 @@ async function online(ctx) {
   const worlds = {};
   let total = 0;
   for (const r of results) { total += r.n; if (builtinWorld(r.world) || r.visibility === 'public') worlds[r.world] = r.n; }
-  return json({ worlds, total, announce: await getSetting(ctx.db, 'announce') });
+  return json({ worlds, total, announce: await getSetting(ctx.db, 'announce'), events: await loadEvents(ctx.db) });
 }
 async function listServers(ctx) {
   const world = String(ctx.url.searchParams.get('world') || '');
@@ -944,9 +953,15 @@ async function joinPlay(ctx, input) {
   let code = input.code ? String(input.code).trim() : '', world, priv = false, owner = null;
   const now = Date.now();
   if (code) {
-    const s = await db.prepare('SELECT s.code, s.world, s.private, u.name AS owner FROM servers s LEFT JOIN users u ON u.id = s.owner_id WHERE s.code = ?').bind(code).first();
+    const s = await db.prepare('SELECT s.code, s.world, s.private, s.owner_id, u.name AS owner FROM servers s LEFT JOIN users u ON u.id = s.owner_id WHERE s.code = ?').bind(code).first();
     if (!s) fail(404, "That server code doesn't work. It may have been closed.");
     world = await worldInfo(ctx, s.world); priv = !!s.private; owner = s.private ? s.owner : null;
+    // Tycoon towns: only the owner's friends can visit (and the admin, to help). Visitors look around; they can't earn or build there.
+    const bw = builtinWorld(s.world);
+    if (bw && bw.own && s.owner_id !== user.id && !user.admin) {
+      const friends = await db.prepare("SELECT 1 FROM friends WHERE status = 'ok' AND ((a = ? AND b = ?) OR (a = ? AND b = ?))").bind(user.id, s.owner_id, s.owner_id, user.id).first();
+      if (!friends) fail(403, `That's ${owner || 'someone'}'s Tycoon town. Only their friends can visit. Press Play on Tycoon to go to your own.`);
+    }
   } else if (builtinWorld(String(input.world || '')) && builtinWorld(String(input.world)).own) {
     // Tycoon: everyone plays in their own private server (friends can visit with the invite link)
     world = await worldInfo(ctx, String(input.world)); priv = true;
@@ -969,7 +984,7 @@ async function joinPlay(ctx, input) {
   const u = await db.prepare('SELECT look, title, display, tags FROM users WHERE id = ?').bind(user.id).first();
   const w = await getWallet(db, user.id);
   const look = cleanLook(lookOf(u && u.look), w.items);
-  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, o: user.role || undefined, t: (u && u.title) || undefined, d: (u && u.display) || undefined, g: u && u.tags ? cleanTags(u.tags) : undefined, a: user.admin, w: world.id, c: code, x: now + 20e3 });
+  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, mu: user.muted || undefined, o: user.role || undefined, t: (u && u.title) || undefined, d: (u && u.display) || undefined, g: u && u.tags ? cleanTags(u.tags) : undefined, a: user.admin, w: world.id, c: code, x: now + 20e3 });
   return json({ ticket, code, world, private: priv, owner: owner || (priv && !input.code ? user.name : undefined) });
 }
 async function joinEdit(ctx, input) {
@@ -990,7 +1005,7 @@ async function connectRoom(request, env, url) {
   const p = await readTicket(await roomSecret(env), url.searchParams.get('t'));
   if (!p) fail(401, 'That ticket expired. Join again.');
   const headers = new Headers(request.headers);
-  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, role: p.o || '', title: p.t || '', display: p.d || '', tags: p.g || [], admin: !!p.a, world: p.w, code: p.c, project: p.p }));
+  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, muted: p.mu || 0, role: p.o || '', title: p.t || '', display: p.d || '', tags: p.g || [], admin: !!p.a, world: p.w, code: p.c, project: p.p }));
   return env.ROOMS.get(env.ROOMS.idFromName(p.r)).fetch(new Request(request, { headers }));
 }
 async function kickEverywhere(env, db, uid, why) {
@@ -1174,6 +1189,58 @@ async function admin(ctx, path, method) {
     await db.prepare("INSERT INTO settings (key, value) VALUES ('deals', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(clean)).run();
     return json({ ok: true, cfg: clean });
   }
+  // anyone's Tycoon town: look at it, change it, or reset it
+  { const t = path.match(/^\/tycoon\/([A-Za-z0-9_]{3,16})$/); if (t && (method === 'GET' || method === 'POST')) return tycoonAdmin(ctx, t[1], method); }
+  // events: double coins or double Tycoon money for a while
+  if (path === '/events' && method === 'GET') return json({ events: await loadEvents(db, true), kinds: EVENT_KINDS });
+  if (path === '/events' && method === 'POST') {
+    const input = await body(ctx.request);
+    const ev = await loadEvents(db, true);
+    if (!EVENT_KINDS[input.kind]) fail(400, 'Unknown event.');
+    const hours = Math.floor(Number(input.hours) || 0);
+    if (hours < 0 || hours > 24 * 14) fail(400, 'Pick 0 to 336 hours.');
+    if (hours) ev[input.kind] = Date.now() + hours * 3600e3; else delete ev[input.kind];
+    const clean = cleanEvents(ev);
+    await db.prepare("INSERT INTO settings (key, value) VALUES ('events', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(clean)).run();
+    await loadEvents(db, true);
+    return json({ ok: true, events: clean });
+  }
+  // gift every player at once: coins and/or an item, with a mail
+  if (path === '/giftall' && method === 'POST') {
+    const input = await body(ctx.request);
+    const coins = Math.floor(Number(input.coins) || 0), f = input.item ? findItem(String(input.item)) : null;
+    if (coins < 0 || coins > 100000) fail(400, 'Pick 0 to 100000 coins.');
+    if (input.item && !f) fail(400, 'Unknown item.');
+    if (!coins && !f) fail(400, 'Pick some coins or an item to give.');
+    if (input.confirm !== 'everyone') fail(400, 'Confirm first: this goes to every player.');
+    const now = Date.now(), what = [coins ? `${coins} coins` : '', f ? `a ${f.item.name}` : ''].filter(Boolean).join(' and ');
+    const msg = String(input.note || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200);
+    const stmts = [];
+    if (coins) stmts.push(
+      db.prepare('INSERT INTO wallets (user_id, coins, xp) SELECT id, 0, 0 FROM users WHERE banned = 0 ON CONFLICT (user_id) DO NOTHING'),
+      db.prepare('UPDATE wallets SET coins = coins + ? WHERE user_id IN (SELECT id FROM users WHERE banned = 0)').bind(coins),
+      db.prepare('INSERT INTO ledger (user_id, delta, why, at) SELECT id, ?, ?, ? FROM users WHERE banned = 0').bind(coins, 'admin gift to everyone', now));
+    if (f) stmts.push(db.prepare('INSERT INTO inventory (user_id, item, qty) SELECT id, ?, 1 FROM users WHERE banned = 0 ON CONFLICT (user_id, item) DO UPDATE SET qty = qty + 1').bind(f.key));
+    stmts.push(db.prepare('INSERT INTO mail (user_id, kind, title, body, data, at) SELECT id, ?, ?, ?, NULL, ? FROM users WHERE banned = 0').bind('gift', `A gift for everyone: ${what}!`.slice(0, 90), `${user.name} gave every player ${what}.${msg ? ' "' + msg + '"' : ''}`.slice(0, 600), now));
+    await db.batch(stmts);
+    const n = await db.prepare('SELECT COUNT(*) AS n FROM users WHERE banned = 0').first();
+    return json({ ok: true, players: n.n, what });
+  }
+  // who is playing right now, and where
+  if (path === '/online' && method === 'GET') {
+    const { results } = await db.prepare(`SELECT u.name, u.display, p.world, p.code, p.at, s.private, s.players FROM presence p JOIN users u ON u.id = p.user_id LEFT JOIN servers s ON s.code = p.code
+      WHERE p.at > ? ORDER BY p.at DESC LIMIT 200`).bind(Date.now() - FRESH).all();
+    const site = await db.prepare('SELECT COUNT(*) AS n FROM users WHERE seen > ?').bind(Date.now() - 3 * 60e3).first().catch(() => ({ n: 0 }));
+    return json({ players: results.map((r) => ({ name: r.name, display: r.display || undefined, world: r.world, worldName: worldName(r.world) || 'a player world', code: r.code, private: !!r.private, at: r.at })), onSite: site ? site.n : 0 });
+  }
+  // close every 3D server right now (everyone is sent out with a message; they can come back right away)
+  if (path === '/closeall' && method === 'POST') {
+    const why = String((await body(ctx.request)).message || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200) || 'The admin closed all servers for a moment. Come back soon!';
+    const { results } = await db.prepare('SELECT code FROM servers WHERE players > 0 AND updated > ?').bind(Date.now() - FRESH).all();
+    if (env.ROOMS) await Promise.all(results.map((r) => env.ROOMS.get(env.ROOMS.idFromName('p:' + r.code)).fetch('https://room/closeall?why=' + encodeURIComponent(why)).catch(() => {})));
+    await db.batch([db.prepare('UPDATE servers SET players = 0'), db.prepare('DELETE FROM presence')]);
+    return json({ ok: true, servers: results.length });
+  }
   if (path === '/announce' && method === 'POST') {
     // a message across the top of the site, and in every 3D server that's running right now
     const text = String((await body(ctx.request)).text || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200);
@@ -1196,14 +1263,14 @@ async function admin(ctx, path, method) {
   }
   m = path.match(/^\/users\/([A-Za-z0-9_]{3,16})$/);
   if (m && method === 'GET') {
-    const u = await db.prepare('SELECT id, name, banned, created_at, role, warnings, tags, display FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
+    const u = await db.prepare('SELECT id, name, banned, created_at, role, warnings, tags, display, muted_until, frozen FROM users WHERE name_lower = ?').bind(m[1].toLowerCase()).first();
     if (!u) fail(404, 'No user with that name.');
     const [w, ledger, games] = await Promise.all([
       getWallet(db, u.id),
       db.prepare('SELECT delta, why, at FROM ledger WHERE user_id = ? ORDER BY at DESC LIMIT 25').bind(u.id).all(),
       db.prepare('SELECT COUNT(*) AS n FROM games WHERE user_id = ?').bind(u.id).first(),
     ]);
-    return json({ name: u.name, banned: !!u.banned, since: u.created_at, admin: isAdmin(env, u), role: u.role || '', tags: cleanTags(u.tags), display: u.display || null, warnings: u.warnings || 0, wallet: w, ledger: ledger.results, games: games.n });
+    return json({ name: u.name, banned: !!u.banned, since: u.created_at, admin: isAdmin(env, u), role: u.role || '', tags: cleanTags(u.tags), display: u.display || null, warnings: u.warnings || 0, wallet: w, ledger: ledger.results, games: games.n, muted: u.muted_until > Date.now() ? u.muted_until : 0, frozen: !!u.frozen });
   }
   if (m && method === 'POST') {
     const input = await body(ctx.request);
@@ -1230,6 +1297,51 @@ async function admin(ctx, path, method) {
         const w = await getWallet(db, u.id);
         await db.prepare('UPDATE users SET look = ? WHERE id = ?').bind(JSON.stringify(w.look), u.id).run();
       }
+      return json({ ok: true, wallet: await getWallet(db, u.id) });
+    }
+    if (action === 'wipe') {
+      // take every item they own (and anything they have up for sale on the Reseller shop). Free items stay.
+      if (input.confirm !== 'wipe') fail(400, 'Confirm first: this takes every item they own.');
+      const inv = (await db.prepare('SELECT item, qty FROM inventory WHERE user_id = ? AND qty > 0').bind(u.id).all()).results;
+      const sale = (await db.prepare("SELECT item FROM listings WHERE seller = ? AND status = 'open'").bind(u.id).all()).results;
+      const n = inv.reduce((t, r) => t + r.qty, 0) + sale.length;
+      // limited ones go back into the shop, so they aren't lost for good
+      const back = {};
+      for (const r of [...inv, ...sale.map((x) => ({ item: x.item, qty: 1 }))]) { const f = findItem(r.item); if (f && f.item.stock) back[r.item] = (back[r.item] || 0) + r.qty; }
+      await db.batch([
+        db.prepare('DELETE FROM inventory WHERE user_id = ?').bind(u.id),
+        db.prepare("UPDATE listings SET status = 'removed' WHERE seller = ? AND status = 'open'").bind(u.id),
+        ...Object.entries(back).map(([k, q]) => db.prepare('UPDATE stock SET left = left + ? WHERE item = ?').bind(q, k)),
+        mailStmt(db, u.id, 'warning', 'Your items were removed', `${user.name} removed all of your items.${input.note ? ' "' + String(input.note).slice(0, 200) + '"' : ''}`),
+      ]);
+      const w = await getWallet(db, u.id);
+      await db.prepare('UPDATE users SET look = ? WHERE id = ?').bind(JSON.stringify(w.look), u.id).run();
+      return json({ ok: true, removed: n, wallet: w });
+    }
+    if (action === 'mute') {
+      // no chat (3D servers, building chat, messages) for a while. 0 minutes = unmute.
+      const mins = Math.floor(Number(input.minutes) || 0);
+      if (mins < 0 || mins > 60 * 24 * 30) fail(400, 'Pick 0 to 43200 minutes.');
+      if (mins && isAdmin(env, u)) fail(400, "You can't mute an admin.");
+      const until = mins ? Date.now() + mins * 60e3 : 0;
+      await db.batch([db.prepare('UPDATE users SET muted_until = ? WHERE id = ?').bind(until, u.id),
+        mailStmt(db, u.id, 'warning', mins ? 'Your chat is muted for a while' : 'You can chat again', mins ? `${user.name} muted your chat for ${untilText(until)}. Be kind in chat!${input.note ? ' "' + String(input.note).slice(0, 200) + '"' : ''}` : `${user.name} unmuted you. You can chat again.`)]);
+      if (env.ROOMS) { const { results } = await db.prepare('SELECT code FROM presence WHERE user_id = ?').bind(u.id).all(); await Promise.all(results.map((r) => env.ROOMS.get(env.ROOMS.idFromName('p:' + r.code)).fetch(`https://room/mute?uid=${u.id}&until=${until}`).catch(() => {}))); }
+      return json({ ok: true, muted: until });
+    }
+    if (action === 'freeze') {
+      // no trades, gifts, live trades or Reseller shop (like while you look into a scam)
+      const on = input.on !== false;
+      if (on && isAdmin(env, u)) fail(400, "You can't freeze an admin.");
+      await db.batch([db.prepare('UPDATE users SET frozen = ? WHERE id = ?').bind(on ? 1 : 0, u.id),
+        mailStmt(db, u.id, 'warning', on ? 'Your trading is frozen for now' : 'You can trade again', on ? `${user.name} froze your trading for now: no trades, gifts, live trades or Reseller shop.${input.note ? ' "' + String(input.note).slice(0, 200) + '"' : ''}` : `${user.name} unfroze your trading. You can trade again.`)]);
+      return json({ ok: true, frozen: on });
+    }
+    if (action === 'level') {
+      // set their player level (it's worked out from XP)
+      const lv = Math.floor(Number(input.level) || 0);
+      if (lv < 1 || lv > 500) fail(400, 'Pick a level from 1 to 500.');
+      await db.prepare('INSERT INTO wallets (user_id, coins, xp) VALUES (?, 0, ?) ON CONFLICT (user_id) DO UPDATE SET xp = excluded.xp').bind(u.id, xpFor(lv)).run();
       return json({ ok: true, wallet: await getWallet(db, u.id) });
     }
     if (action === 'password') {

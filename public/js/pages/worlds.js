@@ -27,7 +27,10 @@ export async function loadOnline(force) {
   const dot = $('#nav-online');
   dot.hidden = !online.total; dot.textContent = online.total ? String(online.total) : '';
   dot.title = online.total ? `${plural(online.total, 'player')} in worlds right now` : '';
-  showAnnounce(online.announce || '');
+  // events (double coins...) show in the same bar as the admin's announcement
+  const ev = online.events || {}, left = (t) => { const h = Math.max(1, Math.round((t - Date.now()) / 3600e3)); return h >= 48 ? `${Math.round(h / 24)} days` : `${h} hour${h === 1 ? '' : 's'}`; };
+  const evText = [ev.double ? `🎉 Double coins from playing (${left(ev.double)} left)` : '', ev.tycoon ? `🏙️ Double Tycoon money (${left(ev.tycoon)} left)` : ''].filter(Boolean).join(' · ');
+  showAnnounce([online.announce || '', evText].filter(Boolean).join(' · '));
   return online;
 }
 // The admin's message across the top of the site. Hiding it hides only that message.
@@ -162,18 +165,18 @@ async function showWorld(id) {
     w.mode === 'hangout' ? null : el('div', {}, el('h2', {}, 'Fastest times'), boardBox),
     el('div', { class: 'two-col' },
       el('div', {}, el('h2', {}, 'Public servers'), serversBox),
-      el('div', {}, el('h2', {}, 'Private servers'), el('p', { class: 'small' }, w.builtin && builtinWorld(id).own ? 'Your town lives in your own private server. Copy the link to invite friends to visit (only you can build and collect).' : w.builtin && builtinWorld(id).game ? 'Only people with the link can join. You can add bots (and pick how smart they are) to practice, even alone. Bot rounds don\'t pay coins.' : 'Only people with the link can join. Great for playing with just your friends.'), privBox)));
+      el('div', {}, el('h2', {}, 'Private servers'), el('p', { class: 'small' }, w.builtin && builtinWorld(id).own ? 'Your town lives in your own private server. Only your friends can visit (press Invite in your town). They can look around, but only you can build and collect.' : w.builtin && builtinWorld(id).game ? 'Only people with the link can join. You can add bots (and pick how smart they are) to practice, even alone. Bot rounds don\'t pay coins.' : 'Only people with the link can join. Great for playing with just your friends.'), privBox)));
   requestAnimationFrame(() => drawWorldThumb(cv, thumbOfWorld(w.world), w.sky));
   if (!(await isOnline())) { serversBox.append(el('p', { class: 'small' }, 'Servers need the online version of Blockyard.')); return; }
   try {
     const r = await api.servers(id);
-    if (w.builtin && builtinWorld(id).own) serversBox.append(el('p', { class: 'small' }, 'Everyone gets their own Tycoon, so there are no public servers. Press Play to go to yours, then press Invite to bring friends over to see it.'));
+    if (w.builtin && builtinWorld(id).own) serversBox.append(el('p', { class: 'small' }, 'Everyone gets their own Tycoon town. Press Play to go to yours. Friends can visit each other.'));
     else serversBox.append(r.servers.length
       ? el('ul', { class: 'server-list' }, ...r.servers.map((s) => el('li', {}, el('span', {}, `Server ${s.code.slice(0, 4)}`), el('span', { class: 'small' }, `${s.players} of ${r.size} players`), el('button', { class: 'btn', type: 'button', disabled: s.players >= r.size, onclick: () => go('#/join/' + s.code) }, s.players >= r.size ? 'Full' : 'Join'))))
       : el('p', { class: 'small' }, 'Nobody is here right now. Press Play and you will start a new server.'));
     const isGame = w.builtin && !!builtinWorld(id).game;
     const mineList = el('ul', { class: 'server-list' }, ...r.mine.map((s) => privRow(s.code, s.players, isGame ? s : null)));
-    if (w.builtin && builtinWorld(id).own) { privBox.append(r.mine.length ? mineList : el('p', { class: 'small' }, 'Press Play and your town is made for you.')); return; }
+    if (w.builtin && builtinWorld(id).own) { privBox.append(el('p', { class: 'small' }, r.mine.length ? 'Your town is ready. Press Play to go there.' : 'Press Play and your town is made for you.')); return; }
     privBox.append(mineList, el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => {
       if (!session.user) { needLogin('Private servers need an account.'); return; }
       try { const p = await api.privateServer(id); mineList.prepend(privRow(p.code, 0, isGame ? { code: p.code, bots: 0, skill: 'normal' } : null)); toast('Private server made. Copy the link and send it to your friends.'); } catch (e) { toast(e.message); }
@@ -252,6 +255,9 @@ async function enterWorld(id, code) {
       load: async () => { const info = await joinedP; return info && info.owner && info.owner.toLowerCase() !== session.user.name.toLowerCase() ? api.tycoonOf(info.owner) : api.tycoon(); },
       buy: (spot, cost) => api.tycoonBuy(spot, cost),
       collect: () => api.tycoonCollect(),
+      tax: (rate) => api.tycoonPost('tax', { rate }),
+      decide: (id, choice) => api.tycoonPost('decide', { id, choice }),
+      judge: (id, verdict) => api.tycoonPost('judge', { id, verdict }),
     } : null,
     tycoonNote: !session.user ? 'Log in to get your own Tycoon town. It makes real coins!' : !multi ? 'Tycoon needs the online version of Blockyard.' : null,
     ownsGear: (gid) => progress.owns('gear', gid),

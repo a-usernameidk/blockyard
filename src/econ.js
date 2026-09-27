@@ -57,7 +57,31 @@ export const seedStock = (db) => LIMITED.map((l) => db.prepare('INSERT OR IGNORE
 // Add (or take away, with a negative number) coins. The whole batch fails if it would go below 0.
 // (Taking works in two steps: lower the number, which the CHECK rule stops at 0, and if there was no row at all,
 // try to insert a negative one, which the CHECK rule also refuses. Either way the whole batch is cancelled.)
+// Events the admin turns on for a while (Admin > News & shop > Events):
+//   double  coins from playing (levels, obbies, minigames, the daily, quests, the daily bonus) are doubled
+//   tycoon  coins you collect from your Tycoon town are doubled
+// The extra coins are their own "event bonus" line, so daily limits still count the normal amount.
+export const EVENT_KINDS = { double: 'Double coins', tycoon: 'Double Tycoon money' };
+let EVENTS = {}, eventsAt = 0;
+export async function loadEvents(db, force) {
+  if (!force && Date.now() - eventsAt < 30e3) return EVENTS;
+  eventsAt = Date.now();
+  try { const r = await db.prepare("SELECT value FROM settings WHERE key = 'events'").first(); EVENTS = cleanEvents(parse(r && r.value)); } catch (e) { EVENTS = {}; }
+  return EVENTS;
+}
+export function cleanEvents(v) {
+  const out = {};
+  for (const k of Object.keys(EVENT_KINDS)) { const u = Number(v && v[k]); if (u > Date.now()) out[k] = u; }
+  return out;
+}
+const eventOn = (k) => (EVENTS[k] || 0) > Date.now();
 export function coinStmts(db, uid, delta, why) {
+  const out = moveCoins(db, uid, delta, why);
+  // an event running: the same again, as an "event bonus"
+  if (delta > 0 && ((eventOn('double') && /^(run|quest|bonus|game)/.test(why)) || (eventOn('tycoon') && why === 'tycoon'))) out.push(...moveCoins(db, uid, delta, 'event bonus'));
+  return out;
+}
+function moveCoins(db, uid, delta, why) {
   const log = db.prepare('INSERT INTO ledger (user_id, delta, why, at) VALUES (?, ?, ?, ?)').bind(uid, delta, why, Date.now());
   // coins earned by playing (runs, quests, the daily bonus) also count as XP
   const xp = /^(run|quest|bonus|game)/.test(why) ? delta : 0;

@@ -333,6 +333,8 @@ export const TYCOON = make({ id: 'tycoon', name: 'Tycoon', mode: 'hangout', sky:
   box(24, 0, 16, 104, 0, 110, B.grass);
   box(61, 0, 18, 67, 0, 90, B.stone);               // main road
   box(58, 0, 16, 70, 0, 18, B.stone);               // the town square by the entrance
+  // roads for the parts of town that open up as it grows: west (Town), east (City), north (Big City)
+  box(45, 0, 28, 48, 0, 89, B.stone); box(80, 0, 28, 83, 0, 89, B.stone); box(45, 0, 86, 83, 0, 89, B.stone);
   box(56, 0, 90, 72, 0, 106, B.dirt);               // the mine lot
   set(64, 1, 21, B.spawn);
   // lots: a dirt floor for each one, and its pad on the road
@@ -344,7 +346,7 @@ export const TYCOON = make({ id: 'tycoon', name: 'Tycoon', mode: 'hangout', sky:
   // a fence around town, lamps along the road, trees
   for (let x = 24; x <= 104; x++) { set(x, 1, 16, B.wood); set(x, 1, 110, B.wood); }
   for (let z = 16; z <= 110; z++) { set(24, 1, z, B.wood); set(104, 1, z, B.wood); }
-  for (let z = 34; z <= 86; z += 10) for (const x of [60, 68]) { box(x, 1, z, x, 3, z, B.metal); set(x, 4, z, B.neon, 6); }
+  for (let z = 34; z <= 76; z += 10) for (const x of [60, 68]) { box(x, 1, z, x, 3, z, B.metal); set(x, 4, z, B.neon, 6); }
   for (const [x, z] of [[30, 24], [40, 20], [90, 22], [98, 30], [32, 96], [44, 104], [88, 100], [98, 90], [30, 60], [98, 60]]) tree(box, x, 1, z, 4);
   box(56, 1, 18, 57, 1, 19, B.plastic, 6); box(71, 1, 18, 72, 1, 19, B.plastic, 6); // gold blocks at the gate
 });

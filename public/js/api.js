@@ -116,6 +116,7 @@ export const api = {
   tycoonOf: (name) => request('GET', '/tycoon/of/' + encodeURIComponent(name)),
   tycoonBuy: (spot, expect) => request('POST', '/tycoon/buy', { spot, expect }),
   tycoonCollect: () => request('POST', '/tycoon/collect'),
+  tycoonPost: (what, body) => request('POST', '/tycoon/' + what, body),
   buyWorldItem: (id, item) => request('POST', `/worlds/${id}/shop`, { item }),
   list: ({ kind = '2d', sort = 'new', style = '', q = '', page = 0, creator = '', rewarding = '' } = {}) => request('GET', `/games?${qs({ kind, sort, style, q, page, creator, rewarding })}`),
   get: (id) => request('GET', `/games/${enc(id)}`),

@@ -2,9 +2,10 @@
 // passwords, kick, ban), the site announcement, and limited item stock.
 import { $, $$, el, session, show, go, addRoute, ask, toast, timeAgo, plural, openModal, closeModal } from '../app.js';
 import { api } from '../api.js';
-import { SHOP, KINDS, LIMITED, itemKey, findItem } from '../cosmetics.js';
+import { SHOP, KINDS, LIMITED, itemKey, findItem, levelOf } from '../cosmetics.js';
+import { SPOTS as TY_SPOTS, STAGES as TY_STAGES } from '../tycoon.js';
 import { refreshWallet } from './account.js';
-import { showAnnounce } from './worlds.js';
+import { showAnnounce, loadOnline } from './worlds.js';
 import { normalizeLevel } from '../format.js';
 import { thumb } from './play.js';
 import { drawWorldThumb } from '../thumb3d.js';
@@ -146,7 +147,12 @@ export async function manageUser(name) {
     el('p', { class: 'small' }, owned.length ? 'Has: ' + owned.join(', ') : 'No items yet.'),
     el('div', { class: 'row', style: 'margin-top:8px' }, pick,
       el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('give', { item: pick.value }, () => `Gave ${u.name} a ${itemName()}.`) }, 'Give'),
-      el('button', { class: 'btn', type: 'button', onclick: () => act('take', { item: pick.value }, () => `Took a ${itemName()} from ${u.name}.`) }, 'Take')));
+      el('button', { class: 'btn', type: 'button', onclick: () => act('take', { item: pick.value }, () => `Took a ${itemName()} from ${u.name}.`) }, 'Take')),
+    owned.length ? el('div', { class: 'row', style: 'margin-top:8px' }, el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => {
+      const ok = await ask(`Remove all of ${u.name}'s items?`, `Every item they own is taken away (${owned.length} kinds), and anything they have for sale on the Reseller shop too. Limited ones go back into the shop. Free items stay. This can't be undone.`, [{ label: 'Remove everything', value: true, cls: 'btn-danger' }]);
+      openModal('#manage-modal');
+      if (ok) act('wipe', { confirm: 'wipe' }, (r) => `Removed ${r.removed} items from ${u.name}.`);
+    } }, 'Remove all items')) : null);
   // password
   const pw = el('input', { type: 'text', minlength: '6', maxlength: '72', placeholder: 'New password', autocomplete: 'off', 'aria-label': 'New password' });
   const canPw = self || !u.admin;
@@ -194,11 +200,50 @@ export async function manageUser(name) {
       el('button', { class: 'btn', type: 'button', onclick: () => act('kick', {}, () => `${u.name} was removed from every 3D server.`) }, 'Kick from servers'),
       el('button', { class: 'btn btn-danger', type: 'button', onclick: deleteNow }, 'Delete account'),
       el('button', { class: 'btn ' + (u.banned ? 'btn-grass' : 'btn-danger'), type: 'button', onclick: async () => { const b = !u.banned; if (await ask(`${b ? 'Ban' : 'Unban'} ${u.name}?`, b ? 'They get logged out, kicked from every server, cannot log back in, and all their games are hidden.' : 'They can log in again and their games come back.', [{ label: b ? 'Ban' : 'Unban', value: true, cls: 'btn-danger' }])) { openModal('#manage-modal'); act(b ? 'ban' : 'unban', {}, () => `${u.name} ${b ? 'banned' : 'unbanned'}.`); } else openModal('#manage-modal'); } }, u.banned ? 'Unban' : 'Ban')));
+  // chat mute and trade freeze (they get a mail about both)
+  const mins = [[10, '10 min'], [60, '1 hour'], [1440, '1 day'], [10080, '1 week']];
+  const behave = u.admin ? null : el('section', {}, el('h3', {}, `Chat: ${u.muted ? `muted (${timeLeft(u.muted)} left)` : 'can chat'} · Trading: ${u.frozen ? 'frozen' : 'normal'}`),
+    el('p', { class: 'small' }, 'Muted players can\'t chat in 3D servers or send messages. Frozen players can\'t trade, gift, live trade or use the Reseller shop (like while you look into a scam).'),
+    el('div', { class: 'row' }, el('span', { class: 'small' }, 'Mute for'), ...mins.map(([m, l]) => el('button', { class: 'btn', type: 'button', onclick: () => act('mute', { minutes: m }, () => `${u.name} is muted for ${l}.`) }, l)),
+      u.muted ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => act('mute', { minutes: 0 }, () => `${u.name} can chat again.`) }, 'Unmute') : null),
+    el('div', { class: 'row', style: 'margin-top:8px' }, u.frozen
+      ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => act('freeze', { on: false }, () => `${u.name} can trade again.`) }, 'Unfreeze trading')
+      : el('button', { class: 'btn btn-danger', type: 'button', onclick: () => act('freeze', { on: true }, () => `${u.name}'s trading is frozen.`) }, 'Freeze trading')));
+  // player level (from XP)
+  const lvIn = el('input', { type: 'number', min: '1', max: '500', value: String(levelOf(u.wallet.xp || 0)), style: 'width:90px', 'aria-label': 'Level' });
+  const level = el('section', {}, el('h3', {}, `Level ${levelOf(u.wallet.xp || 0)} (${u.wallet.xp || 0} XP)`),
+    el('div', { class: 'row' }, lvIn, el('button', { class: 'btn', type: 'button', onclick: () => act('level', { level: Math.floor(Number(lvIn.value) || 1) }, (r) => `${u.name} is level ${levelOf(r.wallet.xp)} now.`) }, 'Set level')));
+  // their Tycoon town
+  const town = el('section', {}, el('h3', {}, 'Tycoon town'), el('p', { class: 'small' }, 'Loading…'));
+  tycoonBox(u.name, town, note);
   const history = el('section', {}, el('h3', {}, 'Recent coins'),
     u.ledger.length ? el('ul', { class: 'ledger' }, ...u.ledger.map((l) => el('li', {}, el('span', {}, `${l.why} · ${timeAgo(l.at)}`), el('span', { class: l.delta < 0 ? 'minus' : 'plus' }, (l.delta > 0 ? '+' : '') + l.delta)))) : el('p', { class: 'small' }, 'Nothing yet.'));
   box.replaceChildren(
     el('p', { class: 'small' }, `${u.admin ? 'Admin. ' : ''}${u.banned ? 'Banned. ' : ''}Playing since ${new Date(u.since).toLocaleDateString()}. ${plural(u.games, 'published game')}. `, el('a', { class: 'linkish', href: '#/u/' + u.name, 'data-go': '#/u/' + u.name }, 'Profile')),
-    note, coins, items, roles, special, pass, safety, history);
+    note, coins, items, roles, special, behave, level, town, pass, safety, history);
+}
+const timeLeft = (t) => { const m = Math.ceil((t - Date.now()) / 60e3); return m >= 1440 ? `${Math.round(m / 1440)} d` : m >= 60 ? `${Math.round(m / 60)} h` : `${m} min`; };
+// look at and change someone's Tycoon town
+async function tycoonBox(name, box, note) {
+  let r;
+  try { r = await api.admin('GET', '/tycoon/' + encodeURIComponent(name)); } catch (e) { box.replaceChildren(el('h3', {}, 'Tycoon town'), el('p', { class: 'small' }, e.message)); return; }
+  const t = r.tycoon, set = async (change, done) => {
+    note.textContent = 'One sec…';
+    try { await api.admin('POST', '/tycoon/' + encodeURIComponent(name), change); note.textContent = done; tycoonBox(name, box, note); } catch (e) { note.textContent = e.message; }
+  };
+  const built = TY_SPOTS.filter((x) => t.b[x.id]).map((x) => `${x.name} ${t.b[x.id]}`).join(', ');
+  const stageSel = el('select', { 'aria-label': 'Stage' }, ...TY_STAGES.slice(1).map((x, i) => el('option', { value: String(i + 1) }, x.name)));
+  stageSel.value = String(t.stage || 1);
+  const vaultIn = el('input', { type: 'number', min: '0', max: '1000000', value: String(t.vault), style: 'width:110px', 'aria-label': 'Coins in the vault' });
+  box.replaceChildren(el('h3', {}, `Tycoon town: ${TY_STAGES[t.stage || 1].name} (${r.title})`),
+    el('p', { class: 'small' }, `${Math.round(r.stats.coinsPerHour)} coins/hour · ${r.stats.people} people · happiness ${Math.round(t.happy)}, crime ${Math.round(t.crime)}, corruption ${Math.round(t.corrupt)} · collected ${r.collected || 0} coins in all.`),
+    el('p', { class: 'small' }, 'Built: ' + (built || 'nothing')),
+    el('div', { class: 'row' }, el('label', {}, 'Stage ', stageSel), el('button', { class: 'btn', type: 'button', onclick: () => set({ stage: Number(stageSel.value) }, `${name}'s town is a ${TY_STAGES[Number(stageSel.value)].name} now.`) }, 'Set stage')),
+    el('div', { class: 'row', style: 'margin-top:8px' }, el('label', {}, 'Vault ', vaultIn), el('button', { class: 'btn', type: 'button', onclick: () => set({ vault: Math.floor(Number(vaultIn.value) || 0) }, 'Vault set.') }, 'Set vault')),
+    el('div', { class: 'row', style: 'margin-top:8px' },
+      el('button', { class: 'btn btn-sun', type: 'button', onclick: () => set({ b: Object.fromEntries(TY_SPOTS.filter((x) => x.stage <= (t.stage || 1)).map((x) => [x.id, x.max])) }, 'Every building they can have is maxed out.') }, 'Max all buildings'),
+      el('button', { class: 'btn', type: 'button', onclick: () => set({ happy: 90, crime: 5, corrupt: 0 }, 'Happy, safe and honest now.') }, 'Make it a happy town'),
+      el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { const ok = await ask(`Reset ${name}'s Tycoon town?`, 'Their town goes back to the start (a house, a mine and a factory). Coins they already collected stay.', [{ label: 'Reset town', value: true, cls: 'btn-danger' }]); openModal('#manage-modal'); if (ok) set({ reset: true }, 'Town reset.'); } }, 'Reset town')));
 }
 async function findUsers() {
   const box = $('#admin-users'); box.innerHTML = '';
@@ -229,8 +274,64 @@ async function loadDaily() {
 $('#daily-pick-go').addEventListener('click', async () => {
   try { await api.admin('POST', '/daily', { date: $('#daily-pick-date').value, game: $('#daily-pick-game').value.trim() }); toast('Picked!'); $('#daily-pick-game').value = ''; loadDaily(); } catch (e) { toast(e.message); }
 });
+// search public 2D levels and pick one for the day in the date box
+async function findDaily() {
+  const box = $('#daily-find');
+  box.replaceChildren(el('p', { class: 'small' }, 'Searching…'));
+  try {
+    const r = await api.list({ kind: '2d', sort: 'top', q: $('#daily-find-q').value.trim() });
+    box.replaceChildren(...(r.games.length ? r.games.slice(0, 12).map((g) => el('div', { class: 'stock-row' }, el('b', {}, g.name), el('span', { class: 'small' }, `by ${g.creator} · ${plural(g.plays || 0, 'play')} · 👍 ${g.likes || 0}${g.stars ? ` · ${g.stars}★` : ''}`),
+      el('a', { class: 'btn', href: '#/p/' + g.id }, 'Play it'),
+      el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => { try { await api.admin('POST', '/daily', { date: $('#daily-pick-date').value, game: g.id }); toast(`"${g.name}" is the daily for ${$('#daily-pick-date').value}.`); loadDaily(); } catch (e) { toast(e.message); } } }, 'Use for that day')))
+      : [el('p', { class: 'small' }, 'No levels found.')]));
+  } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); }
+}
+$('#daily-find-go').addEventListener('click', findDaily);
+$('#daily-find-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') findDaily(); });
+// events: double coins / double Tycoon money for a while
+async function loadEvents() {
+  const box = $('#admin-events');
+  try {
+    const r = await api.admin('GET', '/events');
+    box.replaceChildren(...Object.entries(r.kinds).map(([k, name]) => {
+      const until = r.events[k], hours = el('select', { 'aria-label': 'How long' }, ...[[1, '1 hour'], [3, '3 hours'], [12, '12 hours'], [24, '1 day'], [48, '2 days'], [72, 'A weekend (3 days)'], [168, '1 week']].map(([v, l]) => el('option', { value: String(v) }, l)));
+      hours.value = '24';
+      const set = async (h) => { try { await api.admin('POST', '/events', { kind: k, hours: h }); toast(h ? `${name} is on!` : `${name} ended.`); loadEvents(); loadOnline(true); } catch (e) { toast(e.message); } };
+      return el('div', { class: 'stock-row' }, el('b', {}, name), el('span', { class: 'small' }, until ? `On until ${new Date(until).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : 'Off'),
+        hours, el('button', { class: 'btn btn-sun', type: 'button', onclick: () => set(Number(hours.value)) }, until ? 'Restart' : 'Start'),
+        until ? el('button', { class: 'btn', type: 'button', onclick: () => set(0) }, 'Stop') : null);
+    }));
+  } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); }
+}
+// who's playing right now
+async function loadOnlineNow() {
+  const box = $('#admin-online');
+  box.replaceChildren(el('p', { class: 'small' }, 'Loading…'));
+  try {
+    const r = await api.admin('GET', '/online');
+    $('#admin-online-sum').textContent = `${plural(r.players.length, 'player')} in worlds, ${r.onSite} on the site.`;
+    box.replaceChildren(...(r.players.length ? r.players.map((p) => el('div', { class: 'stock-row' }, el('b', {}, p.display || p.name), el('span', { class: 'small' }, `${p.display ? '@' + p.name + ' · ' : ''}in ${p.worldName}${p.private ? ' (private)' : ''} · ${timeAgo(p.at)}`),
+      p.code ? el('a', { class: 'btn btn-grass', href: '#/join/' + p.code }, 'Join') : null,
+      el('button', { class: 'btn', type: 'button', onclick: () => manageUser(p.name) }, 'Manage'))) : [el('p', { class: 'small' }, 'Nobody is in a world right now.')]));
+  } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); }
+}
+$('#admin-online-go').addEventListener('click', loadOnlineNow);
+$('#giftall-go').addEventListener('click', async () => {
+  const coins = Math.floor(Number($('#giftall-coins').value) || 0), item = $('#giftall-item').value;
+  const what = [coins ? `${coins} coins` : '', item ? `a ${findItem(item).item.name}` : ''].filter(Boolean).join(' and ');
+  if (!what) { toast('Pick some coins or an item first.'); return; }
+  if (!(await ask('Give this to every player?', `Every player gets ${what}, and a mail about it. This can't be undone.`, [{ label: 'Give to everyone', value: true, cls: 'btn-sun' }]))) return;
+  try { const r = await api.admin('POST', '/giftall', { coins, item, note: $('#giftall-note').value, confirm: 'everyone' }); toast(`Gave ${r.what} to ${plural(r.players, 'player')}!`); refreshWallet(); } catch (e) { toast(e.message); }
+});
+$('#closeall-go').addEventListener('click', async () => {
+  if (!(await ask('Close every server?', 'Everyone in a 3D world gets sent out with your message. They can come right back.', [{ label: 'Close all servers', value: true, cls: 'btn-danger' }]))) return;
+  try { const r = await api.admin('POST', '/closeall', { message: $('#closeall-msg').value }); toast(`Closed ${plural(r.servers, 'server')}.`); loadOnlineNow(); } catch (e) { toast(e.message); }
+});
+
 async function loadSite() {
-  loadDaily();
+  loadDaily(); loadEvents(); loadOnlineNow();
+  const gi = $('#giftall-item');
+  if (!gi.options.length) gi.replaceChildren(el('option', { value: '' }, 'No item'), ...allItems().map((i) => el('option', { value: i.key }, i.label)));
   const box = $('#admin-stock');
   box.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
   try {
@@ -260,8 +361,12 @@ function describe(l) {
   if (who) return ({
     grant: d.amount >= 0 ? `gave ${who} ${d.amount} coins` : `took ${-d.amount} coins from ${who}`,
     setcoins: `set ${who}'s coins to ${d.amount}`, give: `gave ${who} a ${item}`, take: `took a ${item} from ${who}`,
-    password: `set a new password for ${who}`, kick: `kicked ${who}`, ban: `banned ${who}`, unban: `unbanned ${who}`, warn: `warned ${who}`, unwarn: `removed a warning from ${who}`,
+    wipe: `removed all of ${who}'s items`, mute: d.minutes ? `muted ${who} for ${d.minutes} minutes` : `unmuted ${who}`, freeze: d.on === false ? `unfroze ${who}'s trading` : `froze ${who}'s trading`, level: `set ${who} to level ${d.level}`, password: `set a new password for ${who}`, kick: `kicked ${who}`, ban: `banned ${who}`, unban: `unbanned ${who}`, warn: `warned ${who}`, unwarn: `removed a warning from ${who}`,
   })[d.action] || `${d.action} ${who}`;
+  if (p === '/giftall') return `gave everyone ${[d.coins ? d.coins + ' coins' : '', d.item ? (findItem(d.item) || { item: { name: d.item } }).item.name : ''].filter(Boolean).join(' and ')}`;
+  if (p === '/closeall') return 'closed all servers';
+  if (p === '/events') return d.hours ? `started ${d.kind === 'tycoon' ? 'Double Tycoon money' : 'Double coins'} for ${d.hours} hours` : `stopped ${d.kind === 'tycoon' ? 'Double Tycoon money' : 'Double coins'}`;
+  if (p.startsWith('/tycoon/')) return d.reset ? `reset ${p.slice(8)}'s Tycoon town` : `changed ${p.slice(8)}'s Tycoon town`;
   if (p === '/announce') return d.text ? `announced "${d.text}"` : 'removed the announcement';
   if (p === '/stock') return `set ${item} stock to ${d.left}`;
   if (p === '/deals') return d.sale === null ? 'ended the sale' : d.sale ? `started a ${d.sale.off}% sale for ${d.sale.hours} hours` : d.pin ? (d.pin.items && d.pin.items.length ? `picked deals for ${d.pin.date}` : `let ${d.pin.date} pick its own deals`) : `changed deals (${d.off}% off, ${d.count} a day, ${d.stock || 25} each)`;

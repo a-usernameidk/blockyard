@@ -20,7 +20,7 @@ import { emojiNodes, emojiButton } from './emoji.js';
 import { createBots } from './bots3d.js';
 import { BOTS, BOT_SKILL } from './games.js';
 import { LIVE_BLOCKS as LIVE } from './world.js';
-import { SPOTS as TY_SPOTS, TY, TAX as TY_TAX, COLLECT_PAD, advance as tyAdvance, stats as tyStats, spotCells, spotBox, workerPath } from './tycoon.js';
+import { SPOTS as TY_SPOTS, TY, TAX as TY_TAX, TAX_RATES, EVENTS as TY_EVENTS, VERDICTS, KINDS as TY_KINDS, COLLECT_PAD, advance as tyAdvance, stats as tyStats, spotCells, spotBox, workerPath, eventText, caseText, choiceBlock, leaderTitle, nextStage, STAGES } from './tycoon.js';
 import { actionOf, keyName, sensitivity, invertY } from './controls.js';
 
 const h = (tag, attrs = {}, ...kids) => {
@@ -408,14 +408,14 @@ export function startWorld(root, opts) {
     switch (m.t) {
       case 'hello':
         myId = m.you; online = true;
-        myPerm = m.perm || ''; drawPowers();
+        myPerm = opts.isTycoon ? '' : m.perm || ''; drawPowers(); // (no building powers in Tycoon towns: buildings come from the town)
         resetEdits(); if (m.edits) applyEdits(m.edits);
         for (const o of [...others.keys()]) removePlayer(o);
         for (const p of m.players) addPlayer(p);
         log.replaceChildren();
         for (const c of m.chat || []) if (!isMutedPlayer(c.n)) addLine(c.n, c.m, null);
-        addLine(null, others.size ? `You joined. ${others.size} other ${others.size === 1 ? 'player is' : 'players are'} here.` : 'You joined. Nobody else is here yet. Press Invite to bring a friend.', null, true);
-        if (m.code) { inviteBtn.hidden = false; inviteBtn.onclick = () => invite(m.code); }
+        addLine(null, opts.isTycoon ? (m.perm === 'owner' ? 'Welcome to your town! Press Invite to show it to your friends (only friends can come in).' : "You're visiting a friend's town. Look around! (You can't build or collect here.)") : others.size ? `You joined. ${others.size} other ${others.size === 1 ? 'player is' : 'players are'} here.` : 'You joined. Nobody else is here yet. Press Invite to bring a friend.', null, true);
+        if (m.code && (!opts.isTycoon || m.perm === 'owner')) { inviteBtn.hidden = false; inviteBtn.onclick = () => invite(m.code); }
         lastSent = '';
         if (m.round) onRound(m.round);
         setupBots(m.bots, m.players.filter((p) => String(p.id).startsWith('bot')).map((p) => p.id));
@@ -794,7 +794,7 @@ export function startWorld(root, opts) {
   /* ----- Tycoon: your own town that makes real coins (the server keeps the real numbers) ----- */
   // Buildings cost real coins: stand on a lot's pad, then press Buy (or B). The gold pad by the vault collects.
   const TYW = opts.tycoon || null;
-  let ty = null, tyAt = 0, tyBusy = false, tyOn = null, tyPad = null, tyPoll = 0, tyErr = '', tyPop = 0;
+  let ty = null, tyAt = 0, tyBusy = false, tyOn = null, tyPad = null, tyPoll = performance.now(), tyErr = '', tyPop = 0;
   const tyShown = {};
   const tyBox = h('button', { class: 'w3-round w3-ty', type: 'button', hidden: !opts.isTycoon, title: 'Where your coins come from' }, opts.isTycoon ? (opts.tycoonNote || 'Loading your town…') : '');
   const tyReport = h('div', { class: 'w3-admin panel w3-tyreport', hidden: true });
@@ -862,14 +862,69 @@ export function startWorld(root, opts) {
         row('Factories', inc.factory, `turn the mine's gold into coins (mine digs ${fmt(st.gold)} gold/h)`),
         row('Car factories', inc.cars, 'build cars and sell them'),
         row('Grocery shops', inc.shops, `your ${st.people} people buy food`),
-        row('Taxes (Town Hall)', inc.taxes, `${st.people} people pay ${TY_TAX[s.b.hall || 0]} each`)),
+        row('Taxes (Town Hall)', inc.taxes, `${st.people} people pay ${fmt(TY_TAX[s.b.hall || 0] * TAX_RATES[s.tax ?? 2].mult * 10) / 10} each (${TAX_RATES[s.tax ?? 2].name} taxes)`),
+        inc.fun ? row('Stadium, bank and airport', inc.fun, 'tickets, interest and tourists') : null),
+      h('p', { class: 'small' }, `Happiness ${Math.round(s.happy)}, crime ${Math.round(s.crime)}: everything works at ${Math.round(st.mood * 100)}%.`),
       h('p', {}, h('b', {}, `Total: +${fmt(st.coinsPerHour)} coins an hour`), ` into the vault (it holds ${fmt(st.vaultCap)}).`),
       h('p', { class: 'small' }, `${st.people} people, ${st.jobs} jobs. ${st.staff < 1 ? `Not enough workers, so everything runs at ${Math.round(st.staff * 100)}%. Build or upgrade houses!` : 'Every job is filled.'}`),
       h('p', { class: 'small' }, 'Buildings cost real coins. Stand on a pad and press Buy. Your town works while you\'re away (up to 12 hours), and you can collect up to 2000 coins a day.'),
       h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => { tyReport.hidden = true; } }, 'Close')));
   }
+  /* ----- the government: your title, the meters, taxes, decisions, court cases and news ----- */
+  const govBtn = h('button', { class: 'btn btn-sun w3-govbtn', type: 'button', hidden: true, title: 'Your government' }, '🏛️ Government');
+  const gov = h('div', { class: 'w3-admin panel w3-gov', hidden: true });
+  if (opts.isTycoon) stage.append(govBtn, gov);
+  govBtn.addEventListener('click', () => { gov.hidden = !gov.hidden; govBtn.blur(); if (!gov.hidden) { tyReport.hidden = true; drawGov(); sfx('open'); } });
+  const meter = (label, v, cls, tip) => h('div', { class: 'gov-meter ' + cls, title: tip }, h('span', {}, label), h('i', {}, h('b', { style: `width:${Math.round(v)}%` })), h('span', { class: 'gov-num' }, String(Math.round(v))));
+  // what a choice will do, as little tags (so you can decide if it's worth it)
+  const fxTags = (e, fx) => {
+    const t = [];
+    if (fx.coins === 'a') t.push(`+${e.a} coins`); if (fx.coins === '-a') t.push(`-${e.a} coins`); if (fx.coins === '-b') t.push(`-${e.b} coins`);
+    if (fx.happy) t.push(`${fx.happy > 0 ? '+' : ''}${fx.happy} happy`); if (fx.crime) t.push(`${fx.crime > 0 ? '+' : ''}${fx.crime} crime`);
+    if (fx.corrupt) t.push(`${fx.corrupt > 0 ? '+' : ''}${fx.corrupt} corrupt`); if (fx.tax) t.push('lower taxes');
+    if (fx.fair) t.push('win if people are happy'); if (fx.tour) t.push('coins if people are happy');
+    return t.length ? h('span', { class: 'small gov-fx' }, t.join(' · ')) : null;
+  };
+  const govDo = (fn) => tyAct(async () => { const r = await fn(); if (r.said) toast(r.said, 3); return r; });
+  function drawGov() {
+    const s = tyNow();
+    if (!s || !ty) return;
+    const mine = !ty.owner && TYW, nx = ty.stage, cases = s.cases || [], evs = s.ev || [];
+    const police = TY_SPOTS.some((x) => x.kind === 'police' && s.b[x.id]), jail = TY_SPOTS.some((x) => x.kind === 'jail' && s.b[x.id]);
+    gov.replaceChildren(
+      h('h3', {}, `${leaderTitle(s)} of your ${STAGES[s.stage || 1].name}`),
+      nx ? h('p', { class: 'small' }, nx.missing.length ? `To become a ${nx.name} you need: ${nx.missing.join(', ')}.` : `Ready to become a ${nx.name}!`) : h('p', { class: 'small' }, "You rule a whole Country. It doesn't get bigger than this!"),
+      meter('Happiness', s.happy, 'm-happy', 'Happy people move in and work harder. Low taxes, parks, schools and good choices help.'),
+      meter('Crime', s.crime, 'm-crime', 'Crime slows everything down. Police, a jail and fair judging keep it low. Corruption makes it worse.'),
+      meter('Corruption', s.corrupt, 'm-corrupt', 'How shady your government is. Bribes and dirty deals raise it; it slowly goes down when you play fair.'),
+      h('h4', {}, 'Taxes'),
+      h('div', { class: 'seg gov-tax', role: 'group', 'aria-label': 'Tax rate' }, ...TAX_RATES.map((t, i) => h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String((s.tax ?? 2) === i), disabled: !mine, title: `${t.name}: taxes x${t.mult}, happiness ${t.happy >= 0 ? '+' : ''}${t.happy}`, onclick: () => govDo(() => TYW.tax(i)) }, t.name))),
+      h('p', { class: 'small' }, (s.b.hall || 0) ? 'Higher taxes = more coins, but people get unhappy (and might protest).' : 'Build the Town Hall to collect taxes.'),
+      h('h4', {}, `Decisions${evs.length ? ` (${evs.length})` : ''}`),
+      ...(evs.length ? evs.map((e) => h('div', { class: 'gov-card' }, h('p', {}, eventText(e)),
+        h('div', { class: 'gov-choices' }, ...TY_EVENTS[e.k].choices.map((c, i) => { const why = choiceBlock(s, e, i); return h('button', { class: 'btn', type: 'button', disabled: !mine || !!why, title: why || '', onclick: () => govDo(() => TYW.decide(e.id, i)) }, h('b', {}, c.label), fxTags(e, c.fx)); }))))
+        : [h('p', { class: 'small' }, 'Nothing to decide right now. Something new comes up every 45 minutes or so.')]),
+      h('h4', {}, `Court${cases.length ? ` (${cases.length})` : ''}`),
+      ...(!police ? [h('p', { class: 'small' }, 'Build a Police station (in the west part of town, once you\'re a Town) and crimes come to your court. You\'re the judge!')]
+        : cases.length ? cases.map((c) => h('div', { class: 'gov-card' }, h('p', {}, caseText(c)),
+          h('div', { class: 'gov-choices' }, ...Object.entries(VERDICTS).map(([v, label]) => h('button', { class: 'btn' + (v === 'bribe' ? ' btn-ghost' : ''), type: 'button', disabled: !mine || (v === 'jail' && !jail), title: v === 'jail' && !jail ? 'You need a Jail' : '', onclick: () => govDo(() => TYW.judge(c.id, v)) }, h('b', {}, label), h('span', { class: 'small gov-fx' }, v === 'fine' ? `+${c.fine} coins if they did it` : v === 'bribe' ? `+${c.bribe} coins, +12 corrupt` : v === 'jail' ? 'big drop in crime if they did it' : 'right call if they didn\'t'))))))
+        : [h('p', { class: 'small' }, 'No cases right now. Strong evidence usually means they did it, weak evidence usually means they didn\'t.')]),
+      (s.log || []).length ? h('h4', {}, 'News') : null,
+      (s.log || []).length ? h('ul', { class: 'gov-news' }, ...[...s.log].reverse().map((l) => h('li', {}, l.text))) : null,
+      h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => { gov.hidden = true; } }, 'Close')));
+  }
+  let govSig = '';
   function tyTick(px, py, pz, scene) {
     if (!opts.isTycoon) return;
+    if (ty) {
+      const waiting = (ty.tycoon.ev || []).length + (ty.tycoon.cases || []).length;
+      govBtn.hidden = false;
+      const label = `🏛️ Government${waiting ? ` (${waiting})` : ''}`;
+      if (govBtn.textContent !== label) govBtn.textContent = label;
+      govBtn.classList.toggle('gov-new', waiting > 0);
+      const sig = JSON.stringify([ty.tycoon.ev, ty.tycoon.cases, ty.tycoon.tax, ty.tycoon.log, ty.tycoon.stage, tyAt]);
+      if (!gov.hidden && sig !== govSig) { govSig = sig; drawGov(); }
+    }
     const s = tyNow();
     if (!s) { tyBox.textContent = tyErr || opts.tycoonNote || 'Loading your town…'; for (const t of tyTags.values()) t.hidden = true; tyBuyBtn.hidden = true; return; }
     const st = tyStats(s), mine = !ty.owner, coinsNow = walletCoins();
@@ -898,7 +953,8 @@ export function startWorld(root, opts) {
     if (onCollect && tyPad !== 'collect' && mine && TYW) { tyPad = 'collect'; tyAct(() => TYW.collect()); }
     if (!onCollect) tyPad = null;
     // visitors see the town change now and then
-    if (!mine && performance.now() - tyPoll > 15000) { tyPoll = performance.now(); tyLoad(); }
+    // (and new decisions and court cases show up while you play)
+    if (performance.now() - tyPoll > (mine ? 60000 : 15000) && !tyBusy) { tyPoll = performance.now(); tyLoad(); }
     // coins pop out of whatever is making money
     if (st.coinsPerHour > 0 && clock - tyPop > 1.6) {
       tyPop = clock;

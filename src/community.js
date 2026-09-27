@@ -88,9 +88,9 @@ export async function dailyPick(db, date) {
     row = await db.prepare('SELECT game_id, how FROM daily_pick WHERE date = ?').bind(date).first();
   }
   if (row && row.game_id) {
-    const g = await db.prepare('SELECT id, name, creator, data, hidden FROM games WHERE id = ?').bind(row.game_id).first();
+    const g = await db.prepare('SELECT id, name, creator, data, hidden, descr, likes, dislikes, stars FROM games WHERE id = ?').bind(row.game_id).first();
     if (g && !g.hidden) {
-      try { return { level: normalizeLevel(JSON.parse(g.data)), how: row.how, game: { id: g.id, name: g.name, creator: g.creator } }; } catch (e) { /* broken: use Blockyard's */ }
+      try { return { level: normalizeLevel(JSON.parse(g.data)), how: row.how, game: { id: g.id, name: g.name, creator: g.creator, descr: g.descr || '', likes: g.likes || 0, dislikes: g.dislikes || 0, stars: g.stars || 0 } }; } catch (e) { /* broken: use Blockyard's */ }
     }
   }
   return { level: dailyCourse(date), how: 'auto', game: null, raw: true };

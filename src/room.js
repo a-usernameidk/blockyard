@@ -12,7 +12,7 @@ import { cleanGearBan } from '../public/js/cosmetics.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
 import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES, cleanShop, shopBlasters, idx, LIVE_BLOCKS } from '../public/js/world.js';
 import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
-import { coinStmts, questBumps } from './econ.js';
+import { coinStmts, questBumps, loadEvents } from './econ.js';
 import { cleanDisplay, cleanTags } from '../public/js/names.js';
 
 const MAX_PLAYERS = 16;
@@ -61,6 +61,16 @@ export class Room {
       if (m) this.broadcast({ t: 'sys', m: 'Announcement: ' + m, big: true });
       return json({ ok: true });
     }
+    if (url.pathname === '/mute') { // the admin muted (or unmuted) someone who is in here right now
+      const uid = url.searchParams.get('uid'), until = Number(url.searchParams.get('until')) || 0;
+      for (const ws of this.state.getWebSockets()) { const a = att(ws); if (a && a.uid === uid && !a.left) { a.mu = until; ws.serializeAttachment(a); send(ws, { t: 'sys', m: until > Date.now() ? 'An admin muted your chat for a while.' : 'You can chat again.' }); } }
+      return json({ ok: true });
+    }
+    if (url.pathname === '/closeall') { // the admin closed every server (like for a quick fix)
+      const why = url.searchParams.get('why') || 'The admin closed all servers for a moment. Come back soon!';
+      for (const ws of this.state.getWebSockets()) { const a = att(ws); if (a && !a.left && !a.admin) this.drop(ws, a, why, 4003); }
+      return json({ ok: true });
+    }
     if (url.pathname === '/count') return json({ players: this.state.getWebSockets().length });
     if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'Expected a WebSocket.' }, 426);
 
@@ -79,7 +89,7 @@ export class Room {
       return new Response(null, { status: 101, webSocket: client });
     }
     const id = Math.random().toString(36).slice(2, 8);
-    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, title: /^[a-z0-9]{2,20}$/.test(info.title || '') ? info.title : '', dn: cleanDisplay(info.display) || '', tags: cleanTags(info.tags), kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
+    const me = { id, uid: info.uid, name: info.name, mu: Number(info.muted) || 0, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, title: /^[a-z0-9]{2,20}$/.test(info.title || '') ? info.title : '', dn: cleanDisplay(info.display) || '', tags: cleanTags(info.tags), kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
     server.serializeAttachment(me);
 
     if (me.kind === 'edit') {
@@ -139,6 +149,7 @@ export class Room {
       case 'chat': {
         let m = cleanChat(msg.m);
         if (!m) return;
+        if (me.mu > Date.now()) { send(ws, { t: 'sys', m: `An admin muted your chat for now (${Math.ceil((me.mu - Date.now()) / 60e3)} more minutes).` }); return; }
         const now = Date.now();
         lim.chat = lim.chat.filter((t) => now - t < 5000);
         if (lim.chat.length >= 3 || (lim.chat.length && now - lim.chat[lim.chat.length - 1] < 700)) { send(ws, { t: 'sys', m: 'Slow down a little. One message a second.' }); return; }
@@ -595,6 +606,7 @@ export class Room {
   async award(mode, list) {
     const db = this.env.DB;
     if (!db || !list.length) return;
+    await loadEvents(db);
     const day = Date.now() - (Date.now() % 86400e3);
     for (const w of list) {
       try {
