@@ -32,7 +32,7 @@ export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') +
 
 // opts: { world, title, me, look, room (ticket fn or null), canPublish, onChange(world), onPublish(world, proof), onFriends(), onExit(), low }
 export function startBuilder(root, opts) {
-  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(opts.world.gearBan), logic: cleanLogic(opts.world.logic), hotbar: opts.world.hotbar === true, shop: cleanShop(opts.world.shop) };
+  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(opts.world.gearBan), logic: cleanLogic(opts.world.logic), hotbar: opts.world.hotbar === true, compass: opts.world.compass === true, shop: cleanShop(opts.world.shop) };
   const typeOf = (m) => (m.game || m.mode);
   let grid = decodeBlocks(opts.world.b || '');
   let proof = opts.proof || null;
@@ -95,9 +95,12 @@ export function startBuilder(root, opts) {
   // the hotbar switch and the creator shop (hangouts and minigames only)
   const hotbarBox = h('input', { type: 'checkbox' });
   hotbarBox.addEventListener('change', () => setMeta({ hotbar: hotbarBox.checked }));
+  const compassBox = h('input', { type: 'checkbox' });
+  compassBox.addEventListener('change', () => setMeta({ compass: compassBox.checked }));
   const shopBox = h('div', { class: 'b3-shop' });
   function drawShopBox() {
     hotbarBox.checked = !!meta.hotbar;
+    compassBox.checked = !!meta.compass;
     const hang = meta.mode === 'hangout';
     const list = meta.shop || [];
     const edit = (i, f) => { const l = list.map((x) => ({ ...x })); Object.assign(l[i], f); setMeta({ shop: cleanShop(l) }); drawShopBox(); };
@@ -128,6 +131,7 @@ export function startBuilder(root, opts) {
     world: h('div', { class: 'b3-pane', hidden: true },
       h('div', { class: 'b3-world' }, h('label', {}, 'Type ', modeSel), h('label', {}, 'Sky ', skySel), h('label', {}, 'Gear ', gearSel)),
       gearBox,
+      h('label', { class: 'check b3-hotbar' }, compassBox, ' Compass: shows N, E, S, W at the top of the screen so players know which way they face'),
       h('label', { class: 'check b3-hotbar' }, hotbarBox, ' Hotbar: gear only works when players put it in a numbered slot and hold it (1, 2, 3…), like Roblox'),
       shopBox,
       h('p', { class: 'small' }, 'Minigame worlds run rounds for everyone in a server. Gear (speed coils, jetpacks...) works in hangouts, Tag and Paintball unless you turn it off, and Logic can lend gear for a while in any world.')),
@@ -348,7 +352,7 @@ export function startBuilder(root, opts) {
     if (f.mode || f.game != null) modeSel.value = typeOf(meta);
     if (f.n && document.activeElement !== nameIn) nameIn.value = meta.n;
     if (f.logic && !send) logicEd.set(meta.logic);
-    if (f.hotbar != null || f.shop || f.mode) drawShopBox();
+    if (f.hotbar != null || f.compass != null || f.shop || f.mode) drawShopBox();
     if (send && room) room.send({ t: 'op', op: { k: 'meta', f }, n: ++seq });
     changed();
   }
@@ -358,7 +362,7 @@ export function startBuilder(root, opts) {
   let nameT = 0;
   nameIn.addEventListener('input', () => { meta.n = nameIn.value.trim().slice(0, 40) || 'My world'; clearTimeout(nameT); nameT = setTimeout(() => setMeta({ n: meta.n }), 500); });
 
-  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), ...(meta.gear !== 'off' && meta.gearBan && meta.gearBan.length ? { gearBan: meta.gearBan } : {}), ...(meta.logic && meta.logic.length ? { logic: meta.logic } : {}), ...(meta.hotbar ? { hotbar: true } : {}), ...(meta.shop && meta.shop.length ? { shop: meta.shop } : {}), b: encodeBlocks(grid) }; }
+  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), ...(meta.gear !== 'off' && meta.gearBan && meta.gearBan.length ? { gearBan: meta.gearBan } : {}), ...(meta.logic && meta.logic.length ? { logic: meta.logic } : {}), ...(meta.hotbar ? { hotbar: true } : {}), ...(meta.compass ? { compass: true } : {}), ...(meta.shop && meta.shop.length ? { shop: meta.shop } : {}), b: encodeBlocks(grid) }; }
   let changeT = 0;
   function changed() {
     clearTimeout(changeT);
@@ -398,7 +402,7 @@ export function startBuilder(root, opts) {
           // the room's copy is the real one: load it, then re-send anything we did while disconnected
           const mine = pending.size ? [...pending.keys()].map((i) => [i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ, grid.t[i], grid.c[i]]) : [];
           grid = decodeBlocks(m.doc.b); R.setGrid(grid);
-          meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky, game: m.doc.game || '', gear: m.doc.gear === 'off' ? 'off' : 'on', logic: cleanLogic(m.doc.logic), hotbar: m.doc.hotbar === true, shop: cleanShop(m.doc.shop) };
+          meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky, game: m.doc.game || '', gear: m.doc.gear === 'off' ? 'off' : 'on', logic: cleanLogic(m.doc.logic), hotbar: m.doc.hotbar === true, compass: m.doc.compass === true, shop: cleanShop(m.doc.shop) };
           drawShopBox();
           meta.gearBan = cleanGearBan(m.doc.gearBan); logicEd.set(meta.logic); gearSel.value = meta.gear; drawGearBox();
           R.setSky(meta.sky); skySel.value = meta.sky; modeSel.value = typeOf(meta); if (document.activeElement !== nameIn) nameIn.value = meta.n;

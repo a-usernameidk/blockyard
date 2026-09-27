@@ -12,7 +12,8 @@ import { cleanGearBan } from '../public/js/cosmetics.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
 import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES, cleanShop, shopBlasters, idx, LIVE_BLOCKS } from '../public/js/world.js';
 import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
-import { coinStmts, questBumps, loadEvents } from './econ.js';
+import { coinStmts, questBumps, loadEvents, xpStmt, timeXp } from './econ.js';
+import { XP } from '../public/js/cosmetics.js';
 import { cleanDisplay, cleanTags } from '../public/js/names.js';
 
 const MAX_PLAYERS = 16;
@@ -89,7 +90,7 @@ export class Room {
       return new Response(null, { status: 101, webSocket: client });
     }
     const id = Math.random().toString(36).slice(2, 8);
-    const me = { id, uid: info.uid, name: info.name, mu: Number(info.muted) || 0, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, title: /^[a-z0-9]{2,20}$/.test(info.title || '') ? info.title : '', dn: cleanDisplay(info.display) || '', tags: cleanTags(info.tags), kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
+    const me = { id, uid: info.uid, name: info.name, mu: Number(info.muted) || 0, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, title: /^[a-z0-9]{2,20}$/.test(info.title || '') ? info.title : '', dn: cleanDisplay(info.display) || '', tags: cleanTags(info.tags), kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0, at: Date.now() };
     server.serializeAttachment(me);
 
     if (me.kind === 'edit') {
@@ -349,7 +350,11 @@ export class Room {
     this.rate.delete(me.id);
     this.broadcast({ t: 'leave', id: me.id }, ws);
     if (this.bots && this.bots.host === me.id) this.removeBots();
-    if (me.kind === 'play') { await this.presence(me, false, ws); this.tick(); }
+    if (me.kind === 'play') {
+      await this.presence(me, false, ws); this.tick();
+      // time played counts as XP (a minute = 1 XP, capped each day)
+      if (me.uid && me.at && this.env.DB) { try { await timeXp(this.env.DB, me.uid, (Date.now() - me.at) / 60000); } catch (e) { /* no XP this time */ } }
+    }
     if (me.kind === 'edit' && this.alive(ws).length === 0) await this.flush();
   }
   async alarm() {
@@ -601,7 +606,7 @@ export class Room {
     R.phase = 'results'; R.ends = Date.now() + ROUND.results * 1000;
     R.results = winners.map(([id, place, coins]) => ({ id, name: name(id), place, coins, score: R.scores.get(id) }));
     this.sendRound();
-    this.award(mode, winners.filter((w) => w[2] > 0 && R.names[w[0]].uid).map(([id, , coins]) => ({ id, uid: R.names[id].uid, coins })));
+    this.award(mode, winners.filter((w) => w[2] > 0 && R.names[w[0]].uid).map(([id, place, coins]) => ({ id, uid: R.names[id].uid, coins, place })));
   }
   async award(mode, list) {
     const db = this.env.DB;
@@ -612,11 +617,12 @@ export class Room {
       try {
         const got = await db.prepare("SELECT COALESCE(SUM(delta), 0) AS n FROM ledger WHERE user_id = ? AND why LIKE 'game%' AND at >= ?").bind(w.uid, day).first();
         const coins = Math.min(w.coins, Math.max(0, PRIZE.dailyCap - got.n));
-        const stmts = [...questBumps(db, w.uid, { game: 1 })];
+        // winning gives XP even after the daily coin cap
+        const stmts = [...questBumps(db, w.uid, { game: 1 }), xpStmt(db, w.uid, w.place === 1 ? XP.win : XP.place)];
         if (coins) stmts.push(...coinStmts(db, w.uid, coins, 'game ' + mode));
         if (stmts.length) await db.batch(stmts);
         const ws = this.alive().find((x) => { const a = att(x); return a && a.id === w.id; });
-        if (ws) send(ws, { t: 'prize', coins, capped: coins < w.coins });
+        if (ws) send(ws, { t: 'prize', coins, capped: coins < w.coins, xp: w.place === 1 ? XP.win : XP.place });
       } catch (e) { /* the round still counts, just no coins */ }
     }
   }
@@ -630,7 +636,7 @@ export class Room {
     if (row.kind === '3d') {
       let grid;
       try { grid = decodeBlocks(String(data.b || '')); } catch (e) { grid = new Grid(); }
-      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(data.gearBan), logic: cleanLogic(data.logic), hotbar: data.hotbar === true, shop: cleanShop(data.shop) }, grid };
+      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(data.gearBan), logic: cleanLogic(data.logic), hotbar: data.hotbar === true, compass: data.compass === true, shop: cleanShop(data.shop) }, grid };
     } else {
       const lv = { n: row.name, style: 'adventure', theme: 'meadow', form: 'hopper', speed: '~', w: 48, h: 12, d: '', ...data };
       this.doc = { id: row.id, kind: '2d', meta: { n: cleanText(lv.n, LIMITS.name) || row.name, style: lv.style === 'rush' ? 'rush' : 'adventure', theme: THEMES.includes(lv.theme) ? lv.theme : 'meadow', form: FORMS.includes(lv.form) ? lv.form : 'hopper', speed: Object.hasOwn(SPEED_NAMES, lv.speed) ? lv.speed : '~' }, w: lv.w | 0, h: lv.h | 0, a: String(lv.d || '').split('') };
@@ -640,7 +646,7 @@ export class Room {
   docOut() {
     const d = this.doc;
     if (!d) return null;
-    if (d.kind === '3d') { const { game, gear, logic, gearBan, hotbar, shop, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), ...(gearBan && gearBan.length ? { gearBan } : {}), ...(logic && logic.length ? { logic } : {}), ...(hotbar ? { hotbar: true } : {}), ...(shop && shop.length ? { shop } : {}), b: encodeBlocks(d.grid) }; }
+    if (d.kind === '3d') { const { game, gear, logic, gearBan, hotbar, compass, shop, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), ...(gearBan && gearBan.length ? { gearBan } : {}), ...(logic && logic.length ? { logic } : {}), ...(hotbar ? { hotbar: true } : {}), ...(compass ? { compass: true } : {}), ...(shop && shop.length ? { shop } : {}), b: encodeBlocks(d.grid) }; }
     return { kind: '2d', ...d.meta, w: d.w, h: d.h, d: d.a.join('') };
   }
   // Checks one change, applies it, and returns the version to send to everyone (or null).
@@ -658,6 +664,7 @@ export class Room {
         if (Array.isArray(op.f.gearBan)) f.gearBan = cleanGearBan(op.f.gearBan);
         if (Array.isArray(op.f.logic) && JSON.stringify(op.f.logic).length < 60000) f.logic = cleanLogic(op.f.logic);
         if (typeof op.f.hotbar === 'boolean') f.hotbar = op.f.hotbar;
+        if (typeof op.f.compass === 'boolean') f.compass = op.f.compass;
         if (Array.isArray(op.f.shop)) f.shop = cleanShop(op.f.shop);
       } else {
         if (op.f.style === 'rush' || op.f.style === 'adventure') f.style = op.f.style;

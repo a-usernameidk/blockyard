@@ -213,6 +213,7 @@ export function normalizeWorld(w, { needGoal } = {}) {
   if (ban.length && w.gear !== 'off') world.gearBan = ban; // ...or just some kinds of gear
   const logic = cleanLogic(w.logic);
   if (logic.length) world.logic = logic;
+  if (w.compass === true) world.compass = true; // the maker turned the compass on
   // hotbar and creator shop: only in hangouts (and minigames), where gear works
   if (mode === 'hangout') {
     if (w.hotbar === true) world.hotbar = true;

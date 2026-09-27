@@ -2,7 +2,7 @@
 // Guests keep it in this browser. With an account, coins and items live on the server
 // (they only change through checked runs, the shop and trades), and the rest syncs.
 import { store } from './api.js';
-import { SHOP, FREE, itemKey } from './cosmetics.js';
+import { SHOP, FREE, itemKey, levelOf } from './cosmetics.js';
 import { WORLDS, BUILTIN } from './levels.js';
 
 // Badges. They used to pay coins; now coins only come from runs the server checks.
@@ -278,6 +278,7 @@ export const progress = {
   },
   canUnlock(item) {
     if (!item.need) return true;
+    if (item.need.level) return !!wallet && levelOf(wallet.xp || 0) >= item.need.level;
     if (item.need.stars) return this.totalStars() >= item.need.stars;
     if (item.need.ach) return !!data.ach[item.need.ach];
     return false;

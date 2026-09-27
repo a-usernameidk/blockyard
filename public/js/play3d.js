@@ -452,7 +452,7 @@ export function startWorld(root, opts) {
       case 'round': onRound(m); break;
       case 'paint': onPaint(m); break;
       case 'throw': if (opts.snow && Array.isArray(m.o) && Array.isArray(m.d)) addSnowball(m.o, m.d, m.id); break;
-      case 'prize': toast(m.coins ? `+${m.coins} coins!` : "You won! (You've hit today's minigame coin limit.)", 2.5); sfx('coin'); if (opts.onPrize) opts.onPrize(); break;
+      case 'prize': toast((m.coins ? `+${m.coins} coins!` : "You won! (You've hit today's minigame coin limit.)") + (m.xp ? ` +${m.xp} XP` : ''), 2.5); sfx('coin'); if (opts.onPrize) opts.onPrize(); break;
     }
   }
   // Invite: copy the link, or invite a friend right from here (they get a pop-up with a Join button)
@@ -1298,6 +1298,28 @@ export function startWorld(root, opts) {
     startMusic(opts.music || (obby ? 'adventure' : 'chill'));
   }
 
+  /* ---------------- the compass (the maker turns it on in the World tab) ---------------- */
+  // North is -z. cam.yaw 0 looks north, and turning right (yaw up) goes to east.
+  const CPX = 2; // pixels per degree
+  const compassTrack = h('div', { class: 'w3-compass-track' });
+  const compass = h('div', { class: 'w3-compass', 'aria-hidden': 'true' }, compassTrack, h('i', { class: 'w3-compass-pin' }));
+  let compassDeg = null;
+  if (world.compass) {
+    const names = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
+    for (let d = 0; d < 1080; d += 15) {
+      const n = names[d % 360];
+      compassTrack.append(h('span', { class: n ? (n.length === 1 ? 'cp-big' : 'cp-mid') : 'cp-tick', style: `left:${d * CPX}px` }, n || ''));
+    }
+    stage.append(compass); stage.classList.add('has-compass');
+  }
+  function compassTick() {
+    if (!world.compass) return;
+    const deg = Math.round((((cam.yaw * 180 / Math.PI) % 360) + 360) % 360);
+    if (deg === compassDeg) return;
+    compassDeg = deg;
+    compassTrack.style.transform = `translateX(${Math.round(compass.clientWidth / 2 - (deg + 360) * CPX)}px)`;
+  }
+
   /* ---------------- the loop ---------------- */
   const gone = new Map(); // crumble blocks currently missing: index -> type
   let facing = 0, walk = 0, clock = 0;
@@ -1309,6 +1331,7 @@ export function startWorld(root, opts) {
   function loop(now) {
     raf = requestAnimationFrame(loop);
     if (paused || stopped) return;
+    compassTick();
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now; clock += dt;
     if (keys.has('ql')) cam.yaw -= dt * 2.2 * sensitivity();

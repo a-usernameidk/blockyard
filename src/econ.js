@@ -1,7 +1,7 @@
 // Coins and items. The server is the only one who can change them:
 // coins come from checked runs (built-in levels, built-in obbies, daily, Endless, and player levels
 // an admin marked as rewarding), and items come from the shop or from trades.
-import { SHOP, FREE, KINDS, findItem, isFree, canTrade, valueOf, sellPrice, LIMITED, levelOf, inStockOn, MAX_BUY } from '../public/js/cosmetics.js';
+import { SHOP, FREE, KINDS, findItem, isFree, canTrade, valueOf, sellPrice, LIMITED, levelOf, inStockOn, MAX_BUY, XP, ROAD } from '../public/js/cosmetics.js';
 import { BUILTIN } from '../public/js/levels.js';
 import { normalizeLevel } from '../public/js/format.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
@@ -18,6 +18,7 @@ export const TRADE = { maxItems: 8, maxCoins: 100000, days: 3, openPerUser: 10 }
 export const DEFAULT_LOOK = { color: '#ff6b35', hat: 'none', trail: 'none', pet: 'none', gear: 'none' };
 
 export const ECON_SCHEMA = [
+  'CREATE TABLE IF NOT EXISTS xp_time (user_id TEXT NOT NULL, day INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (user_id, day))',
   'CREATE TABLE IF NOT EXISTS wallets (user_id TEXT PRIMARY KEY, coins INTEGER NOT NULL DEFAULT 0 CHECK (coins >= 0))',
   'CREATE TABLE IF NOT EXISTS inventory (user_id TEXT NOT NULL, item TEXT NOT NULL, qty INTEGER NOT NULL DEFAULT 1 CHECK (qty >= 0), PRIMARY KEY (user_id, item))',
   'CREATE TABLE IF NOT EXISTS stock (item TEXT PRIMARY KEY, left INTEGER NOT NULL CHECK (left >= 0))',
@@ -83,14 +84,29 @@ export function coinStmts(db, uid, delta, why) {
 }
 function moveCoins(db, uid, delta, why) {
   const log = db.prepare('INSERT INTO ledger (user_id, delta, why, at) VALUES (?, ?, ?, ?)').bind(uid, delta, why, Date.now());
-  // coins earned by playing (runs, quests, the daily bonus) also count as XP
-  const xp = /^(run|quest|bonus|game)/.test(why) ? delta : 0;
+  // XP comes from playing (stars, wins, time: see xpStmt); daily quests and the daily bonus still give some too
+  const xp = /^(quest|bonus)/.test(why) ? delta : 0;
   if (delta >= 0) return [db.prepare('INSERT INTO wallets (user_id, coins, xp) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET coins = coins + excluded.coins, xp = xp + excluded.xp').bind(uid, delta, xp), log];
   return [
     db.prepare('UPDATE wallets SET coins = coins + ? WHERE user_id = ?').bind(delta, uid),
     db.prepare('INSERT INTO wallets (user_id, coins) SELECT ?, -1 WHERE NOT EXISTS (SELECT 1 FROM wallets WHERE user_id = ?)').bind(uid, uid),
     log,
   ];
+}
+// XP on its own (stars, match wins, time played)
+export const xpStmt = (db, uid, n) => db.prepare('INSERT INTO wallets (user_id, coins, xp) VALUES (?, 0, ?) ON CONFLICT (user_id) DO UPDATE SET xp = xp + excluded.xp').bind(uid, Math.max(0, Math.floor(n)));
+// Minutes spent in 3D servers: 1 XP a minute, up to XP.minutesPerDay a day. Returns the XP given.
+export async function timeXp(db, uid, minutes) {
+  const day = startOfDay(Date.now()), want = Math.min(Math.floor(minutes), 180);
+  if (!uid || want < 1) return 0;
+  const row = await db.prepare('SELECT n FROM xp_time WHERE user_id = ? AND day = ?').bind(uid, day).first();
+  const give = Math.min(want, XP.minutesPerDay - (row ? row.n : 0));
+  if (give < 1) return 0;
+  // the WHERE keeps two leaves at once from going over the daily cap
+  const r = await db.prepare('INSERT INTO xp_time (user_id, day, n) VALUES (?, ?, ?) ON CONFLICT (user_id, day) DO UPDATE SET n = n + excluded.n WHERE n + excluded.n <= ?').bind(uid, day, give, XP.minutesPerDay).run();
+  if (!r.meta || !r.meta.changes) return 0;
+  await xpStmt(db, uid, give * XP.minute).run();
+  return give;
 }
 // Give one item / take one item. Taking cancels the batch if they don't have it.
 export const giveItem = (db, uid, key) => db.prepare('INSERT INTO inventory (user_id, item, qty) VALUES (?, ?, 1) ON CONFLICT (user_id, item) DO UPDATE SET qty = qty + 1').bind(uid, key);
@@ -299,6 +315,8 @@ export async function econRoute(ctx, path, method) {
   if (path === '/quests' && method === 'GET') return json(await questStatus(ctx.db, needUser(ctx).id));
   if (path === '/quests/claim' && method === 'POST') return claimQuest(ctx, await body(ctx.request));
   if (path === '/bonus' && method === 'POST') return claimBonus(ctx);
+  if (path === '/road' && method === 'GET') return road(ctx);
+  if (path === '/road/claim' && method === 'POST') return claimRoad(ctx, await body(ctx.request));
   if (path === '/trades' && method === 'GET') return listTrades(ctx);
   if (path === '/trades' && method === 'POST') return newTrade(ctx, await body(ctx.request));
   if ((m = path.match(/^\/trades\/([A-Za-z0-9]{10})$/)) && method === 'POST') return tradeAction(ctx, m[1], await body(ctx.request));
@@ -373,7 +391,7 @@ async function buy(ctx, input) {
   if (f.item.need) {
     if (have && have.qty > 0) fail(409, 'You already have that.');
     const need = f.item.need;
-    const ok = need.stars ? (await starCount(db, user.id)) >= need.stars : !!(await badges(db, user.id))[need.ach];
+    const ok = need.level ? levelOf((await getWallet(db, user.id)).xp) >= need.level : need.stars ? (await starCount(db, user.id)) >= need.stars : !!(await badges(db, user.id))[need.ach];
     if (!ok) fail(403, `Locked: ${f.item.hint}.`);
     await db.prepare('INSERT OR IGNORE INTO inventory (user_id, item, qty) VALUES (?, ?, 1)').bind(user.id, f.key).run();
     return json({ ok: true, price: 0, wallet: await getWallet(db, user.id) });
@@ -506,6 +524,7 @@ async function finishLevel(ctx, user, id, replay) {
   const stmts = [progressStmt(db, user.id, id, bits, run.coins, Math.round(run.time * 10) / 10)];
   // the claim row stops two runs sent at the same moment from both paying for the same stars
   if (earned) stmts.push(claimStmt(db, user.id, `r:${id}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run level ' + id));
+  if (earned && fresh) stmts.push(xpStmt(db, user.id, popcount(fresh) * XP.star));
   stmts.push(...questBumps(db, user.id, { levels: 1, coins: run.coins }));
   if (id === 'b-party' && run.deaths === 0) stmts.push(db.prepare("INSERT OR IGNORE INTO claims (user_id, what, at) VALUES (?, 'b:flawless', ?)").bind(user.id, Date.now()));
   const paid = await payOnce(db, stmts);
@@ -531,6 +550,7 @@ async function finishWorld(ctx, user, id, replay) {
   const earned = (fresh & 1 ? w.reward : 0) + (fresh & 2 ? REWARD.obbyNoFall : 0) + Math.max(0, run.coins - old.coins) * REWARD.coin3d;
   const stmts = [progressStmt(db, user.id, key, bits, run.coins, Math.round(run.time * 10) / 10)];
   if (earned) stmts.push(claimStmt(db, user.id, `r:${key}:${old.stars}:${old.coins}`), ...coinStmts(db, user.id, earned, 'run world ' + id));
+  if (earned && fresh) stmts.push(xpStmt(db, user.id, popcount(fresh) * XP.star));
   const paid = await payOnce(db, stmts);
   const rated = await earnStars(db, user.id, key, starsFor(key));
   const extra = !paid || !earned ? await replayPay(db, user.id, key, 'obby') : { coins: 0 };
@@ -727,4 +747,34 @@ export async function publicItems(db, uid) {
   const items = Object.entries(w.items).filter(([k]) => { const f = findItem(k); return f && canTrade(f.item); }).map(([key, qty]) => ({ key, qty }));
   const value = items.reduce((n, i) => n + valueOf(findItem(i.key).item) * i.qty, 0);
   return { look: w.look, items, value, rstars: w.rstars, level: w.level, stars: await starCount(db, uid), badges: await badges(db, uid) };
+}
+
+/* ---------------- Trophy Road ---------------- */
+async function roadState(db, uid) {
+  const w = await getWallet(db, uid);
+  const got = await db.prepare("SELECT what FROM claims WHERE user_id = ? AND what LIKE 'road:%'").bind(uid).all();
+  const claimed = new Set((got.results || []).map((r) => Number(r.what.slice(5))));
+  return { w, steps: ROAD.map((r) => ({ ...r, claimed: claimed.has(r.lv) || (r.item ? (w.items[r.item] || 0) > 0 : false), open: w.level >= r.lv })) };
+}
+async function road(ctx) {
+  const user = needUser(ctx);
+  const { w, steps } = await roadState(ctx.db, user.id);
+  return json({ level: w.level, xp: w.xp, steps, xpRules: XP });
+}
+async function claimRoad(ctx, input) {
+  const user = needUser(ctx);
+  const { db } = ctx;
+  const step = ROAD.find((r) => r.lv === Number(input.lv));
+  if (!step) fail(404, 'No Trophy Road step there.');
+  const { w } = await roadState(db, user.id);
+  if (w.level < step.lv) fail(403, `Reach level ${step.lv} first (you're level ${w.level}).`);
+  // the claim row makes each step pay once, even if you click twice fast
+  const stmts = [claimStmt(db, user.id, 'road:' + step.lv)];
+  if (step.coins) stmts.push(...moveCoins(db, user.id, step.coins, 'trophy road ' + step.lv));
+  if (step.item) stmts.push(db.prepare('INSERT OR IGNORE INTO inventory (user_id, item, qty) VALUES (?, ?, 1)').bind(user.id, step.item));
+  const ok = await payOnce(db, stmts);
+  if (!ok) fail(409, 'You already got that one.');
+  const f = step.item ? findItem(step.item) : null;
+  const after = await roadState(db, user.id);
+  return json({ ok: true, got: step.coins ? `${step.coins} coins` : f.item.name, wallet: after.w, steps: after.steps });
 }

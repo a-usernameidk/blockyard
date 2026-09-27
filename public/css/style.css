@@ -130,6 +130,8 @@ label, .label { font-weight: 800; }
 .overlay, .modal { display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(29,35,64,.5); }
 .overlay { position: absolute; inset: 0; }
 .modal { position: fixed; inset: 0; z-index: 20; overflow-y: auto; }
+/* a window taller than the screen starts at its top (instead of being cut off) and scrolls */
+.modal > * { margin: auto; }
 .panel { background: var(--card); border: 4px solid var(--line); border-radius: 18px; padding: 20px 22px; box-shadow: 0 6px 0 var(--line); max-width: 480px; width: 100%; }
 .panel h2 { margin: 0 0 8px; }
 .panel label, .panel .label { display: block; margin: 12px 0 4px; }
@@ -534,9 +536,27 @@ body[data-view="w3"] .announce, body[data-view="build"] .announce, body[data-vie
 .stock-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .stock-row b { min-width: 140px; }
 .stock-row input { width: 110px; }
-.manage-panel { max-width: 560px; }
-.manage-panel section { border-top: 3px dashed var(--muted); padding: 10px 0; }
-.manage-panel section:first-of-type { border-top: 0; }
+.manage-panel { max-width: 560px; padding-top: 0; }
+.manage-top { position: sticky; top: -16px; z-index: 2; background: var(--card); margin: 0 -22px; padding: 16px 22px 6px; border-bottom: 3px dashed var(--muted); border-radius: 14px 14px 0 0; }
+.manage-top .row { margin-top: 0; justify-content: space-between; flex-wrap: nowrap; }
+.manage-top h2 { margin: 0; overflow-wrap: anywhere; }
+.manage-top .msg { margin: 4px 0 0; min-height: 0; }
+.manage-top .msg:empty { display: none; }
+.manage-panel section { border-top: 3px dashed var(--muted); padding: 10px 0; break-inside: avoid; }
+.manage-panel #manage-body > p:first-child + section { border-top: 0; }
+.manage-panel .row > label { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-weight: 800; }
+.manage-panel .row > label select { width: auto; }
+/* big screens: the sections sit side by side, so less scrolling */
+@media (min-width: 1000px) {
+  .manage-panel { max-width: min(1100px, calc(100vw - 48px)); }
+  #manage-body { columns: 2; column-gap: 28px; column-rule: 3px dashed color-mix(in srgb, var(--muted) 45%, transparent); }
+  #manage-body > p:first-child { column-span: all; }
+  #manage-body section { border-top: 0; border-bottom: 3px dashed var(--muted); }
+}
+@media (min-width: 1500px) {
+  .manage-panel { max-width: min(1500px, calc(100vw - 64px)); }
+  #manage-body { columns: 3; }
+}
 .manage-panel h3 { font-size: 18px; margin-bottom: 6px; }
 .manage-panel input[type="number"] { width: 130px; }
 .manage-panel select { max-width: 220px; }
@@ -1101,3 +1121,47 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .daily-playbtn:disabled { transform: translate(-50%, -50%); }
 .daily-desc { max-width: 60ch; margin: 4px 0; font-weight: 700; overflow-wrap: anywhere; }
 .daily-rate { justify-content: center; }
+
+/* ---------- compass (3D worlds where the maker turned it on) ---------- */
+.w3-compass { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: min(260px, calc(100% - 220px)); min-width: 150px; height: 34px; overflow: hidden; background: var(--card); color: var(--text); border: 3px solid var(--line); border-radius: 14px; box-shadow: 0 3px 0 var(--line); pointer-events: none; z-index: 4; font-family: Nunito, system-ui, sans-serif; font-weight: 900; }
+.w3-compass::before, .w3-compass::after { content: ''; position: absolute; top: 0; bottom: 0; width: 28%; z-index: 1; pointer-events: none; }
+.w3-compass::before { left: 0; background: linear-gradient(90deg, var(--card), transparent); }
+.w3-compass::after { right: 0; background: linear-gradient(270deg, var(--card), transparent); }
+.w3-compass-track { position: absolute; left: 0; top: 0; bottom: 0; will-change: transform; }
+.w3-compass-track span { position: absolute; top: 0; bottom: 0; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; white-space: nowrap; }
+.w3-compass .cp-big { font-size: 18px; }
+.w3-compass .cp-mid { font-size: 12px; color: var(--muted); }
+.w3-compass .cp-tick::before { content: ''; width: 2px; height: 8px; border-radius: 2px; background: var(--muted); }
+.w3-compass-pin { position: absolute; z-index: 2; left: 50%; bottom: 0; transform: translateX(-50%); width: 0; height: 0; border: 6px solid transparent; border-bottom-color: var(--sun); }
+/* whatever sat at the top middle moves down under the compass */
+.w3-stage.has-compass .w3-round { top: 52px; }
+.w3-stage.has-compass .w3-govbtn { top: 96px; }
+.w3-stage.has-compass .w3-gov { top: 138px; max-height: calc(100% - 150px); }
+.w3-stage.has-compass .w3-tyreport { top: 106px; }
+@media (max-width: 720px) {
+  .w3-compass { top: 44px; width: min(220px, calc(100% - 20px)); height: 30px; }
+  .w3-stage.has-compass .w3-round { top: 82px; }
+  .w3-stage.has-compass .w3-govbtn { top: 124px; }
+  .w3-stage.has-compass .w3-gov { top: 162px; max-height: calc(100% - 172px); }
+}
+
+/* ---------- Trophy Road (Shop tab) ---------- */
+.road-bar { margin: 6px 0 4px; flex: none; height: 20px; }
+.road-how { margin: 6px 0 10px; }
+.road { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
+.road-step { display: grid; grid-template-columns: 46px 52px 1fr auto; align-items: center; gap: 12px; background: var(--card); border: 3px solid var(--line); border-radius: 16px; box-shadow: 0 4px 0 var(--line); padding: 8px 12px; opacity: .72; }
+.road-step.open { opacity: 1; }
+.road-step.open:not(.got) { background: color-mix(in srgb, var(--card) 82%, var(--sun)); }
+.road-lv { display: grid; place-items: center; width: 42px; height: 42px; border: 3px solid var(--line); border-radius: 50%; background: var(--sky); color: var(--ink); font-weight: 900; font-size: 17px; }
+.road-step.open .road-lv { background: var(--sun); }
+.road-step.got .road-lv { background: var(--grass); }
+.road-coin { font-size: 34px; text-align: center; line-height: 1; }
+.road-step canvas { justify-self: center; }
+.road-what { display: flex; flex-direction: column; min-width: 0; }
+.road-what b { overflow-wrap: anywhere; }
+.road-got { background: var(--grass); color: var(--ink); }
+@media (max-width: 520px) {
+  .road-step { grid-template-columns: 40px 44px 1fr; gap: 8px; }
+  .road-step > :last-child { grid-column: 1 / -1; justify-self: stretch; text-align: center; }
+  .road-lv { width: 36px; height: 36px; font-size: 15px; }
+}

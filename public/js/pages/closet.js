@@ -2,7 +2,7 @@
 import { $, $$, el, session, show, go, addRoute, ask, toast, needLogin, pipCanvas, plural, timeAgo, onLeave, currentView } from '../app.js';
 import { api, isOnline } from '../api.js';
 import { progress, ACHIEVEMENTS } from '../progress.js';
-import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice, rarityOf as baseRarity, RARITY, MAX_BUY, GEAR_CATS, GEAR_TIER, TIER_NAME, gearCat, variantGroups, groupOf } from '../cosmetics.js';
+import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice, rarityOf as baseRarity, RARITY, MAX_BUY, GEAR_CATS, GEAR_TIER, TIER_NAME, gearCat, variantGroups, groupOf, xpFor } from '../cosmetics.js';
 import { drawPip, drawPet, drawGear } from '../art.js';
 import { setWallet, openAccount } from './account.js';
 import { SPECIAL_TITLES } from '../names.js';
@@ -95,6 +95,7 @@ async function showCloset(t = 'shop', tradeWith) {
   $('#closet-market').hidden = tab !== 'market';
   $('#closet-chests').hidden = tab !== 'chests';
   $('#closet-badges').hidden = tab !== 'badges';
+  $('#closet-road').hidden = tab !== 'road';
   renderWallet();
   loadStats();
   if (tab === 'shop' || tab === 'mine') {
@@ -105,6 +106,7 @@ async function showCloset(t = 'shop', tradeWith) {
   } else if (tab === 'trades') renderTrades(tradeWith);
   else if (tab === 'market') renderMarket();
   else if (tab === 'chests') renderChests();
+  else if (tab === 'road') renderRoad();
   else renderBadges();
 }
 $$('[data-ctab]').forEach((b) => b.addEventListener('click', () => go(b.dataset.ctab === 'shop' ? '#/closet' : '#/closet/' + b.dataset.ctab)));
@@ -225,7 +227,7 @@ function renderCaption() {
   const grp = groupOf(k, id);
   const styles = grp && grp.list.length > 1 ? el('div', { class: 'variants', role: 'group', 'aria-label': 'Styles' }, ...grp.list.map((v) => {
     const vk = itemKey(k, v.id), left = v.stock && shopInfo ? shopInfo.stock[vk] : null;
-    const note = progress.owns(k, v.id) ? 'Owned' : v.need ? (v.need.stars ? `${v.need.stars} stars` : 'Badge') : v.stock ? (left === 0 ? 'Sold out' : left != null ? `${left} left` : 'Limited') : `${dealPrice(vk, v)}`;
+    const note = progress.owns(k, v.id) ? 'Owned' : v.need ? (v.need.level ? `Level ${v.need.level}` : v.need.stars ? `${v.need.stars} stars` : 'Badge') : v.stock ? (left === 0 ? 'Sold out' : left != null ? `${left} left` : 'Limited') : `${dealPrice(vk, v)}`;
     return el('button', { class: 'variant' + (v.stock ? ' limited' : '') + (v.id === id ? ' on' : ''), type: 'button', 'aria-pressed': String(v.id === id), title: v.name, onclick: () => { pick = { kind: k, id: v.id, key: vk, item: v }; render(); } },
       itemPreview(k, v, 34), el('span', {}, v.name), el('span', { class: 'small' }, note));
   })) : null;
@@ -394,7 +396,7 @@ function pipBadge(on) {
 
 addRoute(/^#\/closet$/, () => showCloset('shop'));
 addRoute(/^#\/shop$/, () => showCloset('shop'));
-addRoute(/^#\/closet\/(mine|trades|badges|market|chests)$/, (m) => showCloset(m[1]));
+addRoute(/^#\/closet\/(mine|trades|badges|market|chests|road)$/, (m) => showCloset(m[1]));
 addRoute(/^#\/closet\/trade\/([A-Za-z0-9_]{0,16})$/, (m) => showCloset('trades', m[1] || ''));
 
 /* ---------------- the shop keeper in 3D worlds ---------------- */
@@ -572,6 +574,36 @@ function chestCanvas(color, size = 96) {
   cv.setAttribute('aria-hidden', 'true');
   return cv;
 }
+/* ---------------- Trophy Road: rewards for leveling up ---------------- */
+async function renderRoad() {
+  const box = $('#closet-road');
+  if (!(await isOnline()) || !progress.wallet) { box.replaceChildren(el('p', { class: 'msg' }, 'Log in to walk the Trophy Road.'), el('div', { class: 'row' }, el('button', { class: 'btn btn-sun', type: 'button', onclick: () => openAccount() }, 'Log in'))); return; }
+  let r;
+  try { r = await api.road(); } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); return; }
+  const lvl = r.level, next = xpFor(lvl + 1), from = xpFor(lvl), pct = Math.max(0, Math.min(100, Math.round(((r.xp - from) / (next - from)) * 100)));
+  const X = r.xpRules;
+  const stepEl = (s) => {
+    const f = s.item ? findItem(s.item) : null;
+    const what = s.coins ? `${s.coins} coins` : f ? f.item.name : s.item;
+    const btn = s.claimed ? el('span', { class: 'tag road-got' }, 'Got it ✓')
+      : s.open ? el('button', { class: 'btn btn-sun', type: 'button', onclick: async (e) => {
+        e.target.disabled = true;
+        try { const res = await api.claimRoad(s.lv); setWallet(res.wallet); renderWallet(); toast(`You got ${res.got}!`); import('../audio.js').then((a) => a.sfx(s.coins ? 'coin' : 'badge')).catch(() => {}); renderRoad(); } catch (err) { toast(err.message); e.target.disabled = false; }
+      } }, 'Claim')
+        : el('span', { class: 'small' }, `Level ${s.lv}`);
+    const pic = s.coins ? el('span', { class: 'road-coin', 'aria-hidden': 'true' }, '🪙') : itemPreview(f.kind, f.item, 48);
+    return el('li', { class: 'road-step' + (s.open ? ' open' : '') + (s.claimed ? ' got' : '') },
+      el('span', { class: 'road-lv' }, String(s.lv)), pic, el('span', { class: 'road-what' }, el('b', {}, what), f ? el('span', { class: 'small' }, s.item.split(':')[0] === 'color' ? 'color' : s.item.split(':')[0]) : null), btn);
+  };
+  const ready = r.steps.filter((s) => s.open && !s.claimed).length;
+  box.replaceChildren(
+    el('div', { class: 'section-head' }, el('h2', {}, `Level ${lvl}`), el('span', { class: 'small' }, `${r.xp} XP · ${next - r.xp} XP to level ${lvl + 1}`)),
+    el('div', { class: 'progress-track road-bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100' }, el('div', { class: 'progress-bar', style: `width:${pct}%` })),
+    el('p', { class: 'small road-how' }, `Get XP by playing: +${X.star} for every new star, +${X.win} for winning a minigame (+${X.place} for 2nd or 3rd), +${X.minute} for every minute in 3D worlds (up to ${X.minutesPerDay} a day), plus daily quests and the daily bonus.`),
+    ready ? el('p', { class: 'msg' }, `${ready} reward${ready === 1 ? '' : 's'} ready to claim!`) : null,
+    el('ol', { class: 'road' }, ...r.steps.map(stepEl)));
+}
+
 async function renderChests() {
   const box = $('#closet-chests');
   if (!(await isOnline())) { box.replaceChildren(el('p', { class: 'msg' }, 'Chests need the online server.')); return; }

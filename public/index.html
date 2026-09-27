@@ -279,6 +279,7 @@
     <button class="tab" role="tab" data-ctab="chests">Chests</button>
     <button class="tab" role="tab" data-ctab="trades">Trades <span class="count" id="trade-count" hidden></span></button>
     <button class="tab" role="tab" data-ctab="badges">Badges</button>
+    <button class="tab" role="tab" data-ctab="road">Trophy Road</button>
   </div>
   <div class="closet" id="closet-main">
     <div class="closet-preview"><canvas id="closet-canvas" aria-label="Pip wearing your outfit"></canvas><div class="small" id="closet-caption"></div></div>
@@ -287,6 +288,7 @@
   <div id="closet-trades" hidden></div>
   <div id="closet-market" hidden></div>
   <div id="closet-chests" hidden></div>
+  <div id="closet-road" hidden></div>
   <div id="closet-badges" hidden>
     <div class="section-head"><h2>Badges</h2><span class="small" id="ach-count"></span></div>
     <div class="title-pick" id="title-pick" hidden><label for="title-select"><b>Your title</b> <span class="small">(shows under your name in worlds and on your profile)</span></label> <select id="title-select"></select></div>
@@ -642,9 +644,11 @@
 
 <div class="modal" id="manage-modal" hidden role="dialog" aria-modal="true" aria-labelledby="manage-h">
   <div class="panel manage-panel">
-    <h2 id="manage-h">Manage player</h2>
+    <div class="manage-top">
+      <div class="row"><h2 id="manage-h">Manage player</h2><button class="btn" type="button" data-close>Done</button></div>
+      <p class="msg" id="manage-note" role="status"></p>
+    </div>
     <div id="manage-body"></div>
-    <div class="row"><button class="btn" type="button" data-close>Done</button></div>
   </div>
 </div>
 

@@ -17,6 +17,7 @@ export const COLORS = [
   { id: '#8d5a2b', name: 'Cocoa', price: 60 },
   { id: '#3d405b', name: 'Midnight', price: 80 },
   { id: '#7ae582', name: 'Glow', need: { stars: 15 }, hint: 'Earn 15 stars' },
+  { id: '#1fb5a0', name: 'Trophy teal', need: { level: 3 }, hint: 'Reach level 3 (Trophy Road)' },
   { id: '#c8a2ff', name: 'Lavender', price: 70 },
   { id: '#0077b6', name: 'Ocean', price: 90 },
   { id: '#e0b12a', name: 'Gold', price: 700 },
@@ -78,6 +79,10 @@ export const HATS = [
   { id: 'cap-racer', name: 'Racing cap', need: { ach: 'race25' }, hint: 'Earn the Photo Finish badge' },
   { id: 'tophat-tycoon', name: 'Tycoon top hat', need: { ach: 'tycoon' }, hint: 'Earn the Tycoon badge' },
   { id: 'horns-lava', name: 'Lava horns', need: { ach: 'lava10' }, hint: 'Earn the Floor Is Lava Pro badge' },
+  // Trophy Road (reach the level)
+  { id: 'cap-trophy', name: 'Trophy cap', need: { level: 5 }, hint: 'Reach level 5 (Trophy Road)' },
+  { id: 'party-trophy', name: 'Trophy party hat', need: { level: 10 }, hint: 'Reach level 10 (Trophy Road)' },
+  { id: 'crown-trophy', name: 'Trophy crown', need: { level: 20 }, hint: 'Reach level 20 (Trophy Road)' },
 ];
 
 export const TRAILS = [
@@ -121,6 +126,10 @@ export const PETS = [
   { id: 'kitty-tiger', name: 'Tiger', need: { ach: 'koth10' }, hint: 'Earn the Hill Hog badge' },
   { id: 'pup-gold', name: 'Golden pup', need: { ach: 'friends10' }, hint: 'Earn the Popular Pip badge' },
   { id: 'slime-star', name: 'Star slime', need: { ach: 'followers10' }, hint: 'Earn the Rising Star badge' },
+  // Trophy Road
+  { id: 'pup-sky', name: 'Sky pup', need: { level: 7 }, hint: 'Reach level 7 (Trophy Road)' },
+  { id: 'slime-trophy', name: 'Trophy slime', need: { level: 15 }, hint: 'Reach level 15 (Trophy Road)' },
+  { id: 'kitty-champ', name: 'Champion cat', need: { level: 30 }, hint: 'Reach level 30 (Trophy Road)' },
 ];
 // Recolored items: [looks like, main color, second color]
 export const VARIANTS = {
@@ -138,6 +147,8 @@ export const VARIANTS = {
   'crown-demon': ['crown', '#8a1020'], 'wizard-star': ['wizard', '#1b2a6b'], 'headphones-dj': ['headphones', '#b06cff'], 'cap-racer': ['cap', '#ffd23f', '#1d2340'],
   'tophat-tycoon': ['tophat', '#2d6a4f', '#e0b12a'], 'horns-lava': ['horns', '#ff5a1f'],
   'slime-demon': ['slime', '#8a1020'], 'kitty-tiger': ['kitty', '#ff9f1c', '#1d2340'], 'pup-gold': ['pup', '#ffd23f', '#e0b12a'], 'slime-star': ['slime', '#b06cff'],
+  'cap-trophy': ['cap', '#1fb5a0', '#127a6b'], 'party-trophy': ['party', '#1fb5a0', '#ffd23f'], 'crown-trophy': ['crown', '#1fb5a0'],
+  'pup-sky': ['pup', '#8ecae6', '#219ebc'], 'slime-trophy': ['slime', '#1fb5a0'], 'kitty-champ': ['kitty', '#ffd23f', '#1fb5a0'],
   'kitty-black': ['kitty', '#3d405b', '#1d2340'], 'kitty-fox': ['kitty', '#ff8c42', '#c85a1e'], 'pup-snow': ['pup', '#f4f4f4', '#c8d0e0'],
 };
 export const variant = (id) => VARIANTS[id] || [id, null, null];
@@ -223,4 +234,13 @@ export const LIMITED = [...COLORS.map((i) => ['color', i]), ...HATS.map((i) => [
 
 // Player levels: every coin you earn by playing is also 1 XP.
 export const xpFor = (lvl) => 20 * (lvl - 1) * (lvl - 1);
+// Where XP comes from (Wave 3): playing, not spending. Daily quests and the daily bonus still give XP too.
+export const XP = { star: 25, win: 40, place: 20, minute: 1, minutesPerDay: 120 };
+// Trophy Road: every step unlocks at a level. Coins are claimed once; items unlock in the Shop (they can't be traded).
+export const ROAD = [
+  { lv: 2, coins: 100 }, { lv: 3, item: 'color:#1fb5a0' }, { lv: 4, coins: 150 }, { lv: 5, item: 'hat:cap-trophy' },
+  { lv: 6, coins: 200 }, { lv: 7, item: 'pet:pup-sky' }, { lv: 8, coins: 250 }, { lv: 10, item: 'hat:party-trophy' },
+  { lv: 12, coins: 400 }, { lv: 15, item: 'pet:slime-trophy' }, { lv: 18, coins: 600 }, { lv: 20, item: 'hat:crown-trophy' },
+  { lv: 25, coins: 1000 }, { lv: 30, item: 'pet:kitty-champ' }, { lv: 40, coins: 2500 }, { lv: 50, coins: 5000 },
+];
 export const levelOf = (xp) => Math.floor(Math.sqrt(Math.max(0, xp || 0) / 20)) + 1;
