@@ -102,7 +102,7 @@ async function openThread(name, quiet) {
     const r = await api.dmThread(name);
     dm.current = r.name;
     const reasons = el('select', { 'aria-label': 'Why are you reporting them?' }, ...[['mean', 'Mean or bullying'], ['spam', 'Spamming'], ['personal', 'Asking for or sharing personal info'], ['other', 'Something else']].map(([v, l]) => el('option', { value: v }, l)));
-    const rep = el('span', { class: 'row', hidden: true }, reasons, el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { try { await api.dmReport(r.name, reasons.value); toast('Report sent. An admin will read it.'); rep.hidden = true; } catch (e) { toast(e.message); } } }, 'Send report'));
+    const rep = el('span', { class: 'row', hidden: true }, reasons, el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { try { await api.dmReport(r.name, reasons.value); toast('Report sent. The admin only sees the last few messages of this chat.'); rep.hidden = true; } catch (e) { toast(e.message); } } }, 'Send report'));
     $('#dm-who').replaceChildren(el('span', { class: 'dot', style: `background:${r.color}` }), el('a', { class: 'linkish', href: '#/u/' + r.name, onclick: () => closeModal($('#dm-modal')) }, r.name),
       el('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { rep.hidden = !rep.hidden; } }, 'Report'), rep);
     const list = $('#dm-msgs');

@@ -178,7 +178,7 @@ function renderDetail() {
     open ? goals : null,
     el('div', { class: 'row' },
       open ? el('button', { class: 'btn btn-grass btn-big', type: 'button', onclick: () => go('#/play/' + lv.id) }, beaten(lv.id) ? 'Play again' : 'Play') : null,
-      open ? el('button', { class: 'btn', type: 'button', onclick: () => editLevel(remixOf(lv)) }, 'Remix in editor') : null)));
+      open && !lv.long ? el('button', { class: 'btn', type: 'button', onclick: () => editLevel(remixOf(lv)) }, 'Remix in editor') : null)));
 }
 
 /* ---------------- playing ---------------- */
@@ -189,7 +189,7 @@ export function playLevel(lv, o) {
   startPlay(lv, {
     key: o.key, by: o.by, mode: o.mode, dailyBest: o.dailyBest,
     onExit: () => (o.onExit ? o.onExit() : go(backTo)),
-    onRemix: (level) => editLevel(remixOf(level)),
+    onRemix: (level) => (level.w > 400 ? toast("This level is too long for the editor (it's bigger than player levels can be).") : editLevel(remixOf(level))),
     onReport: o.pubId ? () => (session.user ? openReport(o.pubId) : needLogin("Reporting needs an account so one person can't spam reports.")) : null,
     onNext: o.onNext || null,
     onLike: o.pubId && o.online ? async () => {

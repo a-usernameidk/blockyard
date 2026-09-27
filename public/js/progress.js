@@ -43,6 +43,8 @@ export const ACHIEVEMENTS = [
   { id: 'daily30', name: 'Creature of Habit', text: 'Finish 30 daily challenges', hard: true },
   { id: 'skyflawless', name: 'Cloud Walker', text: 'Beat Sky Gauntlet without falling once', hard: true },
   { id: 'finalflawless', name: 'Untouchable Legend', text: 'Beat Final Rush without dying', hard: true },
+  { id: 'hyperdrive', name: 'Hyperdrive Survivor', text: 'Beat Hyperdrive, the Insane level in Nightmare Nebula', hard: true },
+  { id: 'hyperflawless', name: 'Normal Mode Hero', text: 'Beat Hyperdrive without dying once (no checkpoints)', hard: true },
   { id: 'towerspeed', name: 'Elevator? Never Heard of It', text: 'Beat Tower of Tries in under 25 seconds', hard: true },
   { id: 'insane', name: 'Asylum Escapee', text: 'Beat an Insane (9★) level or obby', hard: true },
   { id: 'demon', name: 'Demon Slayer', text: 'Beat a Demon (10★) level', hard: true },
@@ -66,7 +68,7 @@ export const ACHIEVEMENTS = [
   { id: 'chosen', name: 'The Chosen One', text: 'You 100%ed everything: every other badge in Blockyard', hard: true, chosen: true },
 ];
 // Blockyard's own 3D worlds (for World Tourist)
-export const TOUR = ['plaza', 'town', 'mg-race', 'mg-tag', 'mg-paint', 'mg-koth', 'mg-lava', 'sunny', 'tower', 'lava', 'factory', 'sky'];
+export const TOUR = ['plaza', 'town', 'mg-race', 'mg-tag', 'mg-paint', 'mg-koth', 'mg-lava', 'mg-tycoon', 'sunny', 'tower', 'lava', 'factory', 'sky'];
 export const OBBIES = ['sunny', 'tower', 'lava', 'factory', 'sky'];
 const STAR_REWARD = 10;
 const blank = () => ({
@@ -204,6 +206,8 @@ export const progress = {
       e.won = true; e.progress = 1;
       data.stats.wins++;
       if (id === 'b-final' && r.deaths === 0) grant('finalflawless');
+      if (id === 'b-hyper') grant('hyperdrive');
+      if (id === 'b-hyper' && r.deaths === 0) grant('hyperflawless');
       if ((meta.stars || 0) >= 9) grant('insane');
       if ((meta.stars || 0) >= 10) grant('demon');
       if (meta.builtin) {
@@ -232,7 +236,6 @@ export const progress = {
     if (first) data.stats.obbies++;
     if (id === 'sky' && r.deaths === 0 && !r.noProof) grant('skyflawless');
     if (id === 'tower' && r.time < 25 && !r.noProof) grant('towerspeed');
-    if (id === 'sky') grant('insane');
     checkAll(); save();
     return { first };
   },

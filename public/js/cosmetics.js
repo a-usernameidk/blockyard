@@ -150,6 +150,23 @@ export const isFree = (item) => item.price === 0 && !item.need;
 export const canTrade = (item) => !isFree(item) && !item.need;
 export const valueOf = (item) => (item.need ? 0 : item.price || 0);
 export const sellPrice = (item) => Math.floor(valueOf(item) / 2);
+// Rarity: limited items by how few were made, everything else by price.
+export const RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic'];
+export function rarityOf(item) {
+  if (item.stock) return item.stock <= 15 ? 4 : item.stock <= 60 ? 3 : 2;
+  return item.price >= 2500 ? 3 : item.price >= 700 ? 2 : item.price >= 200 ? 1 : 0;
+}
+// Normal (not limited) items are only in the shop on some days: the rarer, the less often.
+// The same for everyone, and it changes at midnight UTC. Free and earned items are always there.
+export const STOCK_CHANCE = [0.85, 0.65, 0.45, 0.25];
+export function inStockOn(key, item, date) {
+  if (!item || isFree(item) || item.need || item.stock) return true;
+  let h = 2166136261;
+  for (const ch of key + '|' + date) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0;
+  return (h % 1000) < STOCK_CHANCE[Math.min(3, rarityOf(item))] * 1000;
+}
+export const MAX_BUY = 10; // how many of one item you can buy at once
 export const LIMITED = [...COLORS.map((i) => ['color', i]), ...HATS.map((i) => ['hat', i]), ...TRAILS.map((i) => ['trail', i]), ...PETS.map((i) => ['pet', i]), ...GEAR.map((i) => ['gear', i])].filter(([, i]) => i.stock).map(([k, i]) => ({ key: itemKey(k, i.id), stock: i.stock }));
 
 // Player levels: every coin you earn by playing is also 1 XP.

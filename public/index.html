@@ -216,7 +216,7 @@
 <!-- ============ WORLDS (3D) ============ -->
 <section id="view-worlds" class="view" hidden>
   <div class="page-head">
-    <div><h1>Worlds</h1><p class="lede">3D places to hang out and obbies to beat. Log in to see other players and chat.</p></div>
+    <div><h1>Worlds</h1><p class="lede">3D places to hang out and obbies to beat. Log in to see other players and chat.</p><button class="btn btn-sun btn-big" id="random-world" type="button">🎲 Random world</button></div>
     <form class="join-code" id="join-form"><label for="join-code">Got a server code?</label><div class="row"><input id="join-code" placeholder="Server code" maxlength="12" autocomplete="off"><button class="btn btn-sun" type="submit">Join</button></div></form>
   </div>
   <div id="friends-online" hidden></div>
@@ -270,7 +270,7 @@
 
 <!-- ============ CLOSET ============ -->
 <section id="view-closet" class="view" hidden>
-  <div class="page-head"><div><h1>Pip's Closet</h1><p class="lede" id="closet-lede">Everything is worth coins. Limited items run out, then the only way to get one is a trade.</p></div><span class="wallet" id="shop-wallet"></span></div>
+  <div class="page-head"><div><h1>Pip's Closet</h1><p class="lede" id="closet-lede">The shop changes every day: rarer things are in stock less often.</p></div><span class="wallet" id="shop-wallet"></span></div>
   <div class="tabs page-tabs" id="closet-tabs" role="tablist" aria-label="Closet">
     <button class="tab" role="tab" data-ctab="shop">Shop</button>
     <button class="tab" role="tab" data-ctab="mine">My stuff</button>
@@ -384,7 +384,47 @@
     </div>
   </div>
 </section>
+<section id="view-rules" class="view" hidden>
+  <div class="page-head"><div><h1>Rules, privacy and terms</h1><p class="lede">By using Blockyard, you agree to these. They're short, promise.</p></div></div>
+  <div class="rules">
+    <section class="rules-box"><h2>Be a good player</h2>
+      <ul>
+        <li>Be kind in chat and messages. No bullying, no spam.</li>
+        <li>Never ask for or share personal info (real names, addresses, phone numbers, passwords).</li>
+        <li>No cheating, and no extra accounts to farm coins.</li>
+        <li>Levels, worlds and names have to be okay for everyone.</li>
+      </ul></section>
+    <section class="rules-box"><h2>Your messages are private</h2>
+      <ul>
+        <li>Messages between friends are locked (encrypted) in the database. Nobody reads them, not even the admin.</li>
+        <li>If you report someone, only the <b>last few messages</b> before your report are unlocked and shown to the admin, so they can check it.</li>
+        <li>Chat in 3D servers is seen by the players in that server. A report sends the last few things that player said.</li>
+        <li>Only report real problems. Sending false, mean or spam reports can get <b>you</b> a warning.</li>
+      </ul></section>
+    <section class="rules-box"><h2>Warnings</h2>
+      <p class="warn-steps"><span>Warning 1</span> → <span>Warning 2</span> → <span>Warning 3</span> → <span class="last">Account deleted</span></p>
+      <ul>
+        <li>Only the admin gives warnings, bans and account deletions, and they always have to confirm it first. Automatic checks (like the coin-farming check) only tell the admin to take a look.</li>
+        <li>Nobody gets banned by their internet address, so people sharing a network (like a school) are never blocked because of someone else.</li>
+        <li>You can earn warnings back: every 3 reports you send that turn out to be right takes one away, and so does a level of yours reaching 20 likes and 100 plays.</li>
+      </ul></section>
+    <section class="rules-box"><h2>The community helps</h2>
+      <ul>
+        <li>When 10 players report a level, it's hidden until the admin checks it.</li>
+        <li>Players who beat a level vote how hard it is, and the admin makes the final call.</li>
+      </ul></section>
+    <section class="rules-box"><h2>Open source</h2>
+      <p>Blockyard's code is shared under the <a href="/LICENSE.txt" target="_blank" rel="noopener">Apache License 2.0</a>. Levels and worlds belong to the players who make them, and publishing one lets everyone on Blockyard play it.</p></section>
+  </div>
+</section>
 </main>
+
+<div class="tos-gate" id="tos-gate" role="dialog" aria-labelledby="tos-h" hidden>
+  <div class="tos-inner">
+    <p id="tos-h"><b>Welcome to Blockyard!</b> By using Blockyard, you agree to the <a href="#/rules" id="tos-read">rules, privacy and terms</a> (be kind, no cheating, messages stay private).</p>
+    <div class="row"><a class="btn" href="#/rules">Read them</a><button class="btn btn-grass" id="tos-ok" type="button">I agree</button></div>
+  </div>
+</div>
 
 <!-- ============ MODALS ============ -->
 <div class="modal" id="share-modal" hidden role="dialog" aria-modal="true" aria-labelledby="share-h">

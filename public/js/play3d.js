@@ -7,7 +7,8 @@ import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
 import { openRoom } from './net.js';
 import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
 import { store } from './api.js';
-import { GAMES, ROUND, WEAPONS, WEAPON_IDS, onHill, inBox } from './games.js';
+import { GAMES, ROUND, WEAPONS, WEAPON_IDS, TYCOON, onHill, inBox, nearBlock } from './games.js';
+import { LOGIC_GEAR } from './logic.js';
 import { GEAR_MODS } from './cosmetics.js';
 import { GFX, GFX_ORDER, gfxMode, setGfx } from './settings.js';
 import { emojiNodes, emojiButton } from './emoji.js';
@@ -89,7 +90,9 @@ export function startWorld(root, opts) {
   const msgBox = h('div', { class: 'overlay w3-msg' }, h('div', { class: 'panel' }, h('h2', {}, 'Loading world…')));
   const joy = h('div', { class: 'w3-joy', 'aria-hidden': 'true' }, h('div', { class: 'w3-knob' }));
   const jumpBtn = h('button', { class: 'tbtn tbtn-jump w3-jump', type: 'button', 'aria-label': 'Jump' }, 'Jump');
-  const stage = h('div', { class: 'w3-stage' }, canvas, tags, h('div', { class: 'w3-hud' }, hudTime, hudCoins, hudDeaths, hudNet), toastEl, fade, players, chat, emoteBar, joy, jumpBtn, menu, winBox, msgBox);
+  const hudVars = h('span', { class: 'w3-vars' });
+  const sayBox = h('div', { class: 'w3-say', 'aria-live': 'polite', hidden: true });
+  const stage = h('div', { class: 'w3-stage' }, canvas, tags, h('div', { class: 'w3-hud' }, hudTime, hudCoins, hudDeaths, hudVars, hudNet), toastEl, sayBox, fade, players, chat, emoteBar, joy, jumpBtn, menu, winBox, msgBox);
   const restartBtn = h('button', { class: 'btn', type: 'button', title: 'Start over from the beginning' }, 'Restart');
   const resetBtn = h('button', { class: 'btn', type: 'button', title: 'Go back to your last checkpoint (R)' }, 'Respawn');
   const inviteBtn = h('button', { class: 'btn', type: 'button', hidden: true }, 'Invite');
@@ -97,10 +100,11 @@ export function startWorld(root, opts) {
   const G3 = opts.gfx || GFX[opts.low ? 'fast' : 'pretty'];
   const gfxBtn = h('button', { class: 'btn', type: 'button', title: 'Graphics quality (click to change)' }, 'Graphics: ' + G3.name);
   const lockBtn = h('button', { class: 'btn', type: 'button', title: 'Shift lock: the camera follows your mouse and you face where you look (Shift)' }, 'Shift lock');
+  const specBtn = h('button', { class: 'btn', type: 'button', title: 'Watch other players (V)' }, 'Spectate');
   const bar = h('div', { class: 'bar w3-bar' },
     h('button', { class: 'btn', type: 'button', onclick: () => opts.onExit && opts.onExit() }, opts.test ? 'Back to building' : 'Leave'),
     h('div', { class: 'bar-title' }, h('h2', {}, opts.title || world.n), h('span', { class: 'by' }, opts.by ? 'by ' + opts.by : opts.game ? 'Minigames' : obby ? 'Obby' : 'Hangout')),
-    obby ? restartBtn : null, resetBtn, inviteBtn, lockBtn, gfxBtn, fullBtn);
+    obby ? restartBtn : null, resetBtn, inviteBtn, specBtn, lockBtn, gfxBtn, fullBtn);
   /* ---------------- admin tools (only for admins) ---------------- */
   const isAdminMe = !!(opts.me && opts.me.admin);
   let fly = false, flySpeed = 12, noProof = false;
@@ -170,6 +174,8 @@ export function startWorld(root, opts) {
     if (down && (e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) { setShiftLock(!shiftLock); return; }
     if (down && e.code === 'KeyB' && nearShop) { openShop(); return; }
     if (down && e.code === 'KeyF' && isAdminMe && !e.repeat) { setFly(!fly); return; }
+    if (down && e.code === 'KeyV' && !e.repeat) { setSpec(!spec); return; }
+    if (spec && down && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD')) { e.preventDefault(); nextSpec(e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : 1); return; }
     const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'j', KeyQ: 'ql', KeyE: 'qr', KeyC: 'dn', ControlLeft: 'dn' }[e.code];
     if (!k) return;
     e.preventDefault();
@@ -239,7 +245,7 @@ export function startWorld(root, opts) {
   gfxBtn.addEventListener('click', () => { const m = GFX_ORDER[(GFX_ORDER.indexOf(gfxMode()) + 1) % GFX_ORDER.length]; setGfx(m); if (opts.onGraphics) opts.onGraphics(m); });
 
   function inputBits() {
-    if (performance.now() < frozenUntil) return 0;
+    if (performance.now() < frozenUntil || spec) return 0;
     let f = keys.has('f'), b = keys.has('b'), l = keys.has('l'), r = keys.has('r');
     if (joyVec) { f = f || joyVec.y < -0.35; b = b || joyVec.y > 0.35; l = l || joyVec.x < -0.35; r = r || joyVec.x > 0.35; }
     let bits = (f ? KEY.fwd : 0) | (b ? KEY.back : 0) | (l ? KEY.left : 0) | (r ? KEY.right : 0) | (keys.has('j') || jumpTouch ? KEY.jump : 0);
@@ -273,6 +279,11 @@ export function startWorld(root, opts) {
         case 'checkpoint': sfx('checkpoint'); burst(e.x, e.y, e.z, ['#44c06a', '#ffffff'], 12, 3, 4); toast('Checkpoint!'); break;
         case 'crumble': sfx('crumble'); break;
         case 'teleport': sfx('bounce'); burst(e.x, e.y + 0.8, e.z, ['#b06cff', '#ffffff', '#7cc8ff'], 14, 3, 3); burst(S.p.x, S.p.y + 0.8, S.p.z, ['#b06cff', '#ffffff', '#7cc8ff'], 14, 3, 3); toast('Whoosh!', 0.8); break;
+        case 'say': logicSay(e.text); break;
+        case 'sound': sfx(e.name); break;
+        case 'vars': drawVars(); break;
+        case 'gear': toast(e.id ? `You got the ${LOGIC_GEAR[e.id] || 'gear'} for ${e.secs} seconds!` : 'Your borrowed gear ran out.', 2); if (e.id) sfx('badge'); break;
+        case 'switch': for (const i of e.cells) { viewGrid.t[i] = physGrid.t[i]; viewGrid.c[i] = physGrid.c[i]; R.markDirty(i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ); } break;
         case 'die': sfx('die'); burst(e.x, e.y + 0.6, e.z, [look.color, '#ffffff'], 16, 4, 4); fade.classList.remove('on'); void fade.offsetWidth; fade.classList.add('on'); break;
         case 'win':
           sfx('win');
@@ -282,6 +293,14 @@ export function startWorld(root, opts) {
       }
     }
     S.events.length = 0;
+  }
+
+  /* ---------------- Logic: messages and variables from the world's scripts ---------------- */
+  let sayT = 0;
+  function logicSay(text) { sayBox.textContent = text; sayBox.hidden = false; clearTimeout(sayT); sayT = setTimeout(() => { sayBox.hidden = true; }, 3500); sfx('pop'); }
+  function drawVars() {
+    const L = S.logic;
+    hudVars.replaceChildren(...(L ? L.shown.map((v) => h('span', { class: 'w3-pill w3-var' }, `${v}: ${L.vars[v] || 0}`)) : []));
   }
 
   /* ---------------- multiplayer ---------------- */
@@ -451,6 +470,71 @@ export function startWorld(root, opts) {
     botMgr = createBots({ world, grid: physGrid, cfg, way: opts.way || [], ids, skill: botInfo.skill, send: (msg) => room && room.send(msg) });
   }
   let inRound = false, lastTag = 0, roundText = '', frozenUntil = 0, lastCount = -1, kothKing = null, myPaint = 0;
+  /* ----- spectating: watch other players (your Pip waits where it is) ----- */
+  let spec = null; // { id } of who you're watching
+  const specBar = h('div', { class: 'w3-spec', hidden: true },
+    h('button', { class: 'btn', type: 'button', 'aria-label': 'Watch the previous player', onclick: () => nextSpec(-1) }, '◀'),
+    h('b', { class: 'w3-spec-name' }),
+    h('button', { class: 'btn', type: 'button', 'aria-label': 'Watch the next player', onclick: () => nextSpec(1) }, '▶'),
+    h('button', { class: 'btn btn-sun', type: 'button', onclick: () => setSpec(false) }, 'Stop watching'));
+  stage.append(specBar);
+  const watchable = () => [...others.values()].filter((o) => o.pos).map((o) => o.id);
+  function setSpec(on) {
+    if (on) {
+      const list = watchable();
+      if (!list.length) { toast('Nobody else is here to watch yet.', 1.8); return; }
+      spec = { id: list[0] }; clearKeys();
+    } else spec = null;
+    specBtn.classList.toggle('on', !!spec); specBtn.textContent = spec ? 'Spectating' : 'Spectate';
+    specBar.hidden = !spec; drawSpec();
+  }
+  function nextSpec(d) {
+    const list = watchable();
+    if (!spec || !list.length) { setSpec(false); return; }
+    const i = list.indexOf(spec.id);
+    spec.id = list[((i < 0 ? 0 : i + d) % list.length + list.length) % list.length]; drawSpec();
+  }
+  function drawSpec() { if (spec) specBar.querySelector('.w3-spec-name').textContent = `Watching ${(others.get(spec.id) || {}).name || '…'}`; }
+  specBtn.addEventListener('click', () => { setSpec(!spec); specBtn.blur(); });
+  /* ----- tycoon: plots, cash and buy buttons (the live room keeps the real score) ----- */
+  const tyPlots = cfg && cfg.areas.tycoon ? cfg.areas.tycoon.plots || {} : null;
+  const tyShown = new Map(); // plot color -> how many buttons are shown as bought
+  let tyAt = 0, tySent = 0;
+  const tyTag = h('div', { class: 'w3-tag shopkeep', hidden: true }, h('span', { class: 'w3-bubble' }));
+  if (tyPlots) tags.append(tyTag);
+  const COLOR_NAME = ['white', 'gray', 'slate', 'navy', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'brown', 'tan', 'sky', 'forest'];
+  function tySet(i, t, c) { if (physGrid.t[i] === t && physGrid.c[i] === c) return; physGrid.t[i] = viewGrid.t[i] = t; physGrid.c[i] = viewGrid.c[i] = c; R.markDirty(i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ); }
+  function tyApply(ty) {
+    if (!tyPlots) return;
+    for (const [c, plot] of Object.entries(tyPlots)) {
+      const n = ty && ty[c] ? ty[c][1] : 0;
+      if (tyShown.get(c) === n) continue;
+      tyShown.set(c, n);
+      plot.buttons.forEach((b, k) => {
+        for (const i of b.cells) tySet(i, k < n ? B.tbuild : 0, k < n ? Number(c) : 0);
+        tySet(b.x + b.z * SX + b.y * SX * SZ, k < n ? B.plastic : B.tbutton, Number(c));
+      });
+    }
+  }
+  const myPlot = () => (rs.ty ? Object.entries(rs.ty).find(([, p]) => p[0] === myId) : null);
+  const tyCash = (p) => Math.floor(p[2] + p[3] * (performance.now() - tyAt) / 1000);
+  function tyTick(px, py, pz) {
+    if (!tyPlots || rs.mode !== 'tycoon' || rs.phase !== 'play' || !inRound || !room) { tyTag.hidden = true; return ''; }
+    const mine = myPlot(), now = performance.now(), at = [px, py, pz];
+    if (!mine) {
+      tyTag.hidden = true;
+      if (now - tySent > 500) for (const [c, plot] of Object.entries(tyPlots)) if (rs.ty[c] && !rs.ty[c][0] && nearBlock(at, plot.pad)) { room.send({ t: 'tclaim', c }); tySent = now; break; }
+      return 'Find a glowing claim pad nobody has and step on it!';
+    }
+    const [c, p] = mine, plot = tyPlots[c], next = plot.buttons[p[1]], cash = tyCash(p);
+    if (next) {
+      placeTag(tyTag, next.x + 0.5, next.y + 2.2, next.z + 0.5, false, 60);
+      tyTag.firstChild.textContent = cash >= next.price ? `Buy: $${next.price}` : `$${next.price}`;
+      if (cash >= next.price && now - tySent > 500 && nearBlock(at, [next.x, next.y, next.z])) { room.send({ t: 'tbuy', c }); tySent = now; }
+    } else tyTag.hidden = true;
+    return `Your ${COLOR_NAME[c] || ''} plot: $${cash} (+$${p[3]}/s). ${next ? `Next button: $${next.price}${cash >= next.price ? ', go step on it!' : ''}` : 'All built!'} ${p[1]}/${plot.buttons.length} built.`;
+  }
+  tyApply(null);
   const nameOf = (id) => (id === myId ? 'You' : (others.get(id) || {}).name || 'Someone');
   const toXYZ = (a, spread) => ({ x: a[0] + (spread ? (Math.random() - 0.5) * spread : 0), y: a[1], z: a[2] + (spread ? (Math.random() - 0.5) * spread : 0) });
   // gear works in hangouts, Tag and Paintball. Never in obbies (timed and checked) or the other minigames (fair play).
@@ -574,7 +658,9 @@ export function startWorld(root, opts) {
     if (!cfg) return;
     const was = rs.phase;
     if (m.phase === 'play' && m.mode === 'lava' && rs.phase === 'play' && m.lava != null && rs.lava != null && m.lava > rs.lava && inRound) { toast('The lava is rising!', 1); sfx('crumble'); }
-    Object.assign(rs, { phase: m.phase, mode: m.mode, endsLocal: performance.now() + (m.left || 0), it: new Set(m.it || []), alive: new Set(m.alive || []), fin: m.fin || [], scores: m.scores || {}, lava: m.lava, results: m.results, need: m.need, practice: !!m.practice });
+    Object.assign(rs, { phase: m.phase, mode: m.mode, endsLocal: performance.now() + (m.left || 0), it: new Set(m.it || []), alive: new Set(m.alive || []), fin: m.fin || [], scores: m.scores || {}, lava: m.lava, results: m.results, need: m.need, practice: !!m.practice, ty: m.ty || null });
+    tyAt = performance.now();
+    if (tyPlots) tyApply(m.mode === 'tycoon' && (m.phase === 'play' || m.phase === 'results') ? m.ty : null);
     if (m.phase === 'play' && was !== 'play' && rs.alive.has(myId)) enterArea(m.mode);
     else if (m.phase !== 'play' && inRound) backToLobby();
     if (m.ev) {
@@ -587,6 +673,8 @@ export function startWorld(root, opts) {
       }
       if (m.ev.out && m.ev.out !== myId) toast(`${nameOf(m.ev.out)} fell in the lava!`, 1.4);
       if (m.ev.fin) toast(`${nameOf(m.ev.fin)} finished #${rs.fin.indexOf(m.ev.fin) + 1}!`, 1.6);
+      if (m.ev.claim) { toast(m.ev.claim === myId ? 'This plot is yours! Step on the glowing buttons to build it.' : `${nameOf(m.ev.claim)} claimed a plot!`, 1.8); if (m.ev.claim === myId) sfx('badge'); }
+      if (m.ev.buy) { const b = tyPlots && tyPlots[m.ev.c] && tyPlots[m.ev.c].buttons[m.ev.n - 1]; if (b) burst(b.x + 0.5, b.y + 1.5, b.z + 0.5, [PALETTE[m.ev.c] || '#ffd23f', '#ffffff'], 16, 3, 4); if (m.ev.buy === myId) sfx('buy'); }
       if (m.ev.splat) {
         const by = m.ev.by === myId ? look : (others.get(m.ev.by) || {}).look;
         splash(m.ev.splat === myId ? [S.p.x, S.p.y, S.p.z] : (others.get(m.ev.splat) || {}).pos, by && by.color, 24);
@@ -668,6 +756,7 @@ export function startWorld(root, opts) {
   let lastHb = 0;
   function roundTick(px, py, pz, scene, clock) {
     if (!cfg || !rs.phase) return;
+    if (tyPlots && (rs.mode !== 'tycoon' || rs.phase !== 'play')) tyTag.hidden = true;
     const secs = Math.max(0, Math.ceil((rs.endsLocal - performance.now()) / 1000));
     const clockTxt = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     let t = '';
@@ -680,6 +769,7 @@ export function startWorld(root, opts) {
     else if (rs.mode === 'koth') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `KING OF THE HILL ${clockTxt}. You: ${Math.floor(rs.scores[myId] || 0)}s${top ? `, leader: ${nameOf(top[0])} ${Math.floor(top[1])}s` : ''}`; }
     else if (rs.mode === 'paint') { const top = Object.entries(rs.scores).sort((a, b) => b[1] - a[1])[0]; t = `PAINTBALL ${clockTxt}. ${WEAPONS[weapon].name}. Splats: ${rs.scores[myId] || 0}${top ? `, leader: ${nameOf(top[0])} ${top[1]}` : ''}. Paint on you: ${myPaint}/${ROUND.hp}`; }
     else if (rs.mode === 'lava') t = `RISING LAVA ${clockTxt}. ${rs.alive.has(myId) ? `${rs.alive.size} left. Keep climbing!` : 'You fell in. Watch the rest!'}`;
+    else if (rs.mode === 'tycoon') t = `TYCOON ${clockTxt}. ${tyTick(px, py, pz)}`;
     if (rs.phase === 'intro' && secs <= 3 && secs !== lastCount) { lastCount = secs; if (secs > 0) { toast(String(secs), 0.9); sfx('tick'); } }
     if (rs.phase !== 'intro') lastCount = -1;
     if (t !== roundText) { roundText = t; roundBox.textContent = t; roundBox.hidden = false; }
@@ -751,6 +841,7 @@ export function startWorld(root, opts) {
     S = createSim(world, physGrid);
     applyGear();
     scatter();
+    drawVars();
     frames = []; acc = 0; prevP = { ...S.p }; winShown = false; noProof = fly;
     for (const [i, t] of gone) { viewGrid.t[i] = t; const x = i % SX, z = Math.floor(i / SX) % SZ, y = Math.floor(i / (SX * SZ)); R.markDirty(x, y, z); }
     gone.clear();
@@ -813,7 +904,9 @@ export function startWorld(root, opts) {
 
     // camera: orbit around the player, pulled in if a wall is in the way
     shoulder += ((shiftLock ? 0.9 : 0) - shoulder) * Math.min(1, dt * 10);
-    const tgt = [px + Math.cos(cam.yaw) * shoulder, py + 1.25, pz + Math.sin(cam.yaw) * shoulder];
+    if (spec && !others.has(spec.id)) setSpec(false);
+    const fo = spec ? others.get(spec.id).pos : null;
+    const tgt = fo ? [fo[0], fo[1] + 1.25, fo[2]] : [px + Math.cos(cam.yaw) * shoulder, py + 1.25, pz + Math.sin(cam.yaw) * shoulder];
     aim.from = tgt;
     const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     const dir = [-Math.sin(cam.yaw) * cp, sp, Math.cos(cam.yaw) * cp];

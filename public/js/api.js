@@ -101,7 +101,7 @@ async function request(method, path, body, headers = {}, wait = 12000) {
 const enc = encodeURIComponent;
 const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== '' && v != null)).toString();
 export const api = {
-  signup: (name, password, progress, remember = true) => request('POST', '/auth/signup', { name, password, progress, remember }),
+  signup: (name, password, progress, remember = true) => request('POST', '/auth/signup', { name, password, progress, remember, tos: true }),
   login: (name, password, remember = true) => request('POST', '/auth/login', { name, password, remember }),
   recover: (name, recovery, password, remember = true) => request('POST', '/auth/recover', { name, recovery, password, remember }),
   logout: () => request('POST', '/auth/logout'),
@@ -120,6 +120,7 @@ export const api = {
   visibility: (id, visibility) => request('PUT', `/games/${enc(id)}`, { only: 'visibility', visibility }),
   remove: (id, editKey) => request('DELETE', `/games/${enc(id)}`, null, editKey ? { 'x-edit-key': editKey } : {}),
   play: (id) => request('POST', `/games/${enc(id)}/play`),
+  randomWorld: () => request('GET', '/games/random'),
   like: (id) => request('POST', `/games/${enc(id)}/like`),
   report: (id, reason) => request('POST', `/games/${enc(id)}/report`, { reason }),
   daily: (date) => request('GET', `/daily?date=${enc(date)}`),
@@ -155,7 +156,7 @@ export const api = {
   // coins, closet, trades
   look: (look) => request('PUT', '/me/look', look),
   shop: () => request('GET', '/shop'),
-  buy: (key) => request('POST', '/shop/buy', { key }),
+  buy: (key, qty = 1) => request('POST', '/shop/buy', { key, qty }),
   sell: (key) => request('POST', '/shop/sell', { key }),
   finish: (body) => request('POST', '/finish', body, {}, 20000),
   trades: () => request('GET', '/trades'),

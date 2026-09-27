@@ -10,7 +10,7 @@ export const MARKET_SCHEMA = [
   'CREATE INDEX IF NOT EXISTS listings_item ON listings (item, status, price)',
   'CREATE INDEX IF NOT EXISTS listings_seller ON listings (seller, status)',
 ];
-export const MARKET = { fee: 0.1, maxPrice: 1000000, perUser: 20 };
+export const MARKET = { fee: 0, maxPrice: 1000000, perUser: 20 }; // no fee: the seller gets the whole price
 
 export async function marketRoute(ctx, path, method) {
   let m;
@@ -72,7 +72,7 @@ async function buyListing(ctx, id) {
       ...coinStmts(db, l.seller, get, 'market sale ' + l.item),
       giveItem(db, user.id, l.item),
       transferStmt(db, user.id, l.seller, l.price, 'market'),
-      mail(db, l.seller, 'trade', `Your ${f ? f.item.name : 'item'} sold!`, `${user.name} bought your ${f ? f.item.name : 'item'} for ${l.price} coins. You got ${get} (the Reseller shop keeps ${Math.round(MARKET.fee * 100)}%).`),
+      mail(db, l.seller, 'trade', `Your ${f ? f.item.name : 'item'} sold!`, `${user.name} bought your ${f ? f.item.name : 'item'} for ${l.price} coins. You got all ${get} coins.`),
     ]);
   } catch (e) {
     if (!isConstraint(e)) throw e;

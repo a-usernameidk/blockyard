@@ -38,8 +38,9 @@ async function showSettings() {
   if (session.user) {
     const wn = session.user.warnings || 0;
     body.append(section('My account',
-      el('p', {}, wn ? `⚠️ You have ${wn} of 3 warnings. 3 is a ban.` : 'No warnings. Nice!'),
-      el('p', { class: 'small' }, 'Warnings come from breaking the rules (like mean chat, bad levels, or farming coins with extra accounts). You can earn them back: every 3 reports you send that the admin agrees with takes one away, and so does a level of yours reaching 20 likes and 100 plays.'),
+      el('p', {}, wn ? `⚠️ You have ${wn} of 3 warnings.${wn >= 3 ? ' One more and your account can be deleted.' : ''}` : 'No warnings. Nice!'),
+      el('p', { class: 'small' }, 'Warning 1 → 2 → 3 → account deleted. Only the admin gives warnings, and always on purpose. ', el('a', { href: '#/rules' }, 'Read the rules')),
+      el('p', { class: 'small' }, 'Warnings come from breaking the rules (like mean chat, bad levels, false reports, or farming coins with extra accounts). You can earn them back: every 3 reports you send that the admin agrees with takes one away, and so does a level of yours reaching 20 likes and 100 plays.'),
       el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', onclick: () => $('#acct-pw-change').click() }, 'Change my password'))));
   }
   if (session.user && session.user.admin) {

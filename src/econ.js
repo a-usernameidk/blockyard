@@ -1,7 +1,7 @@
 // Coins and items. The server is the only one who can change them:
 // coins come from checked runs (built-in levels, built-in obbies, daily, Endless, and player levels
 // an admin marked as rewarding), and items come from the shop or from trades.
-import { SHOP, FREE, KINDS, findItem, isFree, canTrade, valueOf, sellPrice, LIMITED, levelOf } from '../public/js/cosmetics.js';
+import { SHOP, FREE, KINDS, findItem, isFree, canTrade, valueOf, sellPrice, LIMITED, levelOf, inStockOn, MAX_BUY } from '../public/js/cosmetics.js';
 import { BUILTIN } from '../public/js/levels.js';
 import { normalizeLevel } from '../public/js/format.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
@@ -290,7 +290,10 @@ async function setLook(ctx, input) {
 
 // Daily deals: picked by themselves each day (the same for everyone). The admin can change how many,
 // how big the discount is, pick the items for any day, and run a shop-wide sale.
-export const dealPool = () => KINDS.flatMap((k) => SHOP[k].filter((i) => !isFree(i) && !i.need && !i.stock).map((i) => k + ':' + i.id));
+export const dealPool = (date) => KINDS.flatMap((k) => SHOP[k].filter((i) => !isFree(i) && !i.need && !i.stock && (!date || inStockOn(k + ':' + i.id, i, date))).map((i) => k + ':' + i.id));
+// what's in the shop today (normal items rotate by rarity; a pinned deal is always in stock)
+export const inStockToday = (f, deal, date = todayUTC()) => inStockOn(f.key, f.item, date) || deal.items.includes(f.key);
+export const giveItems = (db, uid, key, n) => db.prepare('INSERT INTO inventory (user_id, item, qty) VALUES (?, ?, ?) ON CONFLICT (user_id, item) DO UPDATE SET qty = qty + excluded.qty').bind(uid, key, n);
 const num = (v, lo, hi, d) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : d; };
 export function cleanDeals(v) {
   v = v && typeof v === 'object' ? v : {};
@@ -307,7 +310,7 @@ export async function dealSettings(db) {
 }
 export function featured(date = todayUTC(), cfg = cleanDeals({})) {
   if (cfg.pins[date] && cfg.pins[date].length) return { date, off: cfg.off, items: cfg.pins[date], pinned: true, sale: cfg.sale };
-  const pool = dealPool();
+  const pool = dealPool(date);
   let h = 2166136261;
   for (const ch of date) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
   const pick = [];
@@ -324,7 +327,9 @@ async function shop(ctx) {
   const { results } = await ctx.db.prepare('SELECT item, left FROM stock').all();
   const stock = {};
   for (const r of results) stock[r.item] = r.left;
-  return json({ stock, featured: featured(todayUTC(), await dealSettings(ctx.db)) });
+  const date = todayUTC(), deal = featured(date, await dealSettings(ctx.db));
+  const out = KINDS.flatMap((k) => SHOP[k].map((i) => ({ key: k + ':' + i.id, item: i }))).filter((f) => !inStockToday(f, deal, date)).map((f) => f.key);
+  return json({ stock, featured: deal, outToday: out, date, maxBuy: MAX_BUY });
 }
 
 async function buy(ctx, input) {
@@ -333,26 +338,31 @@ async function buy(ctx, input) {
   const f = findItem(input.key);
   if (!f || isFree(f.item)) fail(400, "That item isn't in the shop.");
   const have = await db.prepare('SELECT qty FROM inventory WHERE user_id = ? AND item = ?').bind(user.id, f.key).first();
-  if (have && have.qty > 0) fail(409, 'You already have that.');
   if (f.item.need) {
+    if (have && have.qty > 0) fail(409, 'You already have that.');
     const need = f.item.need;
     const ok = need.stars ? (await starCount(db, user.id)) >= need.stars : !!(await badges(db, user.id))[need.ach];
     if (!ok) fail(403, `Locked: ${f.item.hint}.`);
     await db.prepare('INSERT OR IGNORE INTO inventory (user_id, item, qty) VALUES (?, ?, 1)').bind(user.id, f.key).run();
     return json({ ok: true, price: 0, wallet: await getWallet(db, user.id) });
   }
-  const price = priceOf(f, featured(todayUTC(), await dealSettings(db)));
-  const stmts = [...coinStmts(db, user.id, -price, 'buy ' + f.key), giveItem(db, user.id, f.key)];
-  if (f.item.stock) stmts.push(db.prepare('UPDATE stock SET left = left - 1 WHERE item = ?').bind(f.key));
+  const deal = featured(todayUTC(), await dealSettings(db));
+  if (!inStockToday(f, deal)) fail(409, `${f.item.name} isn't in stock today. The shop changes every day (rarer things show up less often), or try the Reseller shop.`);
+  // you can own more than one, and buy a few at once
+  const qty = Math.max(1, Math.min(MAX_BUY, Math.floor(Number(input.qty) || 1)));
+  const each = priceOf(f, deal), price = each * qty;
+  const stmts = [...coinStmts(db, user.id, -price, 'buy ' + f.key + (qty > 1 ? ' x' + qty : '')), giveItems(db, user.id, f.key, qty)];
+  if (f.item.stock) stmts.push(db.prepare('UPDATE stock SET left = left - ? WHERE item = ?').bind(qty, f.key));
   try { await db.batch(stmts); } catch (e) {
     if (!isConstraint(e)) throw e;
     if (f.item.stock) {
       const s = await db.prepare('SELECT left FROM stock WHERE item = ?').bind(f.key).first();
-      if (!s || s.left <= 0) fail(409, 'Sold out! The only way to get one now is a trade.');
+      if (!s || s.left <= 0) fail(409, 'Sold out! Try the Reseller shop or a trade.');
+      if (s.left < qty) fail(409, `Only ${s.left} left.`);
     }
     fail(402, `You need ${price} coins for that.`);
   }
-  return json({ ok: true, price, wallet: await getWallet(db, user.id) });
+  return json({ ok: true, price, qty, wallet: await getWallet(db, user.id) });
 }
 
 async function sell(ctx, input) {
@@ -442,7 +452,9 @@ async function finishLevel(ctx, user, id, replay) {
   const { db, env } = ctx;
   const lv = BUILTIN.find((b) => b.id === id);
   if (!lv) fail(404, 'Unknown level.');
-  const run = await verify(env, { type: '2d', level: lv, replay, opts: { maxSteps: maxSteps(env) } });
+  // built-in levels are ours, so they skip the size limits for player levels (Hyperdrive is extra long,
+  // and runs on it can take many minutes with checkpoint deaths)
+  const run = await verify(env, { type: '2d', raw: true, level: lv, replay, opts: { maxSteps: lv.long ? Math.max(maxSteps(env), 120 * 60 * 20) : maxSteps(env) } });
   if (!run.won) fail(400, "That run didn't reach the goal.");
   const rush = lv.style === 'rush';
   const s1 = run.totalCoins ? run.coins >= run.totalCoins : run.deaths === 0;
@@ -645,34 +657,27 @@ export async function noteTransfers(ctx, A, B, give, want, giveCoins, wantCoins,
 
 /* ---------------- coin farming ---------------- */
 // Every gift and trade is written down. If one player gets coins or items from 3 or more brand-new, barely-played
-// accounts that were made on the same network as theirs, that's farming with extra accounts: their coins (and the
-// extra accounts' coins) are wiped and they get 2 warnings. 3 warnings is a ban.
-export const FARM = { senders: 3, days: 7, freshDays: 7, lowXp: 100, warnings: 2, banAt: 3 };
+// accounts made on the same network as theirs, that looks like farming with extra accounts. Blockyard only FLAGS it:
+// the admin gets a mail and decides what to do (nothing happens to the player by itself).
+export const FARM = { senders: 3, days: 7, freshDays: 7, lowXp: 100 };
 export const transferStmt = (db, from, to, value, kind) => db.prepare('INSERT INTO transfers (from_id, to_id, value, kind, at) VALUES (?, ?, ?, ?, ?)').bind(from, to, value, kind, Date.now());
 export async function checkFarm(ctx, uid) {
   const { db } = ctx, now = Date.now();
   try {
     const me = await db.prepare('SELECT id, name, signup_ip FROM users WHERE id = ?').bind(uid).first();
     if (!me || !me.signup_ip) return false;
-    const { results } = await db.prepare(`SELECT DISTINCT t.from_id AS id FROM transfers t JOIN users u ON u.id = t.from_id LEFT JOIN wallets w ON w.user_id = u.id
+    const { results } = await db.prepare(`SELECT DISTINCT t.from_id AS id, u.name FROM transfers t JOIN users u ON u.id = t.from_id LEFT JOIN wallets w ON w.user_id = u.id
       WHERE t.to_id = ? AND t.at > ? AND u.signup_ip = ? AND u.created_at > ? AND COALESCE(w.xp, 0) < ?`).bind(uid, now - FARM.days * DAY, me.signup_ip, now - FARM.freshDays * DAY, FARM.lowXp).all();
     if (results.length < FARM.senders) return false;
-    const alts = results.map((r) => r.id), week = Math.floor(now / (7 * DAY));
-    const wipe = (id) => [
-      db.prepare("INSERT INTO ledger (user_id, delta, why, at) SELECT user_id, -coins, 'farm wipe', ? FROM wallets WHERE user_id = ? AND coins > 0").bind(now, id),
-      db.prepare('UPDATE wallets SET coins = 0 WHERE user_id = ?').bind(id),
-    ];
+    const week = Math.floor(now / (7 * DAY));
+    // once a week per player, so the admin isn't spammed
     const ok = await db.batch([
       db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(uid, 'farm:' + week, now),
-      ...wipe(uid), ...alts.flatMap(wipe),
-      db.prepare('UPDATE users SET warnings = warnings + ? WHERE id = ?').bind(FARM.warnings, uid),
-      mail(db, uid, 'warning', 'Coin farming: coins wiped, 2 warnings', `Blockyard noticed ${alts.length} brand-new accounts from your network sending you coins or items. Making extra accounts to farm coins isn't allowed, so your coins (and theirs) were wiped and you got 2 warnings. 3 warnings is a ban. If this was a mistake, tell the admin.`),
-      db.prepare("INSERT INTO admin_log (admin, path, detail, at) VALUES ('Blockyard', 'farm', ?, ?)").bind(JSON.stringify({ user: me.name, alts: alts.length }), now),
+      db.prepare("INSERT INTO admin_log (admin, path, detail, at) VALUES ('Blockyard', 'farm', ?, ?)").bind(JSON.stringify({ user: me.name, alts: results.length, flagged: true }), now),
     ]).then(() => true, (e) => { if (isConstraint(e)) return false; throw e; });
     if (!ok) return false;
-    await mailAdmin(ctx, 'farm', `Coin farming: ${me.name}`, `${me.name} got coins or items from ${alts.length} brand-new accounts made on their network. Their coins were wiped and they got 2 warnings. If that was a mistake, open Admin > Players > Manage.`).catch(() => {});
-    const w = await db.prepare('SELECT warnings FROM users WHERE id = ?').bind(uid).first();
-    if (w && w.warnings >= FARM.banAt && ctx.ban) await ctx.ban(me);
+    const alts = results.map((r) => r.name);
+    await mailAdmin(ctx, 'farm', `Possible coin farming: ${me.name}`, `${me.name} got coins or items from ${alts.length} brand-new accounts made on their network (${alts.slice(0, 6).join(', ')}). Nothing was done automatically. Open Manage to look at their coin history and decide.`, { manage: me.name, alts }).catch(() => {});
     return true;
   } catch (e) { return false; }
 }

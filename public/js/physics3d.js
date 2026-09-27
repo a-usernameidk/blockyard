@@ -2,6 +2,8 @@
 // always give the same run. The server replays runs with this exact file to check wins.
 import { Grid, decodeBlocks, scan, idx, B, BLOCKS, SX, SY, SZ } from './world.js';
 import { decodeReplay } from './replay.js';
+import { initLogic, logicStep } from './logic.js';
+import { GEAR_MODS } from './cosmetics.js';
 
 export const STEP3 = 1 / 60;
 export const P3 = {
@@ -53,7 +55,7 @@ export function createSim(world, grid) {
   for (const [x, y, z, c] of [...info.tps].sort((a, b) => idx(a[0], a[1], a[2]) - idx(b[0], b[1], b[2]))) { if (!tps.has(c)) tps.set(c, []); tps.get(c).push([x, y, z]); }
   // moving platforms: [x, y, z, axis] (axis 0 = x, 1 = y, 2 = z), sorted so every run is the same
   const movers = [...info.movers].sort((a, b) => idx(a[0], a[1], a[2]) - idx(b[0], b[1], b[2])).map(([x, y, z, t]) => [x, y, z, BLOCKS[t].mover]);
-  return {
+  const S = {
     tps, tpLock: false, movers, mOff: 0,
     grid, t: grid.t, info, obby: world.mode !== 'hangout',
     spawn, cp: null, cpIdx: -1,
@@ -63,6 +65,9 @@ export function createSim(world, grid) {
     deaths: 0, steps: 0, runSteps: 0, won: false, events: [],
     fallY: grid.lowest() - 8,
   };
+  // the world's Logic scripts (and switch blocks back to how they were built)
+  S.logic = initLogic(S, world.logic);
+  return S;
 }
 
 function cellKind(S, x, y, z) {
@@ -185,6 +190,7 @@ function around(S) {
 
 function die(S) {
   S.deaths++;
+  if (S.logic) S.logic.died = true;
   S.events.push({ t: 'die', x: S.p.x, y: S.p.y, z: S.p.z });
   const at = S.cp || S.spawn;
   S.p.x = at.x; S.p.y = at.y; S.p.z = at.z;
@@ -238,8 +244,10 @@ export function step3(S, value) {
   }
 
   const icy = S.onGround && under(S) === B.ice;
-  const G = S.mods; // gear (only in hangouts and minigames, never in checked runs)
-  const top = P3.speed * (S.boost > 0 ? P3.boost : 1) * (G && G.speed ? G.speed : 1);
+  // gear: your own (only in hangouts and minigames, never in checked runs), or gear a Logic script lent you
+  const L = S.logic, LM = L ? L.mods : null;
+  const G = L && L.tgear ? GEAR_MODS[L.tgear.id] || null : S.mods;
+  const top = P3.speed * (S.boost > 0 ? P3.boost : 1) * (G && G.speed ? G.speed : 1) * (LM ? LM.speed : 1);
   const tx = dx * top, tz = dz * top;
   const moving = f || s;
   const rate = !S.onGround ? P3.airAccel : icy ? (moving ? P3.iceAccel : P3.iceFriction) : (moving ? P3.accel : P3.friction);
@@ -254,7 +262,7 @@ export function step3(S, value) {
   const pressed = jumpHeld && !S.lastJump;
   S.lastJump = jumpHeld ? 1 : 0;
   if (jumpHeld && (S.onGround || (pressed && S.air < P3.coyote)) && S.v.y <= 0.001) {
-    S.v.y = P3.jump; S.onGround = false; S.air = P3.coyote;
+    S.v.y = P3.jump * (LM ? LM.jump : 1); S.onGround = false; S.air = P3.coyote;
     S.events.push({ t: 'jump', x: S.p.x, y: S.p.y, z: S.p.z });
   } else if (G) {
     if (S.onGround) { S.jumpsLeft = G.jumps || 0; S.fuel = G.jet || 0; }
@@ -265,7 +273,7 @@ export function step3(S, value) {
     }
   }
 
-  S.v.y -= P3.gravity * (G && G.grav ? G.grav : 1) * dt;
+  S.v.y -= P3.gravity * (G && G.grav ? G.grav : 1) * (LM ? LM.grav : 1) * dt;
   if (S.v.y < -P3.maxFall) S.v.y = -P3.maxFall;
 
   if (S.v.x) moveX(S, S.v.x * dt);
@@ -309,7 +317,7 @@ export function step3(S, value) {
       const old = S.cp;
       S.cpIdx = g.i; S.cp = { x: g.x + 0.5, y: g.y + 1, z: g.z + 0.5 };
       // a checkpoint made of several blocks only counts once
-      if (!old || Math.abs(old.x - S.cp.x) + Math.abs(old.z - S.cp.z) + Math.abs(old.y - S.cp.y) > 2.5) S.events.push({ t: 'checkpoint', x: S.cp.x, y: S.cp.y, z: S.cp.z });
+      if (!old || Math.abs(old.x - S.cp.x) + Math.abs(old.z - S.cp.z) + Math.abs(old.y - S.cp.y) > 2.5) { S.events.push({ t: 'checkpoint', x: S.cp.x, y: S.cp.y, z: S.cp.z }); if (L) L.cp = true; }
     } else if (gt === B.crumble && !S.crumbles.has(g.i)) {
       S.crumbles.set(g.i, S.steps);
       S.events.push({ t: 'crumble', i: g.i });
@@ -323,6 +331,7 @@ export function step3(S, value) {
     S.got.add(i); S.coins++;
     S.events.push({ t: 'coin', i, x: i % SX + 0.5, y: Math.floor(i / (SX * SZ)) + 0.5, z: Math.floor(i / SX) % SZ + 0.5 });
   }
+  if (L) { logicStep(S, { die }); if (S.won) return; }
   if (S.obby && (near & 4)) {
     S.won = true;
     S.events.push({ t: 'win', x: S.p.x, y: S.p.y, z: S.p.z });

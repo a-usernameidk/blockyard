@@ -1,6 +1,6 @@
 // Admin: chat reports, reported games (hide, delete, make them pay coins), players (coins, items,
 // passwords, kick, ban), the site announcement, and limited item stock.
-import { $, $$, el, session, show, go, addRoute, ask, toast, timeAgo, plural, openModal } from '../app.js';
+import { $, $$, el, session, show, go, addRoute, ask, toast, timeAgo, plural, openModal, closeModal } from '../app.js';
 import { api } from '../api.js';
 import { SHOP, KINDS, LIMITED, itemKey, findItem } from '../cosmetics.js';
 import { refreshWallet } from './account.js';
@@ -26,6 +26,19 @@ function setTab(t) {
 $$('[data-atab]').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.atab)));
 $('#admin-refresh').addEventListener('click', () => setTab(tab));
 
+// Warning 1, 2, 3, then the account can be deleted. The server never deletes by itself: when someone already
+// has 3 warnings it asks, and only a confirmed "Delete account" goes through.
+async function warnFlow(send, name) {
+  let r = await send({});
+  if (r && r.needConfirm) {
+    const ok = await ask(`Delete ${r.name || name}'s account?`, `${r.name || name} already has 3 warnings, so the next step is deleting their account. Their games, items and coins are deleted too. This can't be undone.`, [{ label: 'Delete account', value: true, cls: 'btn-danger' }]);
+    if (!ok) return { cancelled: true };
+    r = await send({ confirm: 'delete' });
+  }
+  return r;
+}
+const warnText = (r, name) => (r.cancelled ? 'Nothing changed.' : r.deleted ? `${r.name || name}'s account was deleted.` : `${r.name || name} has ${r.warnings} of 3 warnings now.`);
+
 async function loadChat() {
   const box = $('#admin-chat'); box.innerHTML = ''; $('#admin-msg').textContent = 'Loading…';
   try {
@@ -34,11 +47,22 @@ async function loadChat() {
     for (const r of reports) {
       box.append(el('div', { class: 'admin-row chat-report' },
         el('div', {}, el('h3', {}, `${r.target}`), el('p', { class: 'small' }, `Reported by ${r.reporter} for "${r.reason}", ${timeAgo(r.at)}.`)),
-        el('ol', { class: 'said' }, ...(r.messages.length ? r.messages.map((m) => el('li', {}, el('span', { class: 'small' }, new Date(m.at).toLocaleTimeString() + ' '), m.m)) : [el('li', { class: 'small' }, 'They had not said anything in that server.')])),
+        el('p', { class: 'small' }, r.room === 'DMs' ? 'Private messages: only the last few before the report were unlocked for you.' : 'The last few things they said in that server.'),
+        el('ol', { class: 'said' }, ...(r.messages.length ? r.messages.map((m) => el('li', {}, el('span', { class: 'small' }, new Date(m.at).toLocaleTimeString() + ' '), m.from ? el('b', {}, m.from + ': ') : null, m.m)) : [el('li', { class: 'small' }, 'They had not said anything in that server.')])),
         el('div', { class: 'row' },
           el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { if (await ask(`Ban ${r.target}?`, 'They get logged out, kicked from every server, and their games are hidden.', [{ label: 'Ban', value: true, cls: 'btn-danger' }])) { try { await api.admin('POST', '/chat/' + r.id, { action: 'ban' }); toast(`${r.target} banned.`); loadChat(); } catch (e) { toast(e.message); } } } }, 'Ban'),
-          el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => { try { await api.admin('POST', '/chat/' + r.id, { action: 'warn' }); toast(`${r.target} got a warning. The players who reported it got credit.`); loadChat(); } catch (e) { toast(e.message); } } }, 'Warn'),
-          el('button', { class: 'btn', type: 'button', onclick: async () => { try { await api.admin('POST', '/chat/' + r.id, { action: 'dismiss' }); loadChat(); } catch (e) { toast(e.message); } } }, 'Dismiss'),
+          el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => {
+            if (!(await ask(`Warn ${r.target}?`, 'They get a warning in their mailbox, and the players who reported it get credit.', [{ label: 'Give a warning', value: true, cls: 'btn-sun' }]))) return;
+            try { const w = await warnFlow((x) => api.admin('POST', '/chat/' + r.id, { action: 'warn', ...x }), r.target); toast(warnText(w, r.target)); loadChat(); } catch (e) { toast(e.message); }
+          } }, 'Warn'),
+          el('button', { class: 'btn', type: 'button', onclick: async () => {
+            const how = await ask('Dismiss this report?', `Was it just a mistake, or a false or spam report by ${r.reporter}? False reports can get the reporter a warning.`, [{ label: 'Just dismiss', value: 'plain' }, { label: `Dismiss + warn ${r.reporter}`, value: 'false', cls: 'btn-danger' }]);
+            if (!how) return;
+            try {
+              const w = await warnFlow((x) => api.admin('POST', '/chat/' + r.id, { action: 'dismiss', falseReport: how === 'false', ...x }), r.reporter);
+              toast(how === 'false' ? warnText(w, r.reporter) : 'Dismissed.'); loadChat();
+            } catch (e) { toast(e.message); }
+          } }, 'Dismiss'),
           el('button', { class: 'btn', type: 'button', onclick: () => manageUser(r.target) }, 'Manage'),
           el('a', { class: 'btn', href: '#/u/' + r.target }, 'Profile'))));
     }
@@ -57,7 +81,11 @@ async function loadGames() {
       const reasons = Object.entries(g.reasons).map(([r, n]) => `${n} ${r}`).join(', ');
       const act = (label, cls, action, extra) => el('button', { class: 'btn ' + cls, type: 'button', onclick: async (e) => {
         if ((action === 'delete' || action === 'warn') && e.currentTarget.dataset.sure !== '1') { e.currentTarget.dataset.sure = '1'; e.currentTarget.textContent = action === 'warn' ? 'Click again: take down + warn' : 'Click again to delete'; return; }
-        try { await api.admin('POST', '/games/' + g.id, { action, ...extra }); loadGames(); } catch (err) { toast(err.message); }
+        try {
+          if (action === 'warn') { const w = await warnFlow((x) => api.admin('POST', '/games/' + g.id, { action, ...extra, ...x }), g.creator); if (!w.cancelled) toast(warnText(w, g.creator)); }
+          else await api.admin('POST', '/games/' + g.id, { action, ...extra });
+          loadGames();
+        } catch (err) { toast(err.message); }
       } }, label);
       const reward = el('select', { 'aria-label': 'Coins this game pays' }, ...[0, 10, 25, 50, 100, 200].map((n) => el('option', { value: String(n) }, n ? `Pays ${n} coins` : 'Pays nothing')));
       if (![0, 10, 25, 50, 100, 200].includes(g.reward)) reward.append(el('option', { value: String(g.reward) }, `Pays ${g.reward} coins`));
@@ -136,13 +164,25 @@ export async function manageUser(name) {
       u.role !== 'builderpro' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('role', { role: 'builderpro' }, () => `${u.name} is a Builder Pro now! They got a mail about it.`) }, 'Make Builder Pro') : null,
       u.role ? el('button', { class: 'btn', type: 'button', onclick: () => act('role', { role: '' }, () => `${u.name} is a normal player again.`) }, 'Remove role') : null));
   // kick / ban
+  const warnNow = async () => {
+    if (!(await ask(`Warn ${u.name}?`, (u.warnings || 0) >= 3 ? 'They already have 3 warnings. Next you will be asked about deleting their account.' : `This will be warning ${(u.warnings || 0) + 1} of 3.`, [{ label: 'Give a warning', value: true, cls: 'btn-sun' }]))) { openModal('#manage-modal'); return; }
+    openModal('#manage-modal');
+    note.textContent = 'One sec…';
+    try { const r = await warnFlow((x) => api.adminAct(u.name, 'warn', x), u.name); note.textContent = warnText(r, u.name); if (r.deleted) { closeModal($('#manage-modal')); toast(warnText(r, u.name)); findUsers(); return; } openModal('#manage-modal'); setTimeout(() => manageUser(u.name).then(() => { $('#manage-body .msg').textContent = note.textContent; }), 250); } catch (e) { note.textContent = e.message; }
+  };
+  const deleteNow = async () => {
+    const ok = await ask(`Delete ${u.name}'s account?`, "Their games, items, coins and messages are deleted too. This can't be undone.", [{ label: 'Delete account', value: true, cls: 'btn-danger' }]);
+    if (!ok) { openModal('#manage-modal'); return; }
+    try { await api.adminAct(u.name, 'delete', { confirm: 'delete' }); closeModal($('#manage-modal')); toast(`${u.name}'s account was deleted.`); findUsers(); } catch (e) { openModal('#manage-modal'); note.textContent = e.message; }
+  };
   const safety = u.admin ? null : el('section', {}, el('h3', {}, `Safety: ${u.warnings || 0} of 3 warnings`),
-    el('p', { class: 'small' }, '3 warnings is an automatic ban. Coin farming with extra accounts gives 2 at once.'),
+    el('p', { class: 'small' }, 'Warning 1 → 2 → 3 → account deleted. Nothing happens by itself: automatic checks (like coin farming) only mail you, and you confirm every warning, ban and deletion.'),
     el('div', { class: 'row' },
-      el('button', { class: 'btn btn-sun', type: 'button', onclick: () => act('warn', {}, (r) => (r.banned ? `${u.name} hit 3 warnings and is banned.` : `${u.name} has ${r.warnings} warning${r.warnings === 1 ? '' : 's'} now.`)) }, 'Give a warning'),
+      el('button', { class: 'btn btn-sun', type: 'button', onclick: warnNow }, 'Give a warning'),
       u.warnings ? el('button', { class: 'btn', type: 'button', onclick: () => act('unwarn', {}, (r) => `${u.name} has ${r.warnings} warning${r.warnings === 1 ? '' : 's'} now.`) }, 'Remove a warning') : null),
     el('div', { class: 'row', style: 'margin-top:8px' },
       el('button', { class: 'btn', type: 'button', onclick: () => act('kick', {}, () => `${u.name} was removed from every 3D server.`) }, 'Kick from servers'),
+      el('button', { class: 'btn btn-danger', type: 'button', onclick: deleteNow }, 'Delete account'),
       el('button', { class: 'btn ' + (u.banned ? 'btn-grass' : 'btn-danger'), type: 'button', onclick: async () => { const b = !u.banned; if (await ask(`${b ? 'Ban' : 'Unban'} ${u.name}?`, b ? 'They get logged out, kicked from every server, cannot log back in, and all their games are hidden.' : 'They can log in again and their games come back.', [{ label: b ? 'Ban' : 'Unban', value: true, cls: 'btn-danger' }])) { openModal('#manage-modal'); act(b ? 'ban' : 'unban', {}, () => `${u.name} ${b ? 'banned' : 'unbanned'}.`); } else openModal('#manage-modal'); } }, u.banned ? 'Unban' : 'Ban')));
   const history = el('section', {}, el('h3', {}, 'Recent coins'),
     u.ledger.length ? el('ul', { class: 'ledger' }, ...u.ledger.map((l) => el('li', {}, el('span', {}, `${l.why} · ${timeAgo(l.at)}`), el('span', { class: l.delta < 0 ? 'minus' : 'plus' }, (l.delta > 0 ? '+' : '') + l.delta)))) : el('p', { class: 'small' }, 'Nothing yet.'));

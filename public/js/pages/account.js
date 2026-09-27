@@ -297,6 +297,7 @@ async function openMail() {
     el('p', {}, m.body),
     el('div', { class: 'row' },
       m.data && m.data.rate ? rateButtons(m) : null,
+      m.data && m.data.manage ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/u/' + m.data.manage); } }, `Manage ${m.data.manage}`) : null,
       m.data && m.data.claim ? el('button', { class: 'btn btn-sun', type: 'button', onclick: async (e) => { const b = e.currentTarget; try { const r = await api.mailAction(m.id, 'claim'); setWallet(r.wallet); toast(`+${r.coins} coins!`); b.textContent = 'Claimed'; } catch (err) { b.textContent = err.status === 409 ? 'Claimed' : err.message; } b.disabled = true; } }, `Claim ${m.data.claim} coins`) : null,
       m.kind === 'trade' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet/trades'); } }, 'See trades') : null,
       m.kind === 'gift' ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet'); } }, 'Open closet') : null,

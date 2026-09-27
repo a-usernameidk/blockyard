@@ -3,6 +3,37 @@
 import { json, fail, body, needUser, DAY, randomId, isConstraint } from './util.js';
 import { coinStmts, getWallet, mail, fixLook, cleanKeys, cleanCoins, swapStmts, noteTransfers, transferStmt, checkFarm } from './econ.js';
 import { levelOf } from '../public/js/cosmetics.js';
+import { MOD } from './mod.js';
+
+/* ---------------- private messages are locked in the database ---------------- */
+// DMs are saved encrypted (AES-GCM, with a key made from the SALT secret), so nobody can read them by looking in
+// the database, the admin included. The server only unlocks them to show them to the two friends, or, when one of
+// them reports the other, the last few messages go to the admin so they can check the report.
+let dmKeyP = null, dmKeyFor = null;
+function dmKey(env) {
+  const secret = 'blockyard-dm|' + (env.SALT || 'blockyard');
+  if (!dmKeyP || dmKeyFor !== secret) {
+    dmKeyFor = secret;
+    dmKeyP = crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)).then((raw) => crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']));
+  }
+  return dmKeyP;
+}
+const b64 = (u8) => btoa(String.fromCharCode(...u8));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+export async function sealDm(env, text) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await dmKey(env), new TextEncoder().encode(text)));
+  const all = new Uint8Array(12 + ct.length); all.set(iv); all.set(ct, 12);
+  return 'e1:' + b64(all);
+}
+export async function openDm(env, body) {
+  if (!String(body).startsWith('e1:')) return String(body); // saved before messages were locked
+  try {
+    const all = unb64(body.slice(3));
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: all.slice(0, 12) }, await dmKey(env), all.slice(12));
+    return new TextDecoder().decode(pt);
+  } catch (e) { return '(this message could not be unlocked)'; }
+}
 
 export const SOCIAL_SCHEMA = [
   'CREATE TABLE IF NOT EXISTS dms (id INTEGER PRIMARY KEY AUTOINCREMENT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0)',
@@ -63,7 +94,7 @@ async function pulse(ctx) {
     db.prepare("SELECT id FROM live_trades WHERE (a = ? OR b = ?) AND status = 'open' AND updated_at > ? ORDER BY updated_at DESC LIMIT 1").bind(user.id, user.id, Date.now() - LIVE.idleMins * 60e3).first(),
   ]);
   const events = [
-    ...newDms.results.map((d) => ({ kind: 'dm', from: d.name, text: d.body.slice(0, 80), at: d.at })),
+    ...(await Promise.all(newDms.results.map(async (d) => ({ kind: 'dm', from: d.name, text: (await openDm(ctx.env, d.body)).slice(0, 80), at: d.at })))),
     ...newMail.results.map((x) => ({ kind: 'mail', mail: x.kind, text: x.title, at: x.at })),
   ].sort((a, b) => a.at - b.at);
   return json({ now: Date.now(), mail: mailN.n, dms: dmN.n, trades: tradeN.n, events, invite: invite ? { id: invite.id, from: invite.name } : null, live: open ? open.id : null });
@@ -77,6 +108,7 @@ async function dmList(ctx) {
     WHERE (d.from_id = ? OR d.to_id = ?) AND u.banned = 0 ORDER BY d.at DESC LIMIT 300`).bind(user.id, user.id, user.id).all();
   const chats = new Map();
   for (const r of results) {
+    if (!chats.has(r.name)) r.body = await openDm(ctx.env, r.body); // only the newest one per chat is shown
     let c = chats.get(r.name);
     if (!c) { c = { name: r.name, color: lookColor(r.look), last: r.body.slice(0, 60), at: r.at, mine: r.from_id === user.id, unread: 0 }; chats.set(r.name, c); }
     if (r.to_id === user.id && !r.read) c.unread++;
@@ -86,10 +118,14 @@ async function dmList(ctx) {
 async function dmThread(ctx, name) {
   const user = needUser(ctx), { db } = ctx;
   const other = await findUser(db, name);
-  const { results } = await db.prepare(`SELECT from_id, body, at FROM dms WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?) ORDER BY at DESC LIMIT ?`)
+  const { results } = await db.prepare(`SELECT id, from_id, body, at FROM dms WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?) ORDER BY at DESC LIMIT ?`)
     .bind(user.id, other.id, other.id, user.id, DM.keep).all();
   await db.prepare('UPDATE dms SET read = 1 WHERE to_id = ? AND from_id = ? AND read = 0').bind(user.id, other.id).run();
-  return json({ name: other.name, color: lookColor(other.look), friends: await areFriends(db, user.id, other.id), messages: results.reverse().map((r) => ({ me: r.from_id === user.id, text: r.body, at: r.at })) });
+  // messages saved before they were locked get locked now
+  const old = results.filter((r) => !String(r.body).startsWith('e1:'));
+  if (old.length) await db.batch(await Promise.all(old.map(async (r) => db.prepare('UPDATE dms SET body = ? WHERE id = ?').bind(await sealDm(ctx.env, r.body), r.id)))).catch(() => {});
+  const messages = await Promise.all(results.reverse().map(async (r) => ({ me: r.from_id === user.id, text: await openDm(ctx.env, r.body), at: r.at })));
+  return json({ name: other.name, color: lookColor(other.look), friends: await areFriends(db, user.id, other.id), messages });
 }
 async function dmSend(ctx, name, input) {
   const user = needUser(ctx), { db } = ctx;
@@ -100,14 +136,18 @@ async function dmSend(ctx, name, input) {
   if (!text) fail(400, 'Type a message first.');
   const recent = await db.prepare('SELECT COUNT(*) AS n FROM dms WHERE from_id = ? AND at > ?').bind(user.id, Date.now() - 60e3).first();
   if (recent.n >= DM.perMinute) fail(429, 'Slow down a little! Try again in a minute.');
-  await db.prepare('INSERT INTO dms (from_id, to_id, body, at) VALUES (?, ?, ?, ?)').bind(user.id, other.id, text, Date.now()).run();
+  await db.prepare('INSERT INTO dms (from_id, to_id, body, at) VALUES (?, ?, ?, ?)').bind(user.id, other.id, await sealDm(ctx.env, text), Date.now()).run();
   return json({ ok: true }, 201);
 }
 async function dmReport(ctx, name, input) {
   const user = needUser(ctx), { db } = ctx;
   const other = await findUser(db, name);
-  const { results } = await db.prepare('SELECT body AS m, at FROM dms WHERE from_id = ? AND to_id = ? ORDER BY at DESC LIMIT 20').bind(other.id, user.id).all();
-  if (!results.length) fail(400, `${other.name} hasn't sent you anything to report.`);
+  // only the last few messages of this chat (both sides, for context) are unlocked for the admin
+  const sent = await db.prepare('SELECT 1 FROM dms WHERE from_id = ? AND to_id = ? LIMIT 1').bind(other.id, user.id).first();
+  if (!sent) fail(400, `${other.name} hasn't sent you anything to report.`);
+  const rows = (await db.prepare(`SELECT from_id, body, at FROM dms WHERE ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)) AND at <= ? ORDER BY at DESC LIMIT ?`)
+    .bind(other.id, user.id, user.id, other.id, Date.now(), MOD.reportLines).all()).results;
+  const results = await Promise.all(rows.map(async (r) => ({ from: r.from_id === other.id ? other.name : user.name, m: await openDm(ctx.env, r.body), at: r.at })));
   const reason = ['mean', 'spam', 'personal', 'cheating', 'other'].includes(input.reason) ? input.reason : 'other';
   await db.prepare('INSERT INTO chat_reports (reporter, reporter_name, target_id, target, room, reason, messages, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(user.id, user.name, other.id, other.name, 'DMs', reason, JSON.stringify(results.reverse()), Date.now()).run();

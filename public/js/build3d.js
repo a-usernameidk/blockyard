@@ -6,6 +6,8 @@ import { avatarParts } from './avatar3d.js';
 import { openRoom } from './net.js';
 import { sfx, unlockAudio } from './audio.js';
 import { startWorld } from './play3d.js';
+import { logicEditor } from './logicEditor.js';
+import { cleanLogic } from './logic.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -21,11 +23,13 @@ const h = (tag, attrs = {}, ...kids) => {
 };
 const TOOLS = [['place', 'Place', '1'], ['break', 'Break', '2'], ['paint', 'Paint', '3'], ['pick', 'Pick', '4']];
 const ORDER = ['grass', 'dirt', 'stone', 'wood', 'brick', 'sand', 'snow', 'leaves', 'metal', 'plastic', 'neon', 'glass', 'ghost', 'ice', 'lava', 'bounce', 'speed', 'crumble', 'checkpoint', 'beltN', 'beltE', 'beltS', 'beltW', 'teleport', 'moveX', 'moveZ', 'moveY', 'disco', 'goal', 'spawn', 'coin'];
+const LOGIC_ORDER = ['trigger', 'switchOn', 'switchOff', 'marker'];
+const TYCOON_ORDER = ['tclaim', 'tbutton', 'tbuild'];
 export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') + '|' + (w.b || ''); for (let i = 0; i < s.length; i++) { hh ^= s.charCodeAt(i); hh = Math.imul(hh, 16777619) >>> 0; } return hh.toString(36) + ':' + s.length; };
 
 // opts: { world, title, me, look, room (ticket fn or null), canPublish, onChange(world), onPublish(world, proof), onFriends(), onExit(), low }
 export function startBuilder(root, opts) {
-  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on' };
+  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on', logic: cleanLogic(opts.world.logic) };
   const typeOf = (m) => (m.game || m.mode);
   let grid = decodeBlocks(opts.world.b || '');
   let proof = opts.proof || null;
@@ -63,14 +67,28 @@ export function startBuilder(root, opts) {
   const palette = h('div', { class: 'b3-blocks' });
   const swatches = h('div', { class: 'swatches b3-colors' });
   const blockTip = h('p', { class: 'small b3-tip' });
-  const side = h('div', { class: 'b3-side' },
-    h('div', { class: 'b3-tools' }, toolRow, h('div', { class: 'row' }, boxBtn, undoBtn, redoBtn)),
-    h('h3', {}, 'Blocks'), palette, h('h3', {}, 'Color'), swatches, blockTip,
-    h('h3', {}, 'World'), h('label', {}, 'Type ', modeSel), h('label', {}, 'Sky ', skySel), h('label', {}, 'Gear ', gearSel));
   const moveRow = h('div', { class: 'b3-move', 'aria-label': 'Move the camera' },
     ...[['Up', 'up'], ['Forward', 'f'], ['Down', 'down'], ['Left', 'l'], ['Back', 'b'], ['Right', 'r']].map(([l, k]) => h('button', { class: 'tbtn', type: 'button', 'data-mv': k }, l)));
-  const hint = h('p', { class: 'hint' }, 'Click to use the tool, drag to look around. W A S D fly, Space up, Shift down, scroll to zoom. Right-click breaks. Keys: 1 Place, 2 Break, 3 Paint, 4 Pick, B box fill, T test, Ctrl+Z undo.');
-  const layout = h('div', { class: 'b3' }, side, h('div', { class: 'b3-main' }, stage, moveRow));
+  // everything lives in one wide dock right under the building view (no floating window, no little scroll box)
+  const logicEd = logicEditor({ logic: meta.logic, onChange: (l) => setMeta({ logic: l }) });
+  const specBtn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', title: 'Watch: follow a teammate, or a slow tour of your world (V)' }, 'Spectate');
+  const viewNote = h('p', { class: 'small' });
+  const panes = {
+    build: h('div', { class: 'b3-pane b3-pane-build' },
+      h('div', { class: 'b3-tools' }, toolRow, boxBtn, undoBtn, redoBtn, blockTip),
+      h('div', { class: 'b3-dock-row' }, h('div', { class: 'b3-dock-blocks' }, palette), h('div', { class: 'b3-dock-colors' }, h('h3', {}, 'Color'), swatches))),
+    world: h('div', { class: 'b3-pane', hidden: true },
+      h('div', { class: 'b3-world' }, h('label', {}, 'Type ', modeSel), h('label', {}, 'Sky ', skySel), h('label', {}, 'Gear ', gearSel)),
+      h('p', { class: 'small' }, 'Minigame worlds run rounds for everyone in a server. Tycoon needs claim pads and buy buttons (Build tab, Tycoon blocks): each color is one plot. Gear (speed coils, jetpacks...) works in hangouts, Tag and Paintball unless you turn it off, and Logic can lend gear for a while in any world.')),
+    logic: h('div', { class: 'b3-pane', hidden: true }, logicEd.el),
+    view: h('div', { class: 'b3-pane', hidden: true }, h('div', { class: 'row' }, specBtn), viewNote,
+      h('p', { class: 'small' }, 'Spectate follows a teammate who is building with you (◀ ▶ to switch). With nobody here it slowly tours around your spawn so you can see your world like a player would.')),
+  };
+  const tabBtns = Object.keys(panes).map((k) => h('button', { class: 'tab', role: 'tab', type: 'button', 'data-dock': k, 'aria-selected': String(k === 'build'), onclick: () => setDock(k) }, { build: 'Build', world: 'World', logic: 'Logic', view: 'View' }[k]));
+  function setDock(k) { for (const b of tabBtns) b.setAttribute('aria-selected', String(b.dataset.dock === k)); for (const [n, p] of Object.entries(panes)) p.hidden = n !== k; }
+  const dock = h('div', { class: 'b3-dock' }, h('div', { class: 'tabs b3-dock-tabs', role: 'tablist', 'aria-label': 'Builder tools' }, ...tabBtns), ...Object.values(panes));
+  const hint = h('p', { class: 'hint' }, 'Click to use the tool, drag to look around. W A S D fly, Space up, Shift down, scroll to zoom. Right-click breaks. Keys: 1 Place, 2 Break, 3 Paint, 4 Pick, B box fill, T test, V spectate, Ctrl+Z undo.');
+  const layout = h('div', { class: 'b3 b3-docked' }, stage, moveRow, dock);
   root.replaceChildren(bar, layout, hint);
 
   let R;
@@ -80,12 +98,15 @@ export function startBuilder(root, opts) {
 
   /* ---------------- palette ---------------- */
   function renderPalette() {
-    palette.replaceChildren(...ORDER.map((id) => {
+    const btn = (id) => {
       const t = B[id], b = BLOCKS[t];
       const col = b.tint ? PALETTE[ed.color] : b.color || '#ffd23f';
       return h('button', { class: 'b3-block', type: 'button', 'aria-pressed': String(ed.block === t), title: b.name + (b.tip ? ': ' + b.tip : ''), onclick: () => { ed.block = t; if (ed.tool !== 'place' && ed.tool !== 'paint') setTool('place'); renderPalette(); } },
         h('span', { class: 'b3-chip' + (b.glow ? ' glow' : '') + (b.see ? ' see' : '') + (id === 'coin' ? ' coin' : ''), style: `--c:${col}` }), b.name);
-    }));
+    };
+    palette.replaceChildren(h('h3', {}, 'Blocks'), h('div', { class: 'b3-grid' }, ...ORDER.map(btn)),
+      h('h3', {}, 'Logic blocks'), h('div', { class: 'b3-grid' }, ...LOGIC_ORDER.map(btn)),
+      h('h3', {}, 'Tycoon blocks'), h('div', { class: 'b3-grid' }, ...TYCOON_ORDER.map(btn)));
     swatches.replaceChildren(...PALETTE.map((c, i) => h('button', { class: 'swatch', type: 'button', style: `background:${c}`, 'aria-label': 'Color ' + (i + 1), 'aria-pressed': String(ed.color === i), onclick: () => { ed.color = i; renderPalette(); } })));
     const b = BLOCKS[ed.block];
     blockTip.textContent = b.tip || (b.tint ? 'Pick a color for this block below.' : '');
@@ -123,6 +144,8 @@ export function startBuilder(root, opts) {
       if (t) { setTool(t); return; }
       if (e.code === 'KeyB') { setBox(!ed.box); return; }
       if (e.code === 'KeyT') { test(); return; }
+      if (e.code === 'KeyV') { setSpec(!spec); return; }
+      if (spec && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) { e.preventDefault(); nextSpec(e.code === 'ArrowLeft' ? -1 : 1); return; }
       if (e.key === 'Enter' && opts.room) { e.preventDefault(); chatInput.focus(); return; }
     }
     const k = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', Space: 'up', ShiftLeft: 'down', ShiftRight: 'down', KeyQ: 'tl', KeyE: 'tr' }[e.code];
@@ -173,6 +196,7 @@ export function startBuilder(root, opts) {
   });
   canvas.addEventListener('pointerup', (e) => {
     if (!drag || drag.id !== e.pointerId) return;
+    if (spec) { drag = null; return; }
     const d = drag; drag = null;
     if (d.moved) return;
     const r = canvas.getBoundingClientRect();
@@ -271,6 +295,7 @@ export function startBuilder(root, opts) {
     if (f.gear) gearSel.value = meta.gear;
     if (f.mode || f.game != null) modeSel.value = typeOf(meta);
     if (f.n && document.activeElement !== nameIn) nameIn.value = meta.n;
+    if (f.logic && !send) logicEd.set(meta.logic);
     if (send && room) room.send({ t: 'op', op: { k: 'meta', f }, n: ++seq });
     changed();
   }
@@ -280,7 +305,7 @@ export function startBuilder(root, opts) {
   let nameT = 0;
   nameIn.addEventListener('input', () => { meta.n = nameIn.value.trim().slice(0, 40) || 'My world'; clearTimeout(nameT); nameT = setTimeout(() => setMeta({ n: meta.n }), 500); });
 
-  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), b: encodeBlocks(grid) }; }
+  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), ...(meta.logic && meta.logic.length ? { logic: meta.logic } : {}), b: encodeBlocks(grid) }; }
   let changeT = 0;
   function changed() {
     clearTimeout(changeT);
@@ -320,7 +345,8 @@ export function startBuilder(root, opts) {
           // the room's copy is the real one: load it, then re-send anything we did while disconnected
           const mine = pending.size ? [...pending.keys()].map((i) => [i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ, grid.t[i], grid.c[i]]) : [];
           grid = decodeBlocks(m.doc.b); R.setGrid(grid);
-          meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky, game: m.doc.game || '' };
+          meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky, game: m.doc.game || '', gear: m.doc.gear === 'off' ? 'off' : 'on', logic: cleanLogic(m.doc.logic) };
+          logicEd.set(meta.logic); gearSel.value = meta.gear;
           R.setSky(meta.sky); skySel.value = meta.sky; modeSel.value = typeOf(meta); if (document.activeElement !== nameIn) nameIn.value = meta.n;
           pending.clear();
           if (mine.length) { applyLocal(mine); share(mine); }
@@ -362,6 +388,25 @@ export function startBuilder(root, opts) {
     });
   }
   chatForm.addEventListener('submit', (e) => { e.preventDefault(); const t = chatInput.value.trim(); if (t && room) room.send({ t: 'chat', m: t }); chatInput.value = ''; });
+
+  /* ---------------- spectating: follow a teammate, or tour the world ---------------- */
+  let spec = null; // { id } of a teammate, or { tour: angle }
+  function setSpec(on) {
+    if (on) {
+      const mates = [...team.values()].filter((t) => t.c);
+      spec = mates.length ? { id: mates[0].id } : { tour: 0 };
+    } else spec = null;
+    specBtn.setAttribute('aria-pressed', String(!!spec)); specBtn.textContent = spec ? 'Stop spectating' : 'Spectate';
+    viewNote.textContent = !spec ? '' : spec.id ? `Watching ${team.get(spec.id).name}. ◀ ▶ switch.` : 'Touring your world. Press V or Stop to build again.';
+    say(spec ? (spec.id ? `Watching ${team.get(spec.id).name}` : 'Touring your world') : '');
+  }
+  function nextSpec(d) {
+    const mates = [...team.values()].filter((t) => t.c);
+    if (!spec || !spec.id || !mates.length) return;
+    const i = mates.findIndex((t) => t.id === spec.id);
+    spec.id = mates[((i + d) % mates.length + mates.length) % mates.length].id; setSpec(true);
+  }
+  specBtn.addEventListener('click', () => setSpec(!spec));
 
   /* ---------------- testing ---------------- */
   function test() {
@@ -414,6 +459,16 @@ export function startBuilder(root, opts) {
     if (k.has('up')) cam.y += sp; if (k.has('down')) cam.y -= sp;
     if (k.has('tl')) cam.yaw -= dt * 1.8; if (k.has('tr')) cam.yaw += dt * 1.8;
     clampCam();
+    if (spec) {
+      if (spec.id && team.get(spec.id) && team.get(spec.id).c) { const c = team.get(spec.id).c; cam.x = c[0]; cam.y = c[1]; cam.z = c[2]; const dx = c[3] + 0.5 - c[0], dy = c[4] + 0.5 - c[1], dz = c[5] + 0.5 - c[2]; cam.yaw = Math.atan2(dx, -dz); cam.pitch = Math.atan2(dy, Math.hypot(dx, dz)); }
+      else if (spec.id) setSpec(false);
+      else {
+        spec.tour += dt * 0.25;
+        const sp = [...grid.each()].find((b) => b[3] === B.spawn) || [64, 0, 64];
+        cam.x = sp[0] + Math.sin(spec.tour) * 22; cam.z = sp[2] - Math.cos(spec.tour) * 22; cam.y = sp[1] + 12;
+        cam.yaw = Math.atan2(sp[0] - cam.x, -(sp[2] - cam.z)); cam.pitch = -0.45;
+      }
+    }
     if (tipT > 0) { tipT -= dt; if (tipT <= 0) tip.classList.remove('on'); }
     const eye = [cam.x, cam.y, cam.z], tgt = [cam.x + f[0], cam.y + f[1], cam.z + f[2]];
     const scene = [], lines = [{ pts: floorGrid(), color: [0.1, 0.14, 0.3, 0.22] }];
@@ -422,7 +477,7 @@ export function startBuilder(root, opts) {
       if (t === B.coin) scene.push({ prim: 'cyl', color: hexRGB('#ffd23f'), glow: 0.35, m: M4.trs(x + 0.5, y + 0.5, z + 0.5, clock * 2, 0, Math.PI / 2, 0.62, 0.1, 0.62) });
     }
     // what the mouse points at
-    if (mouse && !drag) {
+    if (mouse && !drag && !spec) {
       const tg = target(mouse.x, mouse.y);
       if (tg) {
         const tool = ed.tool;

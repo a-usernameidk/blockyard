@@ -2,7 +2,7 @@
 import { $, $$, el, session, show, go, addRoute, ask, toast, needLogin, pipCanvas, plural, timeAgo, onLeave, currentView } from '../app.js';
 import { api, isOnline } from '../api.js';
 import { progress, ACHIEVEMENTS } from '../progress.js';
-import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice } from '../cosmetics.js';
+import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice, rarityOf as baseRarity, RARITY, MAX_BUY } from '../cosmetics.js';
 import { drawPip, drawPet, drawGear } from '../art.js';
 import { setWallet, openAccount } from './account.js';
 
@@ -110,7 +110,7 @@ $$('[data-ctab]').forEach((b) => b.addEventListener('click', () => go(b.dataset.
 function renderWallet() {
   const w = progress.wallet;
   $('#shop-wallet').textContent = w ? `${w.coins} coins` : 'Guest';
-  $('#closet-lede').textContent = w ? 'Everything is worth coins. Limited items run out, then the only way to get one is a trade.' : 'Log in to buy, sell and trade. Coins come from built-in levels, 3D obbies, Endless, the daily challenge and levels that pay coins.';
+  $('#closet-lede').textContent = w ? 'The shop changes every day: rarer things are in stock less often. Limited items run out and only come back if the admin restocks them. You can own more than one of anything.' : 'Log in to buy, sell and trade. Coins come from built-in levels, 3D obbies, Endless, the daily challenge and levels that pay coins.';
 }
 // same rule as the server: the bigger of today's deal and a shop-wide sale (limited items are never on sale)
 const dealPrice = (key, item) => {
@@ -118,8 +118,11 @@ const dealPrice = (key, item) => {
   const f = shopInfo.featured, sale = f.sale && f.sale.until > Date.now() && !item.stock ? f.sale.off : 0;
   return Math.floor(item.price * (100 - Math.max(f.items.includes(key) ? f.off : 0, sale)) / 100);
 };
+// normal items rotate in and out of the shop each day (rarer ones are in stock less often)
+const outToday = (key) => !!(shopInfo && shopInfo.outToday && shopInfo.outToday.includes(key));
 function priceTag(key, item) {
   if (item.need) return el('span', { class: 'item-price' }, item.hint);
+  if (outToday(key)) return el('span', { class: 'item-price' }, `${item.price} coins`, el('span', { class: 'stock out' }, ' Not in stock today'));
   const p = dealPrice(key, item);
   const left = item.stock && shopInfo ? shopInfo.stock[key] : null;
   return el('span', { class: 'item-price' }, p < item.price ? [el('s', {}, String(item.price)), ` ${p} coins`] : `${p} coins`, item.stock ? el('span', { class: 'stock' + (left === 0 ? ' out' : '') }, left === 0 ? ' Sold out' : left != null ? ` ${left} left` : ' Limited') : null);
@@ -149,7 +152,7 @@ function render() {
       shopInfo && shopInfo.featured.sale && shopInfo.featured.sale.until > Date.now() ? el('p', { class: 'sale-banner' }, `SALE! Everything is ${shopInfo.featured.sale.off}% off (except limited items) until ${new Date(shopInfo.featured.sale.until).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`) : null,
       deals.length ? el('div', { class: 'shelf' }, el('h3', {}, `Today's deals: ${shopInfo.featured.off}% off`), el('div', { class: 'items' }, ...deals.map((f) => itemButton(f.kind, f.item, { status: statusOf(f.kind, f.item), onclick: choose(f.kind, f.item) })))) : null,
       el('div', { class: 'shelf' }, el('h3', {}, 'Limited'),
-        soldOut ? el('p', { class: 'small' }, `${soldOut} limited ${soldOut === 1 ? 'item has' : 'items have'} sold out and will never come back. Find them on the `, el('a', { href: '#/closet/market' }, 'Reseller shop'), ' or trade for them.') : null,
+        soldOut ? el('p', { class: 'small' }, `${soldOut} limited ${soldOut === 1 ? 'item has' : 'items have'} sold out. Find them on the `, el('a', { href: '#/closet/market' }, 'Reseller shop'), ' or trade for them.') : null,
         el('div', { class: 'items' }, ...limited.map((f) => itemButton(f.kind, f.item, { status: statusOf(f.kind, f.item), onclick: choose(f.kind, f.item) })))),
       el('div', { class: 'shelf' }, el('div', { class: 'shelf-head' }, el('h3', {}, 'Everything'), chips), el('div', { class: 'items' }, ...SHOP[kind].filter((item) => !gone(kind, item)).map((item) => itemButton(kind, item, { status: statusOf(kind, item), onclick: choose(kind, item) })))));
   } else {
@@ -178,15 +181,24 @@ function renderCaption() {
     if (!item.stock) buttons.push(el('button', { class: 'btn btn-danger', type: 'button', onclick: () => sell(key, item) }, `Sell for ${sellPrice(item)}`));
     buttons.push(el('button', { class: 'btn', type: 'button', onclick: () => resell(key, item) }, 'Sell on Reseller shop'));
   }
-  if (!owned) {
+  if (!owned || (w && canTrade(item))) {
     if (!w) buttons.push(el('button', { class: 'btn btn-sun', type: 'button', onclick: () => openAccount() }, 'Log in to buy'));
     else if (item.need) buttons.push(progress.canUnlock(item) ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item) }, 'Unlock it') : el('button', { class: 'btn', type: 'button', disabled: true }, 'Locked'));
     else {
       const price = dealPrice(key, item), left = item.stock && shopInfo ? shopInfo.stock[key] : null;
-      const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item) }, `Buy for ${price} coins`);
-      if (left === 0) { b.disabled = true; b.textContent = 'Sold out forever. Try the Reseller shop'; }
-      else if (w.coins < price) { b.disabled = true; b.textContent = `Need ${price - w.coins} more coins`; }
-      buttons.push(b);
+      const most = Math.max(1, Math.min(MAX_BUY, left == null ? MAX_BUY : left));
+      const qty = el('input', { type: 'number', min: '1', max: String(most), value: '1', class: 'qty', 'aria-label': 'How many' });
+      const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: () => buy(key, item, Math.max(1, Math.min(most, Math.floor(+qty.value || 1)))) });
+      const upd = () => {
+        const n = Math.max(1, Math.min(most, Math.floor(+qty.value || 1)));
+        b.disabled = false;
+        b.textContent = `${owned ? 'Buy more' : 'Buy'}${n > 1 ? ` ${n}` : ''} for ${price * n} coins`;
+        if (left === 0) { b.disabled = true; b.textContent = 'Sold out. Try the Reseller shop'; }
+        else if (outToday(key)) { b.disabled = true; b.textContent = 'Not in stock today. Check back tomorrow'; }
+        else if (w.coins < price * n) { b.disabled = true; b.textContent = `Need ${price * n - w.coins} more coins`; }
+      };
+      qty.addEventListener('input', upd); upd();
+      buttons.push(el('label', { class: 'qty-label' }, 'How many ', qty), b);
     }
   }
   cap.append(el('b', {}, item.name), item.need && !owned ? el('span', { class: 'small' }, ` ${item.hint}.`) : null, statsLine(key, item), el('div', { class: 'row' }, ...buttons));
@@ -197,16 +209,16 @@ async function wear(k, id) {
   } else progress.equipLocal(k, id);
   pick = null; render();
 }
-async function buy(key, item) {
+async function buy(key, item, qty = 1) {
   if (!session.user) { needLogin('Buying needs an account, so your coins are safe on the server.'); return; }
   try {
-    const r = await api.buy(key);
+    const r = await api.buy(key, qty);
     setWallet(r.wallet);
     const f = findItem(key);
     await api.look({ [f.kind]: f.id }).then((x) => setWallet(x.wallet)).catch(() => {});
     progress.stat('bought'); progress.flush();
     import('../audio.js').then((a) => a.sfx('buy')).catch(() => {});
-    toast(`New ${f.kind === 'color' ? 'color' : f.kind}: ${item.name}!`);
+    toast(qty > 1 ? `You got ${qty} ${item.name}!` : `New ${f.kind === 'color' ? 'color' : f.kind}: ${item.name}!`);
     if (item.stock) try { shopInfo = await api.shop(); } catch (e) { /* ok */ }
     pick = null; render(); renderWallet();
   } catch (e) { toast(e.message); }
@@ -368,7 +380,7 @@ export async function shopPanel(host, { close, looked }) {
     else {
       const price = dealPrice(key, item), left = item.stock && shopInfo ? shopInfo.stock[key] : null;
       const b = el('button', { class: 'btn btn-sun', type: 'button', onclick: async () => { b.disabled = true; await buy(key, item); looked({ ...progress.data.equip }); draw(); } }, `Buy for ${price} coins`);
-      if (left === 0) { b.disabled = true; b.textContent = 'Sold out'; } else if (w.coins < price) { b.disabled = true; b.textContent = `Need ${price - w.coins} more coins`; }
+      if (left === 0) { b.disabled = true; b.textContent = 'Sold out'; } else if (outToday(key)) { b.disabled = true; b.textContent = 'Not in stock today'; } else if (w.coins < price) { b.disabled = true; b.textContent = `Need ${price - w.coins} more coins`; }
       btns.push(b);
     }
     cap.append(el('b', {}, item.name), el('div', { class: 'row' }, ...btns));
@@ -386,12 +398,9 @@ async function loadStats(force) {
 }
 // What something really sells for: the average of its last 10 Reseller sales, or the shop price if nobody sold one yet.
 function worthOf(key, item) { const s = stats && stats[key]; return s && s.rap ? s.rap : valueOf(item); }
-const RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic'];
 function rarityOf(key, item) {
   const s = stats && stats[key], n = s ? s.exist : null;
-  let r;
-  if (item.stock) r = item.stock <= 15 ? 4 : item.stock <= 60 ? 3 : 2;
-  else r = item.price >= 2500 ? 3 : item.price >= 700 ? 2 : item.price >= 200 ? 1 : 0;
+  let r = baseRarity(item);
   if (item.stock && n != null && n <= 5 && s.left === 0) r = 5; // almost none left in the whole game
   return RARITY[r];
 }
@@ -413,7 +422,7 @@ async function resell(key, item) {
   const guess = Math.max(1, worthOf(key, item));
   const input = el('input', { type: 'number', min: '1', max: '1000000', value: String(guess), 'aria-label': 'Price in coins' });
   const note = el('p', { class: 'small' });
-  const upd = () => { const p = Math.floor(+input.value || 0); note.textContent = p > 0 ? `If it sells you get ${p - Math.floor(p * 0.1)} coins (the Reseller shop keeps 10%). It leaves your closet until it sells, and you can take it down any time.` : 'Pick a price.'; };
+  const upd = () => { const p = Math.floor(+input.value || 0); note.textContent = p > 0 ? `If it sells you get all ${p} coins. It leaves your closet until it sells, and you can take it down any time.` : 'Pick a price.'; };
   input.addEventListener('input', upd); upd();
   const ok = await ask(`Sell ${item.name} on the Reseller shop`, `Other players can buy it for the price you pick. Real worth right now: ${worthOf(key, item)} coins.`, [{ label: 'Put it up for sale', value: true, cls: 'btn-sun' }], el('div', {}, el('label', { class: 'label' }, 'Price ', input), note));
   if (!ok) return;
@@ -440,7 +449,7 @@ async function renderMarket() {
     el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { try { const r = await api.marketCancel(l.id); setWallet(r.wallet); renderWallet(); toast('Taken down. It is back in your closet.'); loadStats(true); renderMarket(); } catch (e) { toast(e.message); } } }, 'Take it down')) : null; });
   const sellable = w ? Object.keys(w.items).filter((k) => (w.items[k] || 0) > 0).map(findItem).filter((f) => f && canTrade(f.item)) : [];
   box.replaceChildren(
-    el('p', { class: 'lede' }, `Buy and sell with other players. This is the only place to get limited items after they sell out. Sellers pick the price and get it minus ${Math.round(m.fee * 100)}%.`),
+    el('p', { class: 'lede' }, `Buy and sell with other players. This is the only place to get limited items after they sell out. Sellers pick the price and get all of it.`),
     el('h2', {}, 'For sale'),
     forSale.length ? el('div', { class: 'items' }, ...forSale.map((x) => tile(x.f, el('span', { class: 'item-price' }, `from ${x.low} coins`, el('span', { class: 'stock' }, ` ${x.n} for sale`)), () => showListings(x.item)))) : el('p', { class: 'small' }, 'Nothing for sale yet. Be the first!'),
     session.user ? el('h2', {}, 'Your things for sale') : null,

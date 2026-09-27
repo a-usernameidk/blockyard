@@ -1,8 +1,10 @@
-// Keeping Blockyard fair: warnings (3 = ban), ways to earn warnings back, reports that hide a level
-// until the admin looks at it, Builder / Builder Pro pay controls, and the admin's mail settings.
+// Keeping Blockyard fair: 3 strikes (warning 1, 2, 3, then the account can be deleted), ways to earn warnings back,
+// reports that hide a level until the admin looks at it, Builder / Builder Pro pay controls, and the admin's mail settings.
+// Nothing here punishes anyone by itself: automatic checks only flag things for the admin, and every warning,
+// ban and account deletion is the admin's choice (with a "are you sure?" first). There are no IP bans.
 import { json, fail, isConstraint } from './util.js';
 
-export const MOD = { hideAfter: 10, banAt: 3, goodReportsPerWarning: 3, popularLikes: 20, popularPlays: 100 };
+export const MOD = { hideAfter: 10, strikes: 3, goodReportsPerWarning: 3, popularLikes: 20, popularPlays: 100, reportLines: 6 };
 // what each role may set a level's pay to
 export const PAY = { builder: [0, 10, 25], builderpro: [0, 10, 25, 50, 100] };
 export const ROLES = ['', 'builder', 'builderpro'];
@@ -12,15 +14,25 @@ const ADMIN_NOTIFY = { bpPay: true, farm: true, review: true, rate: true };
 const mailQ = (db, uid, kind, title, text, data = null) => db.prepare('INSERT INTO mail (user_id, kind, title, body, data, at) VALUES (?, ?, ?, ?, ?, ?)').bind(uid, kind, String(title).slice(0, 90), String(text).slice(0, 600), data ? JSON.stringify(data) : null, Date.now());
 
 /* ---------------- warnings ---------------- */
-export async function addWarning(ctx, uid, why, n = 1) {
+// Warning 1 -> 2 -> 3 -> account deletion. Only the admin calls this. Someone who already has 3 warnings
+// isn't warned again: the answer says the next step is deleting their account, and the admin has to confirm that
+// (confirm: 'delete'), which deletes it.
+export async function addWarning(ctx, uid, why, { confirm } = {}) {
   const { db } = ctx;
-  await db.batch([
-    db.prepare('UPDATE users SET warnings = warnings + ? WHERE id = ?').bind(n, uid),
-    mailQ(db, uid, 'warning', n > 1 ? `You got ${n} warnings` : 'You got a warning', `${why} 3 warnings is a ban. You can earn warnings back by making levels lots of people like and play, and by sending reports that turn out to be right.`),
-  ]);
   const u = await db.prepare('SELECT id, name, warnings FROM users WHERE id = ?').bind(uid).first();
-  if (u && u.warnings >= MOD.banAt && ctx.ban) await ctx.ban(u);
-  return u ? u.warnings : 0;
+  if (!u) return { warnings: 0, gone: true };
+  if (u.warnings >= MOD.strikes) {
+    if (confirm !== 'delete') return { warnings: u.warnings, needConfirm: true, name: u.name };
+    if (!ctx.deleteAccount) fail(500, 'Deleting accounts is not set up.');
+    await ctx.deleteAccount(u, why);
+    return { warnings: u.warnings, deleted: true, name: u.name };
+  }
+  const n = u.warnings + 1;
+  await db.batch([
+    db.prepare('UPDATE users SET warnings = warnings + 1 WHERE id = ?').bind(uid),
+    mailQ(db, uid, 'warning', `Warning ${n} of ${MOD.strikes}`, `${why} ${n < MOD.strikes ? `After ${MOD.strikes} warnings, the next one deletes your account.` : 'That was your last warning: one more and your account is deleted.'} You can earn warnings back by making levels lots of people like and play, and by sending reports that turn out to be right.`),
+  ]);
+  return { warnings: n, name: u.name };
 }
 export async function removeWarning(db, uid, why) {
   const r = await db.prepare('UPDATE users SET warnings = warnings - 1 WHERE id = ? AND warnings > 0').bind(uid).run();

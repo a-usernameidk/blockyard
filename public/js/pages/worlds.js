@@ -261,3 +261,18 @@ addRoute(/^#\/w\/([A-Za-z0-9-]+)\/play$/, (m) => enterWorld(m[1]));
 addRoute(/^#\/w\/([A-Za-z0-9-]+)$/, (m) => showWorld(m[1]));
 addRoute(/^#\/join\/([A-Za-z0-9]+)$/, (m) => enterWorld(null, m[1]));
 export { OBBIES };
+
+// Quick play: jump straight into a random world (Blockyard's own, or one a player made and shared).
+$('#random-world').addEventListener('click', async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  let id = null;
+  try {
+    const mine = WORLDS3D.filter((w) => !w.hidden).map((w) => w.id);
+    const r = (await isOnline()) ? await api.randomWorld().catch(() => null) : null;
+    // about half the time a player world, if there are any
+    id = r && r.id && Math.random() < 0.5 ? r.id : mine[Math.floor(Math.random() * mine.length)];
+    toast(`Off to ${(builtinWorld(id) || {}).name || (r && r.name) || 'a random world'}!`);
+  } finally { b.disabled = false; }
+  if (id) go('#/w/' + id + '/play');
+});

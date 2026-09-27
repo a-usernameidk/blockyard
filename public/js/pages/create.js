@@ -5,6 +5,7 @@ import { openEditor, closeEditor, currentLevel, validate, setMsg, updateMeta, ne
 import { store, mine, myWorlds, newId, api, isOnline } from '../api.js';
 import { progress } from '../progress.js';
 import { emptyWorld, normalizeWorld } from '../world.js';
+import { TEMPLATES_2D, TEMPLATES_3D } from '../templates.js';
 import { drawThumb, thumbWindow, drawBackground, drawTile } from '../render2d.js';
 import { drawPip } from '../art.js';
 import { drawWorldThumb, thumbOfWorld } from '../thumb3d.js';
@@ -146,14 +147,14 @@ async function newProject(kind, from) {
   else { const lv = from || newLevel('adventure'); mine.save({ ...lv, by: 'You' }); go('#/edit/local/' + lv.id); }
 }
 $('#new-2d').addEventListener('click', async () => {
-  const pick = await ask('New 2D level', 'Adventure: run and jump to the goal. Rush: you run by yourself and tap to survive.', [
-    { label: 'Adventure level', value: 'adventure', cls: 'btn-grass' }, { label: 'Rush level', value: 'rush', cls: 'btn-sun' }]);
-  if (pick) newProject('2d', newLevel(pick));
+  const pick = await ask('New 2D level', 'Pick where to start. Adventure: run and jump to the goal. Rush: you run by yourself and tap to survive.',
+    Object.entries(TEMPLATES_2D).map(([k, t], i) => ({ label: t.name, value: k, cls: ['btn-grass', 'btn-sun', 'btn-danger'][i] || '' })));
+  if (pick) newProject('2d', TEMPLATES_2D[pick].make());
 });
 $('#new-3d').addEventListener('click', async () => {
-  const pick = await ask('New 3D world', 'An obby is a course with a goal at the end. A hangout is a place to chill and chat.', [
-    { label: 'Obby', value: 'obby', cls: 'btn-grass' }, { label: 'Hangout', value: 'hangout', cls: 'btn-sun' }]);
-  if (pick) newProject('3d', emptyWorld(pick));
+  const pick = await ask('New 3D world', 'Pick where to start: a blank obby or hangout, a ready-made minigame (Race, Tag, King of the Hill, Rising Lava, Paintball, Tycoon), or a Logic demo.',
+    Object.entries(TEMPLATES_3D).map(([k, t], i) => ({ label: t.name, value: k, cls: i === 0 ? 'btn-grass' : i === 1 ? 'btn-sun' : '' })));
+  if (pick) newProject('3d', TEMPLATES_3D[pick].make());
 });
 $('#create-login').addEventListener('click', () => openAccount('signup'));
 onRemix((lv) => newProject('2d', lv));

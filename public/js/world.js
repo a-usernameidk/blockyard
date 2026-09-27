@@ -1,6 +1,7 @@
 // 3D worlds: the block list, the saved format, and a fast block grid.
 // Shared by the browser (renderer, builder, game) and the server (checking runs, collaborative editing).
 import { cleanText, isRude } from './format.js';
+import { cleanLogic } from './logic.js';
 
 export const SX = 128, SY = 64, SZ = 128;
 export const MAX_BLOCKS = 24000;
@@ -44,10 +45,20 @@ export const BLOCKS = [
   { id: 'moveY', name: 'Elevator', pat: 37, tint: true, mover: 1, tip: 'Moving platform. Goes 4 blocks up and back down.' },
   { id: 'disco', name: 'Disco floor', pat: 38, color: '#b06cff', glow: true, tip: 'A dance floor that flashes colors. Great for dance parties.' },
   { id: 'snow2', name: 'Snow pile', pat: 7, color: '#ffffff', tip: 'Soft snow.' },
+  // Logic blocks: the world's Logic scripts use them (by their color)
+  { id: 'trigger', name: 'Trigger pad', pat: 36, tint: true, glow: true, see: true, ghost: true, logic: true, tip: 'Walk into it to start Logic: "When I touch a Trigger" of this color.' },
+  { id: 'switchOn', name: 'Switch block', pat: 10, tint: true, logic: true, tip: 'Solid until Logic hides it ("Hide Switch blocks" of this color).' },
+  { id: 'switchOff', name: 'Hidden switch', pat: 22, tint: true, see: true, ghost: true, logic: true, tip: 'You walk through it until Logic shows it ("Show Switch blocks" of this color).' },
+  { id: 'marker', name: 'Marker', pat: 22, tint: true, see: true, ghost: true, logic: true, tip: 'A spot Logic can teleport players to ("Teleport to Marker" of this color).' },
+  // Tycoon minigame blocks (by color: each color is one player's plot)
+  { id: 'tclaim', name: 'Claim pad', pat: 18, tint: true, glow: true, tycoon: true, tip: 'Tycoon: step on it to claim the plot of this color.' },
+  { id: 'tbutton', name: 'Buy button', pat: 11, tint: true, glow: true, tycoon: true, tip: 'Tycoon: the plot owner buys it to build the Tycoon blocks of its color near it. Closer to the claim pad = cheaper.' },
+  { id: 'tbuild', name: 'Tycoon block', pat: 10, tint: true, tycoon: true, tip: 'Tycoon: hidden until the owner of this color buys the nearest buy button.' },
 ];
 export const B = Object.fromEntries(BLOCKS.map((b, i) => [b ? b.id : 'air', i]));
 BLOCKS.forEach((b, i) => { if (b) b.n = i; });
 
+export const COLOR_NAMES = ['White', 'Gray', 'Slate', 'Navy', 'Red', 'Orange', 'Yellow', 'Green', 'Teal', 'Blue', 'Purple', 'Pink', 'Brown', 'Tan', 'Sky', 'Forest'];
 export const PALETTE = ['#f4f4f4', '#a3abc2', '#4a5378', '#1d2340', '#e63946', '#ff6b35', '#ffd23f', '#5fd07c',
   '#2ec4b6', '#3a86ff', '#b06cff', '#ff5d8f', '#8d5a2b', '#f6d98a', '#7cc8ff', '#1f8a4c'];
 
@@ -57,9 +68,9 @@ export const SKIES = {
   night: { name: 'Night', top: '#0b1030', bottom: '#2a3570', fog: '#223066', sun: [0.3, 0.8, -0.4], light: 0.55, amb: 0.42 },
   space: { name: 'Space', top: '#05060f', bottom: '#1b1440', fog: '#120f2e', sun: [0.5, 0.7, 0.2], light: 0.9, amb: 0.45 },
 };
-export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just chill)', race: 'Minigame: Race (needs a Goal)', tag: 'Minigame: Tag', koth: 'Minigame: King of the Hill (Goal blocks are the hill)', lava: 'Minigame: Rising Lava', paint: 'Minigame: Paintball' };
+export const MODES = { obby: 'Obby (reach the goal)', hangout: 'Hangout (just chill)', race: 'Minigame: Race (needs a Goal)', tag: 'Minigame: Tag', koth: 'Minigame: King of the Hill (Goal blocks are the hill)', lava: 'Minigame: Rising Lava', paint: 'Minigame: Paintball', tycoon: 'Minigame: Tycoon (claim pads + buy buttons)' };
 // Minigame worlds are hangouts with a game: the live server runs rounds of it (see games.js).
-export const GAME_TYPES = ['race', 'tag', 'koth', 'lava', 'paint'];
+export const GAME_TYPES = ['race', 'tag', 'koth', 'lava', 'paint', 'tycoon'];
 
 export const solidType = (t) => t !== 0 && !BLOCKS[t].entity && !BLOCKS[t].ghost;
 
@@ -164,6 +175,9 @@ export function normalizeWorld(w, { needGoal } = {}) {
   const world = { v: 1, n: name, mode, sky: SKIES[w.sky] ? w.sky : 'day', b: encodeBlocks(grid) };
   if (game) world.game = game;
   if (w.gear === 'off') world.gear = 'off'; // the maker turned gear off for this world
+  if (game === 'tycoon' && !grid.t.some((t) => t === B.tclaim)) throw new Error('Tycoon worlds need at least one Tycoon claim pad (and buy buttons of the same color).');
+  const logic = cleanLogic(w.logic);
+  if (logic.length) world.logic = logic;
   return { world, grid, info };
 }
 export function worldNameOk(n) { return !isRude(n); }

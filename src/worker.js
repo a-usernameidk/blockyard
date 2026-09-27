@@ -100,6 +100,7 @@ const COLUMNS = [
   "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT ''",
   'ALTER TABLE users ADD COLUMN warnings INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE users ADD COLUMN signup_ip TEXT',
+  'ALTER TABLE users ADD COLUMN tos_at INTEGER',
   'ALTER TABLE users ADD COLUMN good_reports INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE users ADD COLUMN seen INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE servers ADD COLUMN bots INTEGER NOT NULL DEFAULT 0',
@@ -163,6 +164,7 @@ async function handle(request, env, url) {
   const db = env.DB;
   const ctx = { db, env, request, url, ip: await visitorId(request, env), user: await sessionUser(db, request, env) };
   ctx.ban = (u) => banUser(ctx, u);
+  ctx.deleteAccount = (u, why) => deleteAccount(ctx, u, why);
   let m;
 
   // accounts
@@ -189,6 +191,13 @@ async function handle(request, env, url) {
 
   // published levels and worlds
   if (path === '/games' && method === 'GET') return listGames(ctx);
+  // quick play: a random public 3D world someone made (the page mixes in Blockyard's own worlds too)
+  if (path === '/games/random' && method === 'GET') {
+    const n = await ctx.db.prepare("SELECT COUNT(*) AS n FROM games WHERE kind = '3d' AND hidden = 0 AND visibility = 'public'").first();
+    if (!n.n) return json({ id: null });
+    const r = await ctx.db.prepare("SELECT id, name FROM games WHERE kind = '3d' AND hidden = 0 AND visibility = 'public' LIMIT 1 OFFSET ?").bind(Math.floor(Math.random() * n.n)).first();
+    return json({ id: r ? r.id : null, name: r ? r.name : null, total: n.n });
+  }
   if (path === '/games' && method === 'POST') return publish(ctx, await body(request));
   if ((m = path.match(/^\/games\/([A-Za-z0-9]{8})$/))) {
     if (method === 'GET') return getGame(ctx, m[1]);
@@ -337,6 +346,8 @@ async function signup(ctx, input) {
   // a welcome gift in the mailbox (only the first few new accounts from the same place each day get one)
   if (madeToday < 3 && SIGNUP_BONUS) await mailStmt(db, id, 'welcome', `Welcome to Blockyard! Here are ${SIGNUP_BONUS} coins`, 'Press Claim to get your welcome coins. Spend them in the Closet on hats, colors, pets and more!', null, { claim: SIGNUP_BONUS }).run();
   await addEvent(db, 'signup', ip);
+  // they agreed to the rules and terms before making the account
+  if (input.tos) await db.prepare('UPDATE users SET tos_at = ? WHERE id = ?').bind(Date.now(), id).run();
   const token = await newSession(db, id);
   return remember(json(await account(ctx, { id, name: input.name, progress, econ: 1 }, { token, recovery }), 201), input, token);
 }
@@ -398,9 +409,20 @@ async function saveProgress(ctx, input) {
 }
 async function deleteMe(ctx) {
   const user = needUser(ctx);
-  const { db } = ctx;
+  await ctx.db.batch(wipeAccount(ctx.db, user));
+  return withCookie(json({ ok: true }), '', 0);
+}
+// The admin deleted an account (the step after 3 warnings, always confirmed first). Admins can't be deleted.
+async function deleteAccount(ctx, u, why) {
+  const { db, env } = ctx;
+  if (isAdmin(env, u)) fail(400, "You can't delete an admin's account.");
+  await kickEverywhere(env, db, u.id, 'This account was deleted.').catch(() => {});
+  await db.batch([...wipeAccount(db, u),
+    db.prepare("INSERT INTO admin_log (admin, path, detail, at) VALUES (?, 'delete-account', ?, ?)").bind(ctx.user ? ctx.user.name : 'Blockyard', JSON.stringify({ user: u.name, why: String(why || '').slice(0, 200) }), Date.now())]);
+}
+function wipeAccount(db, user) {
   const mineG = 'SELECT id FROM games WHERE user_id = ?';
-  await db.batch([
+  return [
     ...['likes', 'plays', 'reports'].map((t) => db.prepare(`DELETE FROM ${t} WHERE game_id IN (${mineG})`).bind(user.id)),
     db.prepare(`UPDATE projects SET game_id = NULL WHERE game_id IN (${mineG})`).bind(user.id),
     db.prepare('DELETE FROM games WHERE user_id = ?').bind(user.id),
@@ -411,9 +433,9 @@ async function deleteMe(ctx) {
     db.prepare('DELETE FROM dms WHERE from_id = ? OR to_id = ?').bind(user.id, user.id),
     db.prepare("UPDATE live_trades SET status = 'cancelled' WHERE (a = ? OR b = ?) AND status IN ('invite', 'open')").bind(user.id, user.id),
     db.prepare("UPDATE trades SET status = 'cancelled' WHERE status = 'open' AND (from_id = ? OR to_id = ?)").bind(user.id, user.id),
+    db.prepare('DELETE FROM listings WHERE seller = ? AND status = \'open\'').bind(user.id),
     db.prepare('DELETE FROM users WHERE id = ?').bind(user.id),
-  ]);
-  return withCookie(json({ ok: true }), '', 0);
+  ];
 }
 
 /* ---------------- players ---------------- */
@@ -1027,21 +1049,36 @@ async function admin(ctx, path, method) {
   }
   let m = path.match(/^\/chat\/(\d+)$/);
   if (m && method === 'POST') {
-    const { action } = await body(ctx.request);
+    const bodyIn = await body(ctx.request), { action } = bodyIn;
     const r = await db.prepare('SELECT * FROM chat_reports WHERE id = ?').bind(Number(m[1])).first();
     if (!r) fail(404, 'That report is gone.');
+    const input = { action, confirm: bodyIn.confirm, falseReport: bodyIn.falseReport };
     if (action === 'ban' || action === 'warn') {
       const u = await db.prepare('SELECT id, name FROM users WHERE id = ?').bind(r.target_id).first();
       if (u && isAdmin(env, u)) fail(400, `You can't ${action} an admin.`);
       const open = await db.prepare("SELECT reporter FROM chat_reports WHERE target_id = ? AND status = 'open'").bind(r.target_id).all();
+      let w = null;
       if (u && action === 'ban') await banUser(ctx, u);
-      if (u && action === 'warn') await addWarning(ctx, u.id, `An admin read a report about what you said (${r.reason}) and gave you a warning. Be kind in chat!`);
+      if (u && action === 'warn') {
+        w = await addWarning(ctx, u.id, `An admin read a report about what you said (${r.reason}) and gave you a warning. Be kind in chat!`, { confirm: input.confirm });
+        if (w.needConfirm) return json({ ok: false, ...w });
+      }
       await db.prepare("UPDATE chat_reports SET status = 'done' WHERE target_id = ? AND status = 'open'").bind(r.target_id).run();
       await creditReporters(db, open.results.map((x) => x.reporter));
+      return json({ ok: true, ...(w || {}) });
     } else if (action === 'dismiss') {
+      // a false, mean or spam report: the admin can warn whoever sent it (their choice, never automatic)
+      let w = null;
+      if (input.falseReport) {
+        const rep = await db.prepare('SELECT id, name FROM users WHERE id = ?').bind(r.reporter).first();
+        if (rep && !isAdmin(env, rep)) {
+          w = await addWarning(ctx, rep.id, `You reported ${r.target}, but the admin found the report was false or spam. Only report real problems.`, { confirm: input.confirm });
+          if (w.needConfirm) return json({ ok: false, ...w });
+        }
+      }
       await db.prepare("UPDATE chat_reports SET status = 'dismissed' WHERE id = ?").bind(r.id).run();
+      return json({ ok: true, ...(w || {}) });
     } else fail(400, 'Unknown action.');
-    return json({ ok: true });
   }
   m = path.match(/^\/games\/([A-Za-z0-9]{8})$/);
   if (m && method === 'POST') {
@@ -1055,12 +1092,15 @@ async function admin(ctx, path, method) {
       // reviewed and it's bad: stays hidden, the maker gets a warning, and the players who reported it get credit
       const g = await db.prepare('SELECT id, name, user_id FROM games WHERE id = ?').bind(m[1]).first();
       if (!g) fail(404, 'That game is gone.');
+      let w = { warnings: 0 };
+      if (g.user_id) {
+        w = await addWarning(ctx, g.user_id, `Your level "${g.name}" was reviewed and taken down${input.note ? ': ' + String(input.note).slice(0, 200) : '.'}`, { confirm: input.confirm });
+        if (w.needConfirm) return json({ ok: false, ...w });
+      }
       await db.prepare('UPDATE games SET hidden = 1 WHERE id = ?').bind(g.id).run();
       const reps = await db.prepare('SELECT who FROM reports WHERE game_id = ?').bind(g.id).all();
-      let warnings = 0;
-      if (g.user_id) warnings = await addWarning(ctx, g.user_id, `Your level "${g.name}" was reviewed and taken down${input.note ? ': ' + String(input.note).slice(0, 200) : '.'}`);
       await creditReporters(db, reps.results.map((x) => (String(x.who).startsWith('u:') ? x.who.slice(2) : null)));
-      return json({ ok: true, warnings });
+      return json({ ok: true, ...w });
     } else if (action === 'reward') {
       const amount = Math.floor(Number(input.amount) || 0);
       if (amount < 0 || amount > 1000) fail(400, 'Rewards can be 0 to 1000 coins.');
@@ -1118,9 +1158,7 @@ async function admin(ctx, path, method) {
     if (!f || !f.item.stock) fail(400, "That isn't a limited item.");
     const left = Math.floor(Number(input.left));
     if (!(left >= 0 && left <= 100000)) fail(400, 'Pick a number from 0 to 100000.');
-    // limited items never come back: you can take stock away, but not add more
-    const now = await db.prepare('SELECT left FROM stock WHERE item = ?').bind(f.key).first();
-    if (now && left > now.left) fail(400, `Limited items never come back once they're gone, so you can't restock them (${now.left} left).`);
+    // limited items never restock by themselves; only the admin (the owner) can put more in
     await db.prepare('INSERT INTO stock (item, left) VALUES (?, ?) ON CONFLICT (item) DO UPDATE SET left = excluded.left').bind(f.key, left).run();
     return json({ ok: true });
   }
@@ -1188,17 +1226,21 @@ async function admin(ctx, path, method) {
     if (action === 'kick') { if (isAdmin(env, u)) fail(400, "You can't kick an admin."); await kickEverywhere(env, db, u.id, 'An admin removed you from this server.'); return json({ ok: true }); }
     if (isAdmin(env, u)) fail(400, "You can't ban an admin.");
     if (action === 'ban') await banUser(ctx, u);
-    else if (action === 'warn' || action === 'unwarn') {
-      // 3 warnings is a ban
-      const up = action === 'warn';
+    else if (action === 'warn') {
+      // warning 1, 2, 3, then deleting the account (the admin has to confirm that)
+      const w = await addWarning(ctx, u.id, `${user.name} gave you a warning.${input.note ? ' "' + String(input.note).slice(0, 200) + '"' : ''}`, { confirm: input.confirm });
+      return json({ ok: !w.needConfirm, ...w });
+    } else if (action === 'delete') {
+      if (input.confirm !== 'delete') fail(400, 'Confirm first: deleting an account can not be undone.');
+      await deleteAccount(ctx, u, input.note || 'deleted by the admin');
+      return json({ ok: true, deleted: true });
+    } else if (action === 'unwarn') {
       await db.batch([
-        db.prepare(`UPDATE users SET warnings = MAX(0, warnings ${up ? '+' : '-'} 1) WHERE id = ?`).bind(u.id),
-        up ? mailStmt(db, u.id, 'warning', 'You got a warning', `${user.name} gave you a warning.${input.note ? ' "' + String(input.note).slice(0, 200) + '"' : ''} 3 warnings is a ban.`)
-          : mailStmt(db, u.id, 'warning', 'A warning was removed', `${user.name} took away one of your warnings. Nice!`),
+        db.prepare('UPDATE users SET warnings = MAX(0, warnings - 1) WHERE id = ?').bind(u.id),
+        mailStmt(db, u.id, 'warning', 'A warning was removed', `${user.name} took away one of your warnings. Nice!`),
       ]);
       const w = await db.prepare('SELECT warnings FROM users WHERE id = ?').bind(u.id).first();
-      if (up && w.warnings >= 3) await banUser(ctx, u);
-      return json({ ok: true, warnings: w.warnings, banned: up && w.warnings >= 3 });
+      return json({ ok: true, warnings: w.warnings });
     } else if (action === 'unban') {
       await db.batch([
         db.prepare('UPDATE users SET banned = 0, warnings = MIN(warnings, 2) WHERE id = ?').bind(u.id),
