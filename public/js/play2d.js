@@ -222,7 +222,12 @@ function confetti() {
 }
 function showToast(text) { toast = { text, life: 1.4 }; }
 
-const TRAIL_COLORS = { sparkle: ['#ffffff', '#ffd23f'], bubbles: ['#bfefff'], hearts: ['#ff5d8f'], notes: ['#1d2340'], fire: ['#ff5a1f', '#ffb02e', '#ffd23f'], stars: ['#ffd23f', '#fff6c9'], lightning: ['#7cc8ff', '#ffffff', '#ffe66d'], confetti: ['#ff5d8f', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], snow: ['#ffffff', '#dff4ff'], galaxy: ['#5a3fd6', '#b06cff', '#ffffff', '#7cc8ff'] };
+const TRAIL_COLORS = { sparkle: ['#ffffff', '#ffd23f'], bubbles: ['#bfefff'], hearts: ['#ff5d8f'], notes: ['#1d2340'], fire: ['#ff5a1f', '#ffb02e', '#ffd23f'], stars: ['#ffd23f', '#fff6c9'], lightning: ['#7cc8ff', '#ffffff', '#ffe66d'], confetti: ['#ff5d8f', '#ffd23f', '#44c06a', '#3a86ff', '#b06cff'], snow: ['#ffffff', '#dff4ff'], galaxy: ['#5a3fd6', '#b06cff', '#ffffff', '#7cc8ff'],
+  leaves: ['#44c06a', '#2a8a45', '#a7e163'], mint: ['#2ec4b6', '#bff5ee'], lava: ['#ff5a1f', '#b5121b', '#ffb02e'], ice: ['#bfe6ff', '#ffffff', '#7cc8ff'],
+  candy: ['#ff5d8f', '#ffffff', '#7cc8ff'], ocean: ['#0077b6', '#48cae4', '#caf0f8'], toxic: ['#39ff14', '#9dff7a', '#1d2340'], sakura: ['#ffb7c5', '#ff8fb1', '#fff0f5'],
+  shadow: ['#1d2340', '#3d405b'], sunset: ['#ff9f1c', '#ff5d8f', '#b06cff'], goldtrail: ['#ffd23f', '#e0b12a', '#fff6c9'], void: ['#14161f', '#5a3fd6', '#b06cff'] };
+// trails drawn as soft round blobs (the rest have their own shapes, or squares)
+const ROUND_TRAILS = new Set(['leaves', 'mint', 'lava', 'candy', 'ocean', 'toxic', 'sakura', 'shadow', 'sunset', 'goldtrail', 'void']);
 function spawnTrail(dt) {
   const kind = look.trail, p = G.p;
   if (!kind || kind === 'none' || G.dead || kind === 'rainbow') return;
@@ -231,7 +236,7 @@ function spawnTrail(dt) {
   const moving = G.rush || Math.abs(p.vx) > 40 || !p.onGround;
   if (!moving) return;
   trailT = kind === 'fire' ? 0.03 : 0.07;
-  const cols = TRAIL_COLORS[kind];
+  const cols = TRAIL_COLORS[kind] || ['#ffffff']; // a trail without its own colors still works
   cosmetic.push({ kind, x: p.x + p.w / 2 - (G.rush ? p.w / 2 : 0) + (Math.random() - 0.5) * 8, y: p.y + p.h * (0.3 + Math.random() * 0.5), vx: (Math.random() - 0.5) * 30, vy: kind === 'fire' || kind === 'bubbles' ? -40 - Math.random() * 30 : (Math.random() - 0.5) * 30, life: 0.7, max: 0.7, col: cols[Math.floor(Math.random() * cols.length)], rot: Math.random() * 6 });
 }
 
@@ -300,6 +305,7 @@ function drawCosmetic(c) {
   else if (c.kind === 'hearts') { ctx.beginPath(); ctx.moveTo(0, s); ctx.bezierCurveTo(-s * 1.6, -s * 0.4, -s * 0.5, -s * 1.5, 0, -s * 0.4); ctx.bezierCurveTo(s * 0.5, -s * 1.5, s * 1.6, -s * 0.4, 0, s); ctx.fill(); }
   else if (c.kind === 'notes') { ctx.beginPath(); ctx.ellipse(0, s, s * 0.7, s * 0.5, -0.4, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(s * 0.4, -s * 1.2, 1.8, s * 2.2); }
   else if (c.kind === 'lightning') { ctx.rotate(c.rot * 0.3); ctx.beginPath(); ctx.moveTo(-s * 0.3, -s * 1.4); ctx.lineTo(s * 0.5, -s * 0.2); ctx.lineTo(0, -s * 0.1); ctx.lineTo(s * 0.3, s * 1.4); ctx.lineTo(-s * 0.5, s * 0.1); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill(); }
+  else if (ROUND_TRAILS.has(c.kind)) { ctx.beginPath(); ctx.arc(0, 0, s * 0.6, 0, Math.PI * 2); ctx.fill(); }
   else { ctx.fillRect(-s / 2, -s / 2, s, s); }
   ctx.restore();
   ctx.globalAlpha = 1;
