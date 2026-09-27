@@ -76,7 +76,7 @@ export const takeItem = (db, uid, key) => [
 export const itemStmts = (db, uid, key, n) => (n > 0 ? [giveItem(db, uid, key)] : [...takeItem(db, uid, key), tidy(db, uid)]);
 export const tidy = (db, a, b = a) => db.prepare('DELETE FROM inventory WHERE qty = 0 AND user_id IN (?, ?)').bind(a, b);
 // a message in someone's mailbox
-export const mail = (db, uid, kind, title, text) => db.prepare('INSERT INTO mail (user_id, kind, title, body, at) VALUES (?, ?, ?, ?, ?)').bind(uid, kind, title.slice(0, 90), text.slice(0, 600), Date.now());
+export const mail = (db, uid, kind, title, text, data = null) => db.prepare('INSERT INTO mail (user_id, kind, title, body, data, at) VALUES (?, ?, ?, ?, ?, ?)').bind(uid, kind, title.slice(0, 90), text.slice(0, 600), data ? JSON.stringify(data) : null, Date.now());
 const parse = (t, fallback = {}) => { try { const v = JSON.parse(t || ''); return v && typeof v === 'object' ? v : fallback; } catch (e) { return fallback; } };
 
 const owns = (items, kind, id) => FREE.includes(id) || (items[kind + ':' + id] || 0) > 0;
@@ -110,7 +110,7 @@ async function starCount(db, uid) {
   const { results } = await db.prepare("SELECT stars FROM level_progress WHERE user_id = ? AND level LIKE 'b-%'").bind(uid).all();
   return results.reduce((n, r) => n + popcount(r.stars & 7), 0);
 }
-async function badges(db, uid) {
+export async function badges(db, uid) {
   const [c, d] = await Promise.all([
     db.prepare("SELECT what FROM claims WHERE user_id = ? AND what LIKE 'b:%'").bind(uid).all(),
     db.prepare('SELECT COUNT(*) AS n FROM daily WHERE user_id = ? AND won = 1').bind(uid).first(),
@@ -578,7 +578,7 @@ async function newTrade(ctx, input) {
   await db.batch([
     db.prepare('INSERT INTO trades (id, from_id, to_id, give, want, give_coins, want_coins, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .bind(id, user.id, to.id, JSON.stringify(give), JSON.stringify(want), giveCoins, wantCoins, Date.now()),
-    mail(db, to.id, 'trade', `${user.name} wants to trade!`, `${user.name} sent you a trade offer. Open Closet → Trades to see it.`),
+    mail(db, to.id, 'trade', `${user.name} wants to trade!`, `${user.name} sent you a trade offer. Open Shop → Trades to see it.`),
   ]);
   return json({ ok: true, id }, 201);
 }
@@ -628,7 +628,7 @@ async function tradeAction(ctx, id, input) {
     fail(409, "This trade can't happen anymore. Someone doesn't have those items or coins now.");
   }
   await fixLook(db, A);
-  await mail(db, A, 'trade', 'Trade accepted!', `${user.name} accepted your trade. Your new stuff is in your closet.`).run().catch(() => {});
+  await mail(db, A, 'trade', 'Trade accepted!', `${user.name} accepted your trade. Your new stuff is in My Items.`).run().catch(() => {});
   const wallet = await fixLook(db, Bid);
   await noteTransfers(ctx, A, Bid, give, want, t.give_coins, t.want_coins, 'trade');
   return json({ ok: true, wallet });

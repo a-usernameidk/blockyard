@@ -31,7 +31,7 @@ export const ACHIEVEMENTS = [
   { id: 'proven', name: 'Proven', text: 'Beat your own level in Test' },
   { id: 'publisher', name: 'Published', text: 'Publish a level or world' },
   { id: 'teamwork', name: 'Teamwork', text: 'Build with a friend' },
-  { id: 'shopper', name: 'Fresh look', text: 'Buy something in the closet' },
+  { id: 'shopper', name: 'Fresh look', text: 'Buy something in the shop' },
   // the hard (and weird) ones
   { id: 'nightowl', name: 'Night Owl', text: 'Play between midnight and 4 AM', hard: true },
   { id: 'jumps25k', name: 'Pogo Stick Brain', text: 'Jump 25,000 times', hard: true },
@@ -43,7 +43,8 @@ export const ACHIEVEMENTS = [
   { id: 'daily30', name: 'Creature of Habit', text: 'Finish 30 daily challenges', hard: true },
   { id: 'skyflawless', name: 'Cloud Walker', text: 'Beat Sky Gauntlet without falling once', hard: true },
   { id: 'finalflawless', name: 'Untouchable Legend', text: 'Beat Final Rush without dying', hard: true },
-  { id: 'hyperdrive', name: 'Hyperdrive Survivor', text: 'Beat Hyperdrive, the Insane level in Nightmare Nebula', hard: true },
+  { id: 'hyperdrive', name: 'Hyperdrive Survivor', text: 'Beat Hyperdrive, the first level in Nightmare Nebula', hard: true },
+  { id: 'nebula', name: 'Treasure Hunter', text: 'Beat Grand Line, the longest level in Blockyard', hard: true },
   { id: 'hyperflawless', name: 'Normal Mode Hero', text: 'Beat Hyperdrive without dying once (no checkpoints)', hard: true },
   { id: 'towerspeed', name: 'Elevator? Never Heard of It', text: 'Beat Tower of Tries in under 25 seconds', hard: true },
   { id: 'insane', name: 'Asylum Escapee', text: 'Beat an Insane (9★) level or obby', hard: true },
@@ -52,6 +53,10 @@ export const ACHIEVEMENTS = [
   { id: 'tycoon', name: 'Tycoon', text: 'Have 10,000 coins at once', hard: true },
   { id: 'collector', name: 'Museum Curator', text: 'Own 25 different items', hard: true },
   { id: 'friends10', name: 'Popular Pip', text: 'Have 10 friends', hard: true },
+  { id: 'followers1', name: 'First Fan', text: 'Get your first follower' },
+  { id: 'followers10', name: 'Rising Star', text: 'Have 10 followers' },
+  { id: 'followers50', name: 'Famous Pip', text: 'Have 50 followers', hard: true },
+  { id: 'followers100', name: 'Superstar', text: 'Have 100 followers', hard: true },
   { id: 'chat500', name: 'Chatterbox', text: 'Send 500 chat messages in 3D servers', hard: true },
   { id: 'dance200', name: 'Disco Inferno', text: 'Dance 200 times', hard: true },
   { id: 'spin100', name: 'Spin Cycle', text: 'Spin 100 times', hard: true },
@@ -64,7 +69,7 @@ export const ACHIEVEMENTS = [
   { id: 'tourist', name: 'World Tourist', text: 'Visit every Blockyard world', hard: true },
   { id: 'publish10', name: 'Architect', text: 'Publish 10 levels or worlds', hard: true },
   { id: 'trades25', name: 'Wall Street Pip', text: 'Finish 25 trades', hard: true },
-  { id: 'buy25', name: 'Shopaholic', text: 'Buy 25 things in the closet', hard: true },
+  { id: 'buy25', name: 'Shopaholic', text: 'Buy 25 things in the shop', hard: true },
   { id: 'chosen', name: 'The Chosen One', text: 'You 100%ed everything: every other badge in Blockyard', hard: true, chosen: true },
 ];
 // Blockyard's own 3D worlds (for World Tourist)
@@ -207,6 +212,7 @@ export const progress = {
       data.stats.wins++;
       if (id === 'b-final' && r.deaths === 0) grant('finalflawless');
       if (id === 'b-hyper') grant('hyperdrive');
+      if (id === 'b-grand') grant('nebula');
       if (id === 'b-hyper' && r.deaths === 0) grant('hyperflawless');
       if ((meta.stars || 0) >= 9) grant('insane');
       if ((meta.stars || 0) >= 10) grant('demon');
@@ -334,6 +340,7 @@ function checkAll() {
   if ((s.win_koth || 0) >= 10) grant('koth10');
   if ((s.win_lava || 0) >= 10) grant('lava10');
   if ((s.friends || 0) >= 10) grant('friends10');
+  for (const n of [1, 10, 50, 100]) if ((s.followers || 0) >= n) grant('followers' + n);
   if (s.published >= 10) grant('publish10');
   if (s.trades >= 25) grant('trades25');
   if (s.bought >= 25) grant('buy25');

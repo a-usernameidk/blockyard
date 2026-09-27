@@ -1,8 +1,8 @@
-// Pip's Closet: the shop (with daily deals and limited items), your stuff (wear it or sell it), trades and badges.
+// The Shop (it used to be called Pip's Closet): buying (with daily deals and limited items), your stuff (wear it or sell it), trades and badges.
 import { $, $$, el, session, show, go, addRoute, ask, toast, needLogin, pipCanvas, plural, timeAgo, onLeave, currentView } from '../app.js';
 import { api, isOnline } from '../api.js';
 import { progress, ACHIEVEMENTS } from '../progress.js';
-import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice, rarityOf as baseRarity, RARITY, MAX_BUY } from '../cosmetics.js';
+import { SHOP, KINDS, FREE, itemKey, findItem, canTrade, valueOf, sellPrice, rarityOf as baseRarity, RARITY, MAX_BUY, GEAR_CATS, GEAR_TIER, TIER_NAME, gearCat } from '../cosmetics.js';
 import { drawPip, drawPet, drawGear } from '../art.js';
 import { setWallet, openAccount } from './account.js';
 
@@ -154,7 +154,10 @@ function render() {
       el('div', { class: 'shelf' }, el('h3', {}, 'Limited'),
         soldOut ? el('p', { class: 'small' }, `${soldOut} limited ${soldOut === 1 ? 'item has' : 'items have'} sold out. Find them on the `, el('a', { href: '#/closet/market' }, 'Reseller shop'), ' or trade for them.') : null,
         el('div', { class: 'items' }, ...limited.map((f) => itemButton(f.kind, f.item, { status: statusOf(f.kind, f.item), onclick: choose(f.kind, f.item) })))),
-      el('div', { class: 'shelf' }, el('div', { class: 'shelf-head' }, el('h3', {}, 'Everything'), chips), el('div', { class: 'items' }, ...SHOP[kind].filter((item) => !gone(kind, item)).map((item) => itemButton(kind, item, { status: statusOf(kind, item), onclick: choose(kind, item) })))));
+      el('div', { class: 'shelf' }, el('div', { class: 'shelf-head' }, el('h3', {}, 'Everything'), chips),
+        ...(kind === 'gear'
+          ? [['none'], ...Object.values(GEAR_CATS).map((C) => C.items)].map((ids, i) => { const list = SHOP.gear.filter((g) => ids.includes(g.id) && !gone('gear', g)); return list.length ? el('div', {}, i ? el('h4', { class: 'gear-group' }, Object.values(GEAR_CATS)[i - 1].name) : null, el('div', { class: 'items' }, ...list.map((item) => itemButton('gear', item, { status: statusOf('gear', item), onclick: choose('gear', item) })))) : null; })
+          : [el('div', { class: 'items' }, ...SHOP[kind].filter((item) => !gone(kind, item)).map((item) => itemButton(kind, item, { status: statusOf(kind, item), onclick: choose(kind, item) })))])));
   } else {
     const groups = KINDS.map((k) => {
       const owned = SHOP[k].filter((i) => progress.owns(k, i.id));
@@ -165,7 +168,7 @@ function render() {
     });
     const w = progress.wallet;
     const total = w ? Object.entries(w.items).reduce((n, [k, q]) => { const f = findItem(k); return n + (f && canTrade(f.item) ? valueOf(f.item) * q : 0); }, 0) : 0;
-    body.replaceChildren(el('p', { class: 'lede' }, w ? `Your closet is worth ${total} coins. Selling gives back half of what an item is worth.` : 'Guests can wear the free stuff and anything bought in this browser before.'), ...groups);
+    body.replaceChildren(el('p', { class: 'lede' }, w ? `Your items are worth ${total} coins. Selling gives back half of what an item is worth.` : 'Guests can wear the free stuff and anything bought in this browser before.'), ...groups);
   }
   renderCaption();
 }
@@ -326,6 +329,18 @@ function composer(name) {
 function renderBadges() {
   const list = $('#ach-list'); list.innerHTML = '';
   const got = progress.data.ach;
+  // wear one of your badges as a title
+  const pickBox = $('#title-pick'), sel = $('#title-select');
+  pickBox.hidden = !session.user;
+  if (session.user) {
+    const mine = ACHIEVEMENTS.filter((a) => got[a.id]);
+    sel.replaceChildren(el('option', { value: '' }, 'No title'), ...mine.map((a) => el('option', { value: a.id }, a.name)));
+    sel.value = session.user.title && got[session.user.title] ? session.user.title : '';
+    sel.onchange = async () => {
+      try { await api.saveProgress(progress.data).catch(() => {}); const r = await api.setTitle(sel.value); session.user.title = r.title; toast(r.title ? `You're wearing "${sel.selectedOptions[0].textContent}" as your title.` : 'Title taken off.'); }
+      catch (e) { toast(e.message); sel.value = session.user.title || ''; }
+    };
+  }
   $('#ach-count').textContent = `${Object.keys(got).filter((k) => ACHIEVEMENTS.some((a) => a.id === k)).length} of ${ACHIEVEMENTS.length}`;
   for (const a of ACHIEVEMENTS) {
     list.append(el('div', { class: 'ach' + (got[a.id] ? ' got' : '') + (a.hard ? ' hard' : '') + (a.chosen ? ' chosen' : '') }, pipBadge(got[a.id]), el('div', {}, el('b', {}, a.name, a.hard ? el('span', { class: 'hard-tag' }, a.chosen ? 'LEGENDARY' : 'HARD') : null), el('span', { class: 'small' }, a.text))));
@@ -408,7 +423,8 @@ function statsLine(key, item) {
   if (!canTrade(item)) return null;
   const s = stats && stats[key];
   const real = s && s.rap, r = rarityOf(key, item);
-  const bits = [el('span', { class: 'rarity r-' + r.toLowerCase() }, r), el('span', {}, `Store worth ${valueOf(item)}`),
+  const cat = key.startsWith('gear:') ? gearCat(item.id) : null;
+  const bits = [el('span', { class: 'rarity r-' + r.toLowerCase() }, r), cat ? el('span', { class: 'gear-cat' }, `${GEAR_CATS[cat].name} gear, ${TIER_NAME[GEAR_TIER[item.id]]}`) : null, el('span', {}, `Store worth ${valueOf(item)}`),
     el('span', { class: real && real > valueOf(item) ? 'up' : real && real < valueOf(item) ? 'down' : '' }, real ? `Real worth ${real}` : 'Real worth: no sales yet')];
   if (s) bits.push(el('span', {}, `${s.exist} exist`), el('span', {}, `${s.owners} ${s.owners === 1 ? 'owner' : 'owners'}`));
   if (item.stock && s && s.left != null) bits.push(el('span', {}, s.left ? `${s.left} left in shop` : 'Sold out forever'));
@@ -422,7 +438,7 @@ async function resell(key, item) {
   const guess = Math.max(1, worthOf(key, item));
   const input = el('input', { type: 'number', min: '1', max: '1000000', value: String(guess), 'aria-label': 'Price in coins' });
   const note = el('p', { class: 'small' });
-  const upd = () => { const p = Math.floor(+input.value || 0); note.textContent = p > 0 ? `If it sells you get all ${p} coins. It leaves your closet until it sells, and you can take it down any time.` : 'Pick a price.'; };
+  const upd = () => { const p = Math.floor(+input.value || 0); note.textContent = p > 0 ? `If it sells you get all ${p} coins. It leaves My Items until it sells, and you can take it down any time.` : 'Pick a price.'; };
   input.addEventListener('input', upd); upd();
   const ok = await ask(`Sell ${item.name} on the Reseller shop`, `Other players can buy it for the price you pick. Real worth right now: ${worthOf(key, item)} coins.`, [{ label: 'Put it up for sale', value: true, cls: 'btn-sun' }], el('div', {}, el('label', { class: 'label' }, 'Price ', input), note));
   if (!ok) return;
@@ -446,7 +462,7 @@ async function renderMarket() {
   const forSale = m.items.map((x) => ({ ...x, f: findItem(x.item) })).filter((x) => x.f);
   const tile = (f, status, onclick) => el('button', { class: 'item' + (f.item.stock ? ' limited' : ''), type: 'button', onclick }, itemPreview(f.kind, f.item), el('span', { class: 'item-name' }, f.item.name), status);
   const mineRows = m.mine.map((l) => { const f = findItem(l.item); return f ? el('div', { class: 'market-row' }, itemPreview(f.kind, f.item, 40), el('b', {}, f.item.name), el('span', { class: 'small' }, `${l.price} coins, ${timeAgo(l.at)}`),
-    el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { try { const r = await api.marketCancel(l.id); setWallet(r.wallet); renderWallet(); toast('Taken down. It is back in your closet.'); loadStats(true); renderMarket(); } catch (e) { toast(e.message); } } }, 'Take it down')) : null; });
+    el('button', { class: 'btn btn-danger', type: 'button', onclick: async () => { try { const r = await api.marketCancel(l.id); setWallet(r.wallet); renderWallet(); toast('Taken down. It is back in My Items.'); loadStats(true); renderMarket(); } catch (e) { toast(e.message); } } }, 'Take it down')) : null; });
   const sellable = w ? Object.keys(w.items).filter((k) => (w.items[k] || 0) > 0).map(findItem).filter((f) => f && canTrade(f.item)) : [];
   box.replaceChildren(
     el('p', { class: 'lede' }, `Buy and sell with other players. This is the only place to get limited items after they sell out. Sellers pick the price and get all of it.`),

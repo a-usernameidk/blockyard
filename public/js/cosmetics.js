@@ -134,6 +134,24 @@ export const GEAR = [
 export const GEAR_MODS = { speed: { speed: 1.45 }, gravity: { grav: 0.5 }, boots: { jumps: 1 }, jetpack: { jet: 75 },
   turbo: { speed: 1.7 }, moon: { grav: 0.35 }, spring: { jumps: 2 }, feather: { grav: 0.65, speed: 1.15 }, rocket: { jet: 130, speed: 1.15 } };
 
+// Gear comes in categories, and each piece has a tier (1 = basic, 2 = advanced, 3 = legendary).
+// World makers can turn off whole categories or single pieces of gear in their worlds.
+export const GEAR_CATS = {
+  speed: { name: 'Speed', items: ['speed', 'turbo'] },
+  float: { name: 'Floaty', items: ['gravity', 'feather', 'moon'] },
+  jump: { name: 'Jumping', items: ['boots', 'spring'] },
+  fly: { name: 'Flying', items: ['jetpack', 'rocket'] },
+};
+export const GEAR_TIER = { speed: 1, turbo: 2, gravity: 1, feather: 1, moon: 2, boots: 1, spring: 2, jetpack: 2, rocket: 3 };
+export const TIER_NAME = ['', 'Tier 1 (basic)', 'Tier 2 (advanced)', 'Tier 3 (legendary)'];
+export const gearCat = (id) => Object.keys(GEAR_CATS).find((c) => GEAR_CATS[c].items.includes(id)) || null;
+// Can this gear be used in this world? (off: no gear at all; gearBan: categories and single gear the maker turned off)
+export function gearAllowed(world, id) {
+  if (!id || id === 'none' || !world || world.gear === 'off') return false;
+  const ban = Array.isArray(world.gearBan) ? world.gearBan : [];
+  return !ban.includes(id) && !ban.includes(gearCat(id));
+}
+export const cleanGearBan = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => GEAR_CATS[x] || GEAR_TIER[x]))].slice(0, 20) : []);
 export const SHOP = { color: COLORS, hat: HATS, trail: TRAILS, pet: PETS, gear: GEAR };
 export const KINDS = ['hat', 'color', 'trail', 'pet', 'gear'];
 export const FREE = [...COLORS, ...HATS, ...TRAILS, ...PETS, ...GEAR].filter((i) => i.price === 0 && !i.need).map((i) => i.id);

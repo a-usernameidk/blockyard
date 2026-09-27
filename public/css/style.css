@@ -866,3 +866,19 @@ body.tos-pending main { opacity: .96; }
 .w3-spec .btn { padding: 4px 10px; font-size: 14px; }
 .b3-dock-blocks .b3-blocks { display: block; }
 .b3-dock-blocks .b3-blocks h3:first-child { margin-top: 0; }
+.w3-invite { left: auto; right: 12px; top: 56px; width: min(340px, 90%); }
+.w3-invite-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+.w3-invite-list li { display: flex; align-items: center; gap: 6px; font-weight: 800; }
+.w3-invite-list li .btn { margin-left: auto; padding: 3px 10px; font-size: 13px; }
+.w3-invite-list .dot { width: 10px; height: 10px; border-radius: 99px; display: inline-block; }
+.w3-title { display: block; font-size: 11px; font-weight: 900; color: #ffd23f; letter-spacing: .02em; }
+.title-pill { display: inline-block; background: #1d2340; color: #ffd23f; border-radius: 999px; padding: 2px 10px; font: 900 13px Nunito, system-ui, sans-serif; margin-left: 8px; vertical-align: middle; }
+.title-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; }
+.title-pick select { font-size: 15px; padding: 4px 8px; }
+.b3-gear { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.b3-gear h3 { flex-basis: 100%; margin: 4px 0 0; font-size: 16px; }
+.b3-gearcat { display: grid; gap: 3px; min-width: 150px; }
+.b3-gearcat label { display: flex; gap: 6px; align-items: center; font-weight: 800; font-size: 14px; }
+.b3-gearitem { padding-left: 18px; }
+.gear-group { margin: 10px 0 6px; font-size: 16px; }
+.gear-cat { color: var(--text); }

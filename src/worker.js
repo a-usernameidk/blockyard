@@ -17,6 +17,7 @@ import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, 
 import { findItem } from '../public/js/cosmetics.js';
 import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
 import { MARKET_SCHEMA, marketRoute } from './market.js';
+import { PEOPLE_SCHEMA, PEOPLE_COLUMNS, peopleRoute, followInfo, tellFollowers, rateGame } from './people.js';
 import { COMMUNITY_SCHEMA, vote, voteSummary, facesBeaten, dailyPick, setDailyPick, dailyPicks } from './community.js';
 import { MOD, ROLES, ROLE_NAME, addWarning, creditReporters, checkPopular, adminNotify, setAdminNotify, mailAdmin, setPay } from './mod.js';
 import { ECON_SCHEMA, seedStock, econRoute, migrateUser, accountExtras, coinStmts, verify, maxSteps, maxSteps3d, publicItems, REWARD, DEFAULT_LOOK, cleanLook, getWallet, itemStmts, boardInfo, dealSettings, cleanDeals, featured, dealPool, ECON_COLUMNS, questBumps } from './econ.js';
@@ -85,6 +86,7 @@ const SCHEMA = [
   ...SOCIAL_SCHEMA,
   ...COMMUNITY_SCHEMA,
   ...MARKET_SCHEMA,
+  ...PEOPLE_SCHEMA,
 ];
 // columns added after the first version
 const COLUMNS = [
@@ -106,6 +108,7 @@ const COLUMNS = [
   'ALTER TABLE servers ADD COLUMN bots INTEGER NOT NULL DEFAULT 0',
   "ALTER TABLE servers ADD COLUMN bot_skill TEXT NOT NULL DEFAULT 'normal'",
   'ALTER TABLE games ADD COLUMN suggested INTEGER NOT NULL DEFAULT 0',
+  ...PEOPLE_COLUMNS,
 ];
 
 // Tables are created automatically the first time the Worker runs.
@@ -182,6 +185,8 @@ async function handle(request, env, url) {
   if (e) return e;
   const so = await socialRoute(ctx, path, method);
   if (so) return so;
+  const pp = await peopleRoute(ctx, path, method);
+  if (pp) return pp;
   const mk = await marketRoute(ctx, path, method);
   if (mk) return mk;
 
@@ -204,7 +209,7 @@ async function handle(request, env, url) {
     if (method === 'PUT') return updateGame(ctx, m[1], await body(request));
     if (method === 'DELETE') return deleteGame(ctx, m[1]);
   }
-  if ((m = path.match(/^\/games\/([A-Za-z0-9]{8})\/(play|like|report)$/)) && method === 'POST') return gameAction(ctx, m[1], m[2]);
+  if ((m = path.match(/^\/games\/([A-Za-z0-9]{8})\/(play|like|dislike|report)$/)) && method === 'POST') return gameAction(ctx, m[1], m[2]);
   if ((m = path.match(/^\/games\/([A-Za-z0-9]{8})\/vote$/)) && method === 'POST') return vote(ctx, m[1], await body(request));
 
   // projects (building, alone or together)
@@ -222,6 +227,7 @@ async function handle(request, env, url) {
   if (path === '/servers' && method === 'GET') return listServers(ctx);
   if (path === '/servers' && method === 'POST') return privateServer(ctx, await body(request));
   if ((m = path.match(/^\/servers\/([A-Za-z0-9]{8})$/)) && method === 'PUT') return serverBots(ctx, m[1], await body(request));
+  if ((m = path.match(/^\/servers\/([A-Za-z0-9]{8})$/)) && method === 'DELETE') return closeServer(ctx, m[1]);
   if (path === '/rooms/join' && method === 'POST') return joinPlay(ctx, await body(request));
   if (path === '/rooms/edit' && method === 'POST') return joinEdit(ctx, await body(request));
 
@@ -323,8 +329,8 @@ function checkPassword(pw) {
 async function account(ctx, u, extra = {}) {
   const { db, env } = ctx;
   if (!u.econ) await migrateUser(db, u.id, u.progress);
-  const [ex, mail, rr] = await Promise.all([accountExtras(db, u.id), db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(u.id).first(), db.prepare('SELECT role, warnings FROM users WHERE id = ?').bind(u.id).first()]);
-  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u), role: (rr && rr.role) || '', warnings: (rr && rr.warnings) || 0 }, progress: JSON.parse(u.progress || '{}'), ...ex, unread: mail.n };
+  const [ex, mail, rr] = await Promise.all([accountExtras(db, u.id), db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(u.id).first(), db.prepare('SELECT role, warnings, title FROM users WHERE id = ?').bind(u.id).first()]);
+  return { ...extra, user: { id: u.id, name: u.name, admin: isAdmin(env, u), role: (rr && rr.role) || '', warnings: (rr && rr.warnings) || 0, title: (rr && rr.title) || null }, progress: JSON.parse(u.progress || '{}'), ...ex, unread: mail.n };
 }
 async function signup(ctx, input) {
   const { db, env, ip } = ctx;
@@ -344,7 +350,7 @@ async function signup(ctx, input) {
   await db.prepare('INSERT INTO users (id, name, name_lower, pw_hash, pw_salt, rec_hash, progress, created_at, look, econ, signup_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)')
     .bind(id, input.name, input.name.toLowerCase(), await hashPassword(input.password, salt, env), salt, await sha256(recovery.toUpperCase() + (env.SALT || '')), progress, Date.now(), look, ip).run();
   // a welcome gift in the mailbox (only the first few new accounts from the same place each day get one)
-  if (madeToday < 3 && SIGNUP_BONUS) await mailStmt(db, id, 'welcome', `Welcome to Blockyard! Here are ${SIGNUP_BONUS} coins`, 'Press Claim to get your welcome coins. Spend them in the Closet on hats, colors, pets and more!', null, { claim: SIGNUP_BONUS }).run();
+  if (madeToday < 3 && SIGNUP_BONUS) await mailStmt(db, id, 'welcome', `Welcome to Blockyard! Here are ${SIGNUP_BONUS} coins`, 'Press Claim to get your welcome coins. Spend them in the Shop on hats, colors, pets and more!', null, { claim: SIGNUP_BONUS }).run();
   await addEvent(db, 'signup', ip);
   // they agreed to the rules and terms before making the account
   if (input.tos) await db.prepare('UPDATE users SET tos_at = ? WHERE id = ?').bind(Date.now(), id).run();
@@ -572,7 +578,7 @@ async function friendAction(ctx, input) {
 
 async function profile(ctx, name) {
   const { db } = ctx;
-  const u = await db.prepare('SELECT id, name, created_at, banned, role, progress FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
+  const u = await db.prepare('SELECT id, name, created_at, banned, role, progress, title FROM users WHERE name_lower = ?').bind(name.toLowerCase()).first();
   if (!u || u.banned) fail(404, 'No player with that name.');
   const [items, games, here] = await Promise.all([
     publicItems(db, u.id),
@@ -588,7 +594,7 @@ async function profile(ctx, name) {
   let saved = {};
   try { saved = JSON.parse(u.progress || '{}').ach || {}; } catch (e) { /* none */ }
   const badges = { ...Object.fromEntries(Object.keys(saved).slice(0, 200).map((k) => [String(k).slice(0, 30), true])), ...items.badges };
-  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), ...items, badges, faces: await facesBeaten(db, u.id), games: games.results.map(row), playing });
+  return json({ name: u.name, since: u.created_at, role: u.role || '', admin: isAdmin(ctx.env, u), title: u.title && badges[u.title] ? u.title : null, ...items, badges, faces: await facesBeaten(db, u.id), games: games.results.map(row), playing, ...(await followInfo(db, u.id, ctx.user && ctx.user.id)) });
 }
 const worldName = (id) => { const b = builtinWorld(id); return b ? b.name : null; };
 
@@ -619,7 +625,7 @@ async function checkFields(ctx, input) {
 }
 function row(g) {
   return {
-    id: g.id, kind: g.kind || '2d', name: g.name, creator: g.creator, descr: g.descr, style: g.style, theme: g.theme, plays: g.plays, likes: g.likes,
+    id: g.id, kind: g.kind || '2d', name: g.name, creator: g.creator, descr: g.descr, style: g.style, theme: g.theme, plays: g.plays, likes: g.likes, dislikes: g.dislikes || 0,
     created_at: g.created_at, visibility: g.visibility || 'public', reward: g.reward || 0, stars: g.stars || 0, pays: g.reward || (g.stars ? g.stars * RATED_PAY : 0), level: (g.kind || '2d') === '2d' ? JSON.parse(g.data) : undefined,
     world: g.kind === '3d' && g.withWorld ? JSON.parse(g.data) : undefined, blocks: g.kind === '3d' ? g.w : undefined,
     coins: g.kind === '3d' ? g.h : undefined, thumb: g.kind === '3d' ? g.thumb || '' : undefined,
@@ -683,6 +689,8 @@ async function publish(ctx, input) {
     .bind(id, f.name, user.name, f.desc, f.style, f.theme, f.w, f.h, JSON.stringify(f.data), ip, user.id, now, now, f.kind, f.visibility, project, f.thumb || null)];
   if (project) stmts.push(db.prepare('UPDATE projects SET game_id = ? WHERE id = ?').bind(id, project));
   await db.batch(stmts);
+  // people who follow this player hear about it
+  if (f.visibility === 'public') await tellFollowers(ctx, user, { id, kind: f.kind, name: f.name }).catch(() => {});
   return json({ id }, 201);
 }
 // Who can change a published game: whoever published it, an admin, a collaborator on its project,
@@ -742,10 +750,11 @@ async function gameAction(ctx, id, action) {
   }
   const user = needUser(ctx);
   const who = 'u:' + user.id;
-  if (action === 'like') {
-    const r = await db.prepare('INSERT OR IGNORE INTO likes (game_id, who) VALUES (?, ?)').bind(id, who).run();
-    if (r.meta.changes) { await db.prepare('UPDATE games SET likes = likes + 1 WHERE id = ?').bind(id).run(); await payCreator(ctx, game, 'like').catch(() => {}); await checkPopular(db, id).catch(() => {}); }
-    return json({ ok: true });
+  if (action === 'like' || action === 'dislike') {
+    const added = await rateGame(ctx, game, who, action);
+    if (added && action === 'like') { await payCreator(ctx, game, 'like').catch(() => {}); await checkPopular(db, id).catch(() => {}); }
+    const g = await db.prepare('SELECT likes, dislikes FROM games WHERE id = ?').bind(id).first();
+    return json({ ok: true, likes: g.likes, dislikes: g.dislikes || 0, mine: action });
   }
   const input = await body(ctx.request);
   const reason = ['rude', 'personal', 'broken', 'copied', 'other'].includes(input.reason) ? input.reason : 'other';
@@ -900,6 +909,15 @@ async function serverBots(ctx, code, input) {
   await ctx.db.prepare('UPDATE servers SET bots = ?, bot_skill = ? WHERE code = ?').bind(n, skill, code).run();
   return json({ ok: true, code, bots: n, skill });
 }
+// The owner closes one of their private servers: everyone in it is sent out, and the code stops working.
+async function closeServer(ctx, code) {
+  const user = needUser(ctx), { db, env } = ctx;
+  const s = await db.prepare('SELECT code, owner_id, private FROM servers WHERE code = ?').bind(code).first();
+  if (!s || !s.private || (s.owner_id !== user.id && !user.admin)) fail(404, 'That private server was not found.');
+  await db.batch([db.prepare('DELETE FROM servers WHERE code = ?').bind(code), db.prepare('DELETE FROM presence WHERE code = ?').bind(code)]);
+  if (env.ROOMS) await env.ROOMS.get(env.ROOMS.idFromName('p:' + code)).fetch('https://room/close').catch(() => {});
+  return json({ ok: true });
+}
 async function privateServer(ctx, input) {
   const user = needUser(ctx);
   const w = await worldInfo(ctx, String(input.world || ''));
@@ -935,10 +953,10 @@ async function joinPlay(ctx, input) {
     }
   }
   await db.prepare('UPDATE servers SET updated = ? WHERE code = ?').bind(now, code).run();
-  const u = await db.prepare('SELECT look FROM users WHERE id = ?').bind(user.id).first();
+  const u = await db.prepare('SELECT look, title FROM users WHERE id = ?').bind(user.id).first();
   const w = await getWallet(db, user.id);
   const look = cleanLook(lookOf(u && u.look), w.items);
-  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, o: user.role || undefined, a: user.admin, w: world.id, c: code, x: now + 20e3 });
+  const ticket = await signTicket(await roomSecret(env), { k: 'play', r: 'p:' + code, u: user.id, n: user.name, l: look, v: w.level, o: user.role || undefined, t: (u && u.title) || undefined, a: user.admin, w: world.id, c: code, x: now + 20e3 });
   return json({ ticket, code, world, private: priv });
 }
 async function joinEdit(ctx, input) {
@@ -959,7 +977,7 @@ async function connectRoom(request, env, url) {
   const p = await readTicket(await roomSecret(env), url.searchParams.get('t'));
   if (!p) fail(401, 'That ticket expired. Join again.');
   const headers = new Headers(request.headers);
-  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, role: p.o || '', admin: !!p.a, world: p.w, code: p.c, project: p.p }));
+  headers.set('x-room', JSON.stringify({ kind: p.k, room: p.r, uid: p.u, name: p.n, look: p.l, lvl: p.v || 1, role: p.o || '', title: p.t || '', admin: !!p.a, world: p.w, code: p.c, project: p.p }));
   return env.ROOMS.get(env.ROOMS.idFromName(p.r)).fetch(new Request(request, { headers }));
 }
 async function kickEverywhere(env, db, uid, why) {
@@ -1192,7 +1210,7 @@ async function admin(ctx, path, method) {
     if (action === 'give' || action === 'take') {
       const f = findItem(input.item);
       if (!f) fail(400, 'Unknown item.');
-      const note = action === 'give' && u.id !== user.id ? [mailStmt(db, u.id, 'gift', `You got a ${f.item.name}!`, `${user.name} gave you a ${f.item.name}. It's in your closet.`)] : [];
+      const note = action === 'give' && u.id !== user.id ? [mailStmt(db, u.id, 'gift', `You got a ${f.item.name}!`, `${user.name} gave you a ${f.item.name}. It's in My Items.`)] : [];
       try { await db.batch([...itemStmts(db, u.id, f.key, action === 'give' ? 1 : -1), ...note]); } catch (e) { if (isConstraint(e)) fail(400, "They don't have that item."); throw e; }
       if (action === 'take') {
         const w = await getWallet(db, u.id);

@@ -70,6 +70,7 @@ export async function socialRoute(ctx, path, method) {
   }
   if ((m = path.match(/^\/dms\/([A-Za-z0-9_]{3,20})\/report$/)) && method === 'POST') return dmReport(ctx, m[1], await body(ctx.request));
   if (path === '/gift' && method === 'POST') return gift(ctx, await body(ctx.request));
+  if ((m = path.match(/^\/servers\/([A-Za-z0-9]{8})\/invite$/)) && method === 'POST') return inviteFriend(ctx, m[1], await body(ctx.request));
   if (path === '/live' && method === 'POST') return liveStart(ctx, await body(ctx.request));
   if ((m = path.match(/^\/live\/([A-Za-z0-9]{10})$/))) {
     if (method === 'GET') return liveGet(ctx, m[1]);
@@ -89,13 +90,13 @@ async function pulse(ctx) {
     db.prepare('SELECT COUNT(*) AS n FROM dms WHERE to_id = ? AND read = 0').bind(user.id).first(),
     db.prepare("SELECT COUNT(*) AS n FROM trades WHERE to_id = ? AND status = 'open' AND created_at > ?").bind(user.id, Date.now() - 3 * DAY).first(),
     db.prepare('SELECT d.body, d.at, u.name FROM dms d JOIN users u ON u.id = d.from_id WHERE d.to_id = ? AND d.at > ? AND d.read = 0 ORDER BY d.at DESC LIMIT 5').bind(user.id, since).all(),
-    db.prepare('SELECT kind, title, at FROM mail WHERE user_id = ? AND at > ? AND read = 0 ORDER BY at DESC LIMIT 5').bind(user.id, since).all(),
+    db.prepare('SELECT kind, title, data, at FROM mail WHERE user_id = ? AND at > ? AND read = 0 ORDER BY at DESC LIMIT 5').bind(user.id, since).all(),
     db.prepare("SELECT l.id, u.name FROM live_trades l JOIN users u ON u.id = l.a WHERE l.b = ? AND l.status = 'invite' AND l.created_at > ? ORDER BY l.created_at DESC LIMIT 1").bind(user.id, Date.now() - LIVE.inviteSecs * 1000).first(),
     db.prepare("SELECT id FROM live_trades WHERE (a = ? OR b = ?) AND status = 'open' AND updated_at > ? ORDER BY updated_at DESC LIMIT 1").bind(user.id, user.id, Date.now() - LIVE.idleMins * 60e3).first(),
   ]);
   const events = [
     ...(await Promise.all(newDms.results.map(async (d) => ({ kind: 'dm', from: d.name, text: (await openDm(ctx.env, d.body)).slice(0, 80), at: d.at })))),
-    ...newMail.results.map((x) => ({ kind: 'mail', mail: x.kind, text: x.title, at: x.at })),
+    ...newMail.results.map((x) => ({ kind: 'mail', mail: x.kind, text: x.title, at: x.at, join: x.kind === 'invite' ? (JSON.parse(x.data || '{}').join || undefined) : undefined })),
   ].sort((a, b) => a.at - b.at);
   return json({ now: Date.now(), mail: mailN.n, dms: dmN.n, trades: tradeN.n, events, invite: invite ? { id: invite.id, from: invite.name } : null, live: open ? open.id : null });
 }
@@ -152,6 +153,25 @@ async function dmReport(ctx, name, input) {
   await db.prepare('INSERT INTO chat_reports (reporter, reporter_name, target_id, target, room, reason, messages, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(user.id, user.name, other.id, other.name, 'DMs', reason, JSON.stringify(results.reverse()), Date.now()).run();
   return json({ ok: true });
+}
+
+/* ---------------- inviting a friend to the server you're in ---------------- */
+// Anyone in a server (private or not) can invite their friends. The friend gets a pop-up with a Join button.
+async function inviteFriend(ctx, code, input) {
+  const user = needUser(ctx), { db } = ctx;
+  const other = await findUser(db, input.to);
+  if (other.id === user.id) fail(400, "That's you!");
+  if (!(await areFriends(db, user.id, other.id))) fail(403, `You can only invite friends. Send ${other.name} a friend request first.`);
+  const s = await db.prepare('SELECT code, world FROM servers WHERE code = ?').bind(code).first();
+  if (!s) fail(404, 'That server is closed.');
+  const here = await db.prepare('SELECT 1 FROM presence WHERE user_id = ? AND code = ?').bind(user.id, code).first();
+  if (!here) fail(403, 'You can only invite friends to a server you are in.');
+  const recent = await db.prepare("SELECT COUNT(*) AS n FROM mail WHERE kind = 'invite' AND title LIKE ? AND at > ?").bind(user.name + ' %', Date.now() - 60e3).first();
+  if (recent.n >= 10) fail(429, 'Slow down a little! Try again in a minute.');
+  const g = await db.prepare('SELECT name FROM games WHERE id = ?').bind(s.world).first();
+  const place = g ? g.name : String(s.world).replace(/^mg-/, '').replace(/^\w/, (c) => c.toUpperCase());
+  await mail(db, other.id, 'invite', `${user.name} invited you to play!`, `${user.name} wants you to join them in ${place}. Press Join to go there.`, { join: code, world: s.world }).run();
+  return json({ ok: true, to: other.name });
 }
 
 /* ---------------- sending coins ---------------- */

@@ -74,7 +74,7 @@ export const TEMPLATES_3D = {
 // "Nebula starter": the first part of Hyperdrive (fast hopper, then a spiked jet tunnel) to learn from and change.
 function nebulaStarter() {
   const src = BUILTIN.find((b) => b.id === 'b-hyper');
-  const cut = 265, w = cut + 9;
+  const cut = src.cut || 265, w = cut + 9;
   const rows = src.rows.map((r, y) => {
     let row = r.slice(0, cut);
     const tail = y >= 14 ? '#########' : y <= 0 ? '....G....' : '....G....';

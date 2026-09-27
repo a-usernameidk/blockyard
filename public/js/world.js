@@ -2,6 +2,7 @@
 // Shared by the browser (renderer, builder, game) and the server (checking runs, collaborative editing).
 import { cleanText, isRude } from './format.js';
 import { cleanLogic } from './logic.js';
+import { cleanGearBan } from './cosmetics.js';
 
 export const SX = 128, SY = 64, SZ = 128;
 export const MAX_BLOCKS = 24000;
@@ -175,6 +176,8 @@ export function normalizeWorld(w, { needGoal } = {}) {
   const world = { v: 1, n: name, mode, sky: SKIES[w.sky] ? w.sky : 'day', b: encodeBlocks(grid) };
   if (game) world.game = game;
   if (w.gear === 'off') world.gear = 'off'; // the maker turned gear off for this world
+  const ban = cleanGearBan(w.gearBan);
+  if (ban.length && w.gear !== 'off') world.gearBan = ban; // ...or just some kinds of gear
   if (game === 'tycoon' && !grid.t.some((t) => t === B.tclaim)) throw new Error('Tycoon worlds need at least one Tycoon claim pad (and buy buttons of the same color).');
   const logic = cleanLogic(w.logic);
   if (logic.length) world.logic = logic;

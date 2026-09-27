@@ -8,6 +8,7 @@ import { TILES, THEMES, FORMS, SPEED_NAMES, LIMITS, cleanText, normalizeLevel } 
 import { runReplay } from '../public/js/replay.js';
 import { runReplay3d } from '../public/js/physics3d.js';
 import { cleanLogic } from '../public/js/logic.js';
+import { cleanGearBan } from '../public/js/cosmetics.js';
 import { builtinWorld } from '../public/js/worlds3d.js';
 import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY, SZ, normalizeWorld, worldThumb, GAME_TYPES } from '../public/js/world.js';
 import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, TYCOON, gameConfig, onHill, lavaLevel, inBox, nearBlock } from '../public/js/games.js';
@@ -44,6 +45,10 @@ export class Room {
       }
       return json({ ok: true, kicked: n });
     }
+    if (url.pathname === '/close') { // the owner deleted this private server
+      for (const ws of this.state.getWebSockets()) { const a = att(ws); if (a && !a.left) this.drop(ws, a, 'The owner closed this private server.', 4003); }
+      return json({ ok: true });
+    }
     if (url.pathname === '/announce') {
       const m = cleanChat(url.searchParams.get('m'));
       if (m) this.broadcast({ t: 'sys', m: 'Announcement: ' + m, big: true });
@@ -67,7 +72,7 @@ export class Room {
       return new Response(null, { status: 101, webSocket: client });
     }
     const id = Math.random().toString(36).slice(2, 8);
-    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
+    const me = { id, uid: info.uid, name: info.name, look: info.look || {}, lvl: Math.max(1, Math.min(999, info.lvl | 0)), role: ['builder', 'builderpro'].includes(info.role) ? info.role : '', admin: !!info.admin, title: /^[a-z0-9]{2,20}$/.test(info.title || '') ? info.title : '', kind: info.kind, room: info.room, world: info.world || null, code: info.code || null, project: info.project || null, p: null, r: 0, a: 0 };
     server.serializeAttachment(me);
 
     if (me.kind === 'edit') {
@@ -521,7 +526,7 @@ export class Room {
     if (row.kind === '3d') {
       let grid;
       try { grid = decodeBlocks(String(data.b || '')); } catch (e) { grid = new Grid(); }
-      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on', logic: cleanLogic(data.logic) }, grid };
+      this.doc = { id: row.id, kind: '3d', meta: { n: cleanText(data.n, 40) || row.name, mode: data.mode === 'hangout' ? 'hangout' : 'obby', sky: Object.hasOwn(SKIES, data.sky) ? data.sky : 'day', game: GAME_TYPES.includes(data.game) ? data.game : '', gear: data.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(data.gearBan), logic: cleanLogic(data.logic) }, grid };
     } else {
       const lv = { n: row.name, style: 'adventure', theme: 'meadow', form: 'hopper', speed: '~', w: 48, h: 12, d: '', ...data };
       this.doc = { id: row.id, kind: '2d', meta: { n: cleanText(lv.n, LIMITS.name) || row.name, style: lv.style === 'rush' ? 'rush' : 'adventure', theme: THEMES.includes(lv.theme) ? lv.theme : 'meadow', form: FORMS.includes(lv.form) ? lv.form : 'hopper', speed: Object.hasOwn(SPEED_NAMES, lv.speed) ? lv.speed : '~' }, w: lv.w | 0, h: lv.h | 0, a: String(lv.d || '').split('') };
@@ -531,7 +536,7 @@ export class Room {
   docOut() {
     const d = this.doc;
     if (!d) return null;
-    if (d.kind === '3d') { const { game, gear, logic, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), ...(logic && logic.length ? { logic } : {}), b: encodeBlocks(d.grid) }; }
+    if (d.kind === '3d') { const { game, gear, logic, gearBan, ...m } = d.meta; return { kind: '3d', v: 1, ...m, ...(game && m.mode === 'hangout' ? { game } : {}), ...(gear === 'off' ? { gear: 'off' } : {}), ...(gearBan && gearBan.length ? { gearBan } : {}), ...(logic && logic.length ? { logic } : {}), b: encodeBlocks(d.grid) }; }
     return { kind: '2d', ...d.meta, w: d.w, h: d.h, d: d.a.join('') };
   }
   // Checks one change, applies it, and returns the version to send to everyone (or null).
@@ -546,6 +551,7 @@ export class Room {
         if (Object.hasOwn(SKIES, op.f.sky)) f.sky = op.f.sky;
         if (op.f.game === '' || GAME_TYPES.includes(op.f.game)) f.game = op.f.game;
         if (op.f.gear === 'on' || op.f.gear === 'off') f.gear = op.f.gear;
+        if (Array.isArray(op.f.gearBan)) f.gearBan = cleanGearBan(op.f.gearBan);
         if (Array.isArray(op.f.logic) && JSON.stringify(op.f.logic).length < 60000) f.logic = cleanLogic(op.f.logic);
       } else {
         if (op.f.style === 'rush' || op.f.style === 'adventure') f.style = op.f.style;
@@ -632,7 +638,7 @@ function att(ws) { try { return ws.deserializeAttachment(); } catch (e) { return
 function send(ws, msg) { try { ws.send(JSON.stringify(msg)); } catch (e) { /* closed */ } }
 function pub(a, pos) {
   const st = pos.get(a.id) || (a.p ? { p: a.p, r: a.r, a: a.a } : {});
-  return { id: a.id, name: a.name, look: a.look, lvl: a.lvl || 1, role: a.role || undefined, admin: a.admin || undefined, p: st.p || null, r: st.r || 0, a: st.a || 0 };
+  return { id: a.id, name: a.name, look: a.look, lvl: a.lvl || 1, role: a.role || undefined, title: a.title || undefined, admin: a.admin || undefined, p: st.p || null, r: st.r || 0, a: st.a || 0 };
 }
 // No word filter (Blockyard's choice), just tidy: no invisible characters, no giant messages.
 export function cleanChat(m) {

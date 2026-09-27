@@ -88,7 +88,7 @@ function renderTiles(onlineInfo) {
     tile('Continue', `Level ${nextLevelIndex() + 1}: ${next.n}`, '#/play/' + next.id, 'tile-grass'),
     tile('Daily challenge', d && d.won ? 'Cleared today!' : 'Clear it for 30 coins', '#/daily', 'tile-sun'),
     tile('Endless Rush', progress.data.stats.endlessBest ? `Best ${Math.floor(progress.data.stats.endlessBest)} m` : 'How far can you go?', '#/endless', 'tile-night'),
-    tile('Closet', w ? `${w.coins} coins to spend` : 'Hats, colors and trails', '#/closet', 'tile-pink'));
+    tile('Shop', w ? `${w.coins} coins to spend` : 'Hats, colors and trails', '#/closet', 'tile-pink'));
 }
 $('#hero-play').addEventListener('click', () => go('#/play'));
 

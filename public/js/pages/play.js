@@ -194,7 +194,11 @@ export function playLevel(lv, o) {
     onNext: o.onNext || null,
     onLike: o.pubId && o.online ? async () => {
       if (!session.user) { needLogin('Likes need an account, so every like is from a real player.'); throw new Error('login'); }
-      await api.like(o.pubId); store.set('liked:' + o.pubId, true);
+      await api.like(o.pubId); store.set('liked:' + o.pubId, 'like');
+    } : null,
+    onDislike: o.pubId && o.online ? async () => {
+      if (!session.user) { needLogin('Dislikes need an account, so every one is from a real player.'); throw new Error('login'); }
+      await api.dislike(o.pubId); store.set('liked:' + o.pubId, 'dislike');
     } : null,
     liked: o.pubId ? store.get('liked:' + o.pubId, false) : false,
     onWin: o.onWin || ((r) => progress.finish(o.key, r, {})),
@@ -300,7 +304,7 @@ export function publishedCard(g) {
   const by = el('p', { class: 'by-line' }, 'by ', el('a', { class: 'linkish', href: '#/u/' + encodeURIComponent(g.creator) }, g.creator));
   return card(lv, {
     by, text: g.descr || null, reward: g.pays || g.reward, stars: g.stars,
-    meta: [plural(g.plays, 'play'), plural(g.likes, 'like'), bestText('p:' + g.id, lv)],
+    meta: [plural(g.plays, 'play'), `👍 ${g.likes}${g.dislikes ? `  👎 ${g.dislikes}` : ''}`, bestText('p:' + g.id, lv)],
     actions: [['Play', 'btn-grass', () => go('#/p/' + g.id)], ['Remix', '', () => editLevel(remixOf(lv))]],
   });
 }

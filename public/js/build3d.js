@@ -8,6 +8,8 @@ import { sfx, unlockAudio } from './audio.js';
 import { startWorld } from './play3d.js';
 import { logicEditor } from './logicEditor.js';
 import { cleanLogic } from './logic.js';
+import { GEAR_CATS, GEAR_TIER, TIER_NAME, cleanGearBan } from './cosmetics.js';
+import { SHOP } from './cosmetics.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -29,7 +31,7 @@ export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') +
 
 // opts: { world, title, me, look, room (ticket fn or null), canPublish, onChange(world), onPublish(world, proof), onFriends(), onExit(), low }
 export function startBuilder(root, opts) {
-  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on', logic: cleanLogic(opts.world.logic) };
+  let meta = { n: opts.world.n || 'My world', mode: opts.world.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[opts.world.sky] ? opts.world.sky : 'day', game: opts.world.mode === 'hangout' && GAME_TYPES.includes(opts.world.game) ? opts.world.game : '', gear: opts.world.gear === 'off' ? 'off' : 'on', gearBan: cleanGearBan(opts.world.gearBan), logic: cleanLogic(opts.world.logic) };
   const typeOf = (m) => (m.game || m.mode);
   let grid = decodeBlocks(opts.world.b || '');
   let proof = opts.proof || null;
@@ -73,12 +75,29 @@ export function startBuilder(root, opts) {
   const logicEd = logicEditor({ logic: meta.logic, onChange: (l) => setMeta({ logic: l }) });
   const specBtn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', title: 'Watch: follow a teammate, or a slow tour of your world (V)' }, 'Spectate');
   const viewNote = h('p', { class: 'small' });
+  // which kinds of gear players may use here (untick a category or a single piece to turn it off)
+  const gearBox = h('div', { class: 'b3-gear' });
+  const gearName = (id) => (SHOP.gear.find((g) => g.id === id) || { name: id }).name;
+  function drawGearBox() {
+    const ban = new Set(meta.gearBan || []);
+    const toggle = (id, on) => { const b = new Set(meta.gearBan || []); if (on) b.delete(id); else b.add(id); setMeta({ gearBan: [...b] }); drawGearBox(); };
+    gearBox.hidden = meta.gear === 'off';
+    gearBox.replaceChildren(h('h3', {}, 'Allowed gear'), ...Object.entries(GEAR_CATS).map(([cat, C]) => {
+      const catOn = !ban.has(cat);
+      const cb = h('input', { type: 'checkbox' }); cb.checked = catOn; cb.addEventListener('change', () => toggle(cat, cb.checked));
+      return h('div', { class: 'b3-gearcat' }, h('label', { class: 'b3-gearhead' }, cb, h('b', {}, C.name)),
+        ...C.items.map((id) => { const c2 = h('input', { type: 'checkbox', disabled: !catOn }); c2.checked = catOn && !ban.has(id); c2.addEventListener('change', () => toggle(id, c2.checked));
+          return h('label', { class: 'b3-gearitem', title: TIER_NAME[GEAR_TIER[id]] }, c2, gearName(id), h('span', { class: 'small' }, ` T${GEAR_TIER[id]}`)); }));
+    }));
+  }
+  drawGearBox();
   const panes = {
     build: h('div', { class: 'b3-pane b3-pane-build' },
       h('div', { class: 'b3-tools' }, toolRow, boxBtn, undoBtn, redoBtn, blockTip),
       h('div', { class: 'b3-dock-row' }, h('div', { class: 'b3-dock-blocks' }, palette), h('div', { class: 'b3-dock-colors' }, h('h3', {}, 'Color'), swatches))),
     world: h('div', { class: 'b3-pane', hidden: true },
       h('div', { class: 'b3-world' }, h('label', {}, 'Type ', modeSel), h('label', {}, 'Sky ', skySel), h('label', {}, 'Gear ', gearSel)),
+      gearBox,
       h('p', { class: 'small' }, 'Minigame worlds run rounds for everyone in a server. Tycoon needs claim pads and buy buttons (Build tab, Tycoon blocks): each color is one plot. Gear (speed coils, jetpacks...) works in hangouts, Tag and Paintball unless you turn it off, and Logic can lend gear for a while in any world.')),
     logic: h('div', { class: 'b3-pane', hidden: true }, logicEd.el),
     view: h('div', { class: 'b3-pane', hidden: true }, h('div', { class: 'row' }, specBtn), viewNote,
@@ -292,7 +311,8 @@ export function startBuilder(root, opts) {
   function setMeta(f, send = true) {
     Object.assign(meta, f);
     if (f.sky) { R.setSky(meta.sky); skySel.value = meta.sky; }
-    if (f.gear) gearSel.value = meta.gear;
+    if (f.gear) { gearSel.value = meta.gear; drawGearBox(); }
+    if (f.gearBan && !send) drawGearBox();
     if (f.mode || f.game != null) modeSel.value = typeOf(meta);
     if (f.n && document.activeElement !== nameIn) nameIn.value = meta.n;
     if (f.logic && !send) logicEd.set(meta.logic);
@@ -305,7 +325,7 @@ export function startBuilder(root, opts) {
   let nameT = 0;
   nameIn.addEventListener('input', () => { meta.n = nameIn.value.trim().slice(0, 40) || 'My world'; clearTimeout(nameT); nameT = setTimeout(() => setMeta({ n: meta.n }), 500); });
 
-  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), ...(meta.logic && meta.logic.length ? { logic: meta.logic } : {}), b: encodeBlocks(grid) }; }
+  function getWorld() { return { v: 1, n: meta.n, mode: meta.mode, sky: meta.sky, ...(meta.game ? { game: meta.game } : {}), ...(meta.gear === 'off' ? { gear: 'off' } : {}), ...(meta.gear !== 'off' && meta.gearBan && meta.gearBan.length ? { gearBan: meta.gearBan } : {}), ...(meta.logic && meta.logic.length ? { logic: meta.logic } : {}), b: encodeBlocks(grid) }; }
   let changeT = 0;
   function changed() {
     clearTimeout(changeT);
@@ -346,7 +366,7 @@ export function startBuilder(root, opts) {
           const mine = pending.size ? [...pending.keys()].map((i) => [i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ, grid.t[i], grid.c[i]]) : [];
           grid = decodeBlocks(m.doc.b); R.setGrid(grid);
           meta = { n: m.doc.n || meta.n, mode: m.doc.mode, sky: m.doc.sky, game: m.doc.game || '', gear: m.doc.gear === 'off' ? 'off' : 'on', logic: cleanLogic(m.doc.logic) };
-          logicEd.set(meta.logic); gearSel.value = meta.gear;
+          meta.gearBan = cleanGearBan(m.doc.gearBan); logicEd.set(meta.logic); gearSel.value = meta.gear; drawGearBox();
           R.setSky(meta.sky); skySel.value = meta.sky; modeSel.value = typeOf(meta); if (document.activeElement !== nameIn) nameIn.value = meta.n;
           pending.clear();
           if (mine.length) { applyLocal(mine); share(mine); }

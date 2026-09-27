@@ -1,5 +1,5 @@
 // 3D worlds: the list, one world's page (servers, private servers), and being inside a world.
-import { $, $$, el, session, show, go, addRoute, toast, needLogin, copyText, siteBase, plural, onLeave, replaceRoute } from '../app.js';
+import { $, $$, el, session, show, go, addRoute, toast, needLogin, copyText, siteBase, plural, onLeave, replaceRoute, ask } from '../app.js';
 import { api, isOnline, store } from '../api.js';
 import { progress, OBBIES } from '../progress.js';
 import { WORLDS3D, builtinWorld } from '../worlds3d.js';
@@ -41,7 +41,7 @@ $('#announce-x').addEventListener('click', () => { store.set('announce-hidden', 
 
 /* ---------------- cards ---------------- */
 const builtinThumbs = new Map();
-export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, done, game, stars }) {
+export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, dislikes, done, game, stars }) {
   const cv = el('canvas', { class: 'thumb3d', 'aria-hidden': 'true' });
   requestAnimationFrame(() => drawWorldThumb(cv, thumb, sky));
   const n = online.worlds[id] || 0;
@@ -51,7 +51,7 @@ export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays
     n ? el('span', { class: 'tag tag-live' }, `${n} playing`) : null,
     reward ? el('span', { class: 'tag tag-pay' }, done ? 'Paid out' : `Pays ${reward} coins`) : null,
     plays != null ? el('span', { class: 'tag' }, plural(plays, 'visit')) : null,
-    likes ? el('span', { class: 'tag' }, plural(likes, 'like')) : null);
+    likes || dislikes ? el('span', { class: 'tag' }, `👍 ${likes || 0}${dislikes ? `  👎 ${dislikes}` : ''}`) : null);
   return el('article', { class: 'card card-world' }, cv,
     el('div', { class: 'card-body' },
       el('div', {}, el('h3', {}, name), by ? el('p', { class: 'by-line' }, 'by ', el('a', { class: 'linkish', href: '#/u/' + encodeURIComponent(by) }, by)) : null, blurb ? el('p', {}, blurb) : null, meta),
@@ -65,7 +65,7 @@ export function builtinCards(only) {
     return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, stars: starsFor('w:' + w.id) });
   });
 }
-export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, thumb: g.thumb, plays: g.plays, likes: g.likes, stars: g.stars, reward: g.pays || g.reward });
+export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, thumb: g.thumb, plays: g.plays, likes: g.likes, dislikes: g.dislikes, stars: g.stars, reward: g.pays || g.reward });
 
 /* ---------------- the worlds page ---------------- */
 const wl = { sort: 'top', page: 0, busy: false };
@@ -157,7 +157,7 @@ async function showWorld(id) {
       el('div', { class: 'row' },
         el('button', { class: 'btn btn-big btn-grass', type: 'button', onclick: () => go(`#/w/${id}/play`) }, session.user ? 'Play' : 'Play solo'),
         session.user ? null : el('button', { class: 'btn btn-sun', type: 'button', onclick: () => needLogin('Playing with others and chat need an account.') }, 'Log in to play with others'),
-        w.builtin ? null : el('button', { class: 'btn', type: 'button', onclick: async (e) => { if (!session.user) { needLogin('Likes need an account.'); return; } try { await api.like(id); e.target.textContent = 'Liked'; e.target.disabled = true; } catch (err) { toast(err.message); } } }, 'Like'),
+        w.builtin ? null : rateButtons(id),
         w.builtin ? null : el('button', { class: 'btn btn-ghost', type: 'button', onclick: () => (session.user ? openReport(id) : needLogin('Reporting needs an account.')) }, 'Report')))),
     w.mode === 'hangout' ? null : el('div', {}, el('h2', {}, 'Fastest times'), boardBox),
     el('div', { class: 'two-col' },
@@ -178,6 +178,18 @@ async function showWorld(id) {
     } }, 'Make a private server'));
   } catch (e) { serversBox.append(el('p', { class: 'small' }, e.message)); }
 }
+// Like / Dislike a player's world (picking one takes the other back)
+function rateButtons(id) {
+  const mine = store.get('liked:' + id, '');
+  const set = (k) => { like.disabled = k === 'like'; dis.disabled = k === 'dislike'; like.textContent = k === 'like' ? 'Liked 👍' : 'Like 👍'; dis.textContent = k === 'dislike' ? 'Disliked 👎' : 'Dislike 👎'; };
+  const act = (k) => async () => {
+    if (!session.user) { needLogin('Likes and dislikes need an account.'); return; }
+    try { const r = await (k === 'like' ? api.like(id) : api.dislike(id)); store.set('liked:' + id, k); set(k); toast(`👍 ${r.likes}  👎 ${r.dislikes}`); } catch (err) { toast(err.message); }
+  };
+  const like = el('button', { class: 'btn', type: 'button', onclick: act('like') }), dis = el('button', { class: 'btn', type: 'button', onclick: act('dislike') });
+  set(mine === true ? 'like' : mine);
+  return el('span', { class: 'row' }, like, dis);
+}
 function privRow(code, players, bots) {
   const link = siteBase() + '#/join/' + code;
   // minigame worlds: pick how many bots and how smart they are
@@ -190,9 +202,14 @@ function privRow(code, players, bots) {
     n.addEventListener('change', save); sk.addEventListener('change', save);
     botBits = el('span', { class: 'row bot-row', title: 'Bots play when you are in the server. Rounds with bots do not pay coins.' }, n, sk);
   }
-  return el('li', {}, el('span', {}, `Code ${code}`), el('span', { class: 'small' }, plural(players, 'player')), botBits,
+  const li = el('li', {}, el('span', {}, `Code ${code}`), el('span', { class: 'small' }, plural(players, 'player')), botBits,
     el('button', { class: 'btn', type: 'button', onclick: (e) => copyText(link, e.currentTarget, 'Copy link') }, 'Copy link'),
-    el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + code) }, 'Join'));
+    el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go('#/join/' + code) }, 'Join'),
+    el('button', { class: 'btn btn-danger', type: 'button', title: 'Close this private server for good', onclick: async () => {
+      if (!(await ask('Delete this private server?', `Anyone in it gets sent out, and the code ${code} stops working. You can make a new one any time.`, [{ label: 'Delete it', value: true, cls: 'btn-danger' }]))) return;
+      try { await api.closeServer(code); li.remove(); toast('Private server deleted.'); } catch (e) { toast(e.message); }
+    } }, 'Delete'));
+  return li;
 }
 
 /* ---------------- inside a world ---------------- */
@@ -214,7 +231,7 @@ async function enterWorld(id, code) {
   let joined = code || null;
   const g3 = gfx(), low = g3.low;
   game = startWorld(root, {
-    world: w.world, title: w.name, by: w.by, gfx: g3, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0 } : { name: 'You' }, low,
+    world: w.world, title: w.name, by: w.by, gfx: g3, look: progress.data.equip, me: session.user ? { name: session.user.name, admin: !!session.user.admin, lvl: progress.wallet ? levelOf(progress.wallet.xp) : 0, title: session.user.title || '' } : { name: 'You' }, low,
     onManage: (name) => manageUser(name),
     game: (() => { try { return gameConfig(w.world, w.builtin ? builtinWorld(id) : null); } catch (e) { return null; } })(),
     onPrize: () => refreshWallet(),
@@ -228,6 +245,8 @@ async function enterWorld(id, code) {
     room: multi ? async () => { if (first) { const f = first; first = null; return f; } return api.joinRoom(joined ? { code: joined } : { world: id }); } : null,
     soloNote: !session.user ? 'You are playing solo. Log in to see other players and chat.' : !session.rooms ? 'Multiplayer is off on this server, so you are playing solo.' : null,
     onJoined: (info) => { if (info && info.code) { joined = info.code; replaceRoute('#/join/' + info.code); } },
+    friends: session.user ? () => api.friends() : null,
+    inviteFriend: (code, name) => api.inviteFriend(code, name),
     onExit: () => go(w.builtin || !w.by ? '#/worlds' : '#/w/' + id),
     onProfile: (name) => go('#/u/' + name),
     onTrade: (name) => go('#/closet/trade/' + name),

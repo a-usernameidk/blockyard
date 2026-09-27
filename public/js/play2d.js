@@ -447,9 +447,12 @@ function showEnd() {
   $('#win-title').textContent = title;
   $('#win-stats').textContent = stats;
   $('#win-again').textContent = againLabel;
-  const like = $('#win-like');
-  like.hidden = !opts.onLike;
-  if (opts.onLike) { like.disabled = !!opts.liked; like.textContent = opts.liked ? 'Liked' : 'Like'; }
+  const like = $('#win-like'), dislike = $('#win-dislike');
+  like.hidden = !opts.onLike; dislike.hidden = !opts.onDislike;
+  // opts.liked: true / 'like' = liked, 'dislike' = disliked
+  const mine = opts.liked === true ? 'like' : opts.liked || '';
+  if (opts.onLike) { like.disabled = mine === 'like'; like.textContent = mine === 'like' ? 'Liked 👍' : 'Like 👍'; }
+  if (opts.onDislike) { dislike.disabled = mine === 'dislike'; dislike.textContent = mine === 'dislike' ? 'Disliked 👎' : 'Dislike 👎'; }
   $('#win-next').hidden = !opts.onNext;
   $('#win-remix').hidden = opts.mode !== 'level';
   $('#win').hidden = false;
@@ -524,6 +527,12 @@ $('#play-report').addEventListener('click', () => opts.onReport && opts.onReport
 $('#win-like').addEventListener('click', async () => {
   const b = $('#win-like');
   b.disabled = true;
-  try { await opts.onLike(); opts.liked = true; b.textContent = 'Liked'; }
-  catch (e) { b.disabled = false; b.textContent = 'Like'; }
+  try { await opts.onLike(); opts.liked = 'like'; b.textContent = 'Liked 👍'; const d = $('#win-dislike'); d.disabled = false; d.textContent = 'Dislike 👎'; }
+  catch (e) { b.disabled = false; b.textContent = 'Like 👍'; }
+});
+$('#win-dislike').addEventListener('click', async () => {
+  const b = $('#win-dislike');
+  b.disabled = true;
+  try { await opts.onDislike(); opts.liked = 'dislike'; b.textContent = 'Disliked 👎'; const l = $('#win-like'); l.disabled = false; l.textContent = 'Like 👍'; }
+  catch (e) { b.disabled = false; b.textContent = 'Dislike 👎'; }
 });

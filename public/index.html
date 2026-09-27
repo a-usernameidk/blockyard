@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Blockyard</title>
-<meta name="description" content="Play block games in 2D and 3D, hang out with friends, build your own levels and worlds together, and trade closet items.">
+<meta name="description" content="Play block games in 2D and 3D, hang out with friends, build your own levels and worlds together, and trade items.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='3' width='26' height='26' rx='6' fill='%23ffd23f' stroke='%231d2340' stroke-width='3'/%3E%3Crect x='3' y='21' width='26' height='8' rx='3' fill='%23f0a500'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,7 +19,7 @@
     <button class="btn nav-btn" data-go="#/play" data-nav="play">Play</button>
     <button class="btn nav-btn" data-go="#/worlds" data-nav="worlds">Worlds <span class="live-dot" id="nav-online" hidden></span></button>
     <button class="btn nav-btn" data-go="#/create" data-nav="create">Create</button>
-    <button class="btn nav-btn" data-go="#/closet" data-nav="closet">Closet</button>
+    <button class="btn nav-btn" data-go="#/closet" data-nav="closet">Shop</button>
     <button class="btn nav-btn" data-go="#/top" data-nav="top">Top</button>
   </nav>
   <div class="me">
@@ -139,6 +139,7 @@
           <button class="btn btn-grass" id="win-next" hidden>Next level</button>
           <button class="btn" id="win-again">Play again</button>
           <button class="btn btn-sun" id="win-like" hidden>Like</button>
+          <button class="btn" id="win-dislike" hidden>Dislike</button>
           <button class="btn" id="win-remix">Remix in editor</button>
           <button class="btn" id="win-back">Back</button>
         </div>
@@ -270,10 +271,10 @@
 
 <!-- ============ CLOSET ============ -->
 <section id="view-closet" class="view" hidden>
-  <div class="page-head"><div><h1>Pip's Closet</h1><p class="lede" id="closet-lede">The shop changes every day: rarer things are in stock less often.</p></div><span class="wallet" id="shop-wallet"></span></div>
-  <div class="tabs page-tabs" id="closet-tabs" role="tablist" aria-label="Closet">
-    <button class="tab" role="tab" data-ctab="shop">Shop</button>
-    <button class="tab" role="tab" data-ctab="mine">My stuff</button>
+  <div class="page-head"><div><h1>Shop</h1><p class="lede" id="closet-lede">The shop changes every day: rarer things are in stock less often.</p></div><span class="wallet" id="shop-wallet"></span></div>
+  <div class="tabs page-tabs" id="closet-tabs" role="tablist" aria-label="Shop">
+    <button class="tab" role="tab" data-ctab="shop">Buy</button>
+    <button class="tab" role="tab" data-ctab="mine">My Items</button>
     <button class="tab" role="tab" data-ctab="market">Reseller shop</button>
     <button class="tab" role="tab" data-ctab="chests">Chests</button>
     <button class="tab" role="tab" data-ctab="trades">Trades <span class="count" id="trade-count" hidden></span></button>
@@ -288,6 +289,7 @@
   <div id="closet-chests" hidden></div>
   <div id="closet-badges" hidden>
     <div class="section-head"><h2>Badges</h2><span class="small" id="ach-count"></span></div>
+    <div class="title-pick" id="title-pick" hidden><label for="title-select"><b>Your title</b> <span class="small">(shows under your name in worlds and on your profile)</span></label> <select id="title-select"></select></div>
     <div class="achs" id="ach-list"></div>
     <h2>Stats</h2>
     <div class="stats" id="stats-list"></div>
@@ -532,7 +534,7 @@
       <div class="row">
         <button class="btn" id="acct-profile">My profile</button>
         <button class="btn" id="acct-friends" type="button">Friends <span class="count" id="friend-count" hidden></span></button>
-        <button class="btn" data-go="#/closet">Closet</button>
+        <button class="btn" data-go="#/closet">Shop</button>
         <button class="btn" id="acct-builder" data-go="#/builder" hidden>Builder</button>
         <button class="btn" id="acct-admin" data-go="#/admin" hidden>Admin</button>
         <button class="btn" data-go="#/settings">Settings</button>

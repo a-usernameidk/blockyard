@@ -164,6 +164,9 @@ export const api = {
   tradeAction: (id, action) => request('POST', `/trades/${enc(id)}`, { action }),
   users: (q) => request('GET', `/users?${qs({ q })}`),
   user: (name) => request('GET', `/users/${enc(name)}`),
+  follow: (name, on = true) => request('POST', `/users/${enc(name)}/follow`, { on }),
+  setTitle: (id) => request('PUT', '/me/title', { id }),
+  dislike: (id) => request('POST', `/games/${enc(id)}/dislike`),
   // projects
   projects: () => request('GET', '/projects'),
   newProject: (kind, name, data) => request('POST', '/projects', { kind, name, data }),
@@ -175,6 +178,8 @@ export const api = {
   online: () => request('GET', '/online'),
   servers: (world) => request('GET', `/servers?${qs({ world })}`),
   privateServer: (world) => request('POST', '/servers', { world }),
+  closeServer: (code) => request('DELETE', `/servers/${enc(code)}`),
+  inviteFriend: (code, to) => request('POST', `/servers/${enc(code)}/invite`, { to }),
   market: () => request('GET', '/market'),
   marketItem: (key) => request('GET', `/market/item/${enc(key)}`),
   marketSell: (item, price) => request('POST', '/market', { item, price }),

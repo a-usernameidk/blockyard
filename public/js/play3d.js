@@ -9,7 +9,9 @@ import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
 import { store } from './api.js';
 import { GAMES, ROUND, WEAPONS, WEAPON_IDS, TYCOON, onHill, inBox, nearBlock } from './games.js';
 import { LOGIC_GEAR } from './logic.js';
-import { GEAR_MODS } from './cosmetics.js';
+import { ACHIEVEMENTS } from './progress.js';
+const titleName = (id) => { const a = id && ACHIEVEMENTS.find((x) => x.id === id); return a ? a.name : ''; };
+import { GEAR_MODS, gearAllowed } from './cosmetics.js';
 import { GFX, GFX_ORDER, gfxMode, setGfx } from './settings.js';
 import { emojiNodes, emojiButton } from './emoji.js';
 import { createBots } from './bots3d.js';
@@ -98,7 +100,7 @@ export function startWorld(root, opts) {
   const inviteBtn = h('button', { class: 'btn', type: 'button', hidden: true }, 'Invite');
   const fullBtn = h('button', { class: 'btn', type: 'button', title: 'Full screen' }, 'Full screen');
   const G3 = opts.gfx || GFX[opts.low ? 'fast' : 'pretty'];
-  const gfxBtn = h('button', { class: 'btn', type: 'button', title: 'Graphics quality (click to change)' }, 'Graphics: ' + G3.name);
+  const gfxBtn = h('button', { class: 'btn', type: 'button', title: 'Graphics quality (click to change)' }, 'Graphics: ' + G3.name + (G3.auto ? ` (${GFX[G3.step].name})` : ''));
   const lockBtn = h('button', { class: 'btn', type: 'button', title: 'Shift lock: the camera follows your mouse and you face where you look (Shift)' }, 'Shift lock');
   const specBtn = h('button', { class: 'btn', type: 'button', title: 'Watch other players (V)' }, 'Spectate');
   const bar = h('div', { class: 'bar w3-bar' },
@@ -319,7 +321,7 @@ export function startWorld(root, opts) {
   }
   function addPlayer(p) {
     if (others.has(p.id)) return;
-    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.role === 'builder' ? h('span', { class: 'lvl builder' }, 'Builder') : p.role === 'builderpro' ? h('span', { class: 'lvl builder' }, 'Builder Pro') : null, p.name), h('span', { class: 'w3-bubble', hidden: true }));
+    const tag = h('div', { class: 'w3-tag' }, h('span', { class: 'w3-name' + (p.admin ? ' admin' : '') }, p.lvl ? h('span', { class: 'lvl' }, `Lv ${p.lvl}`) : null, p.role === 'builder' ? h('span', { class: 'lvl builder' }, 'Builder') : p.role === 'builderpro' ? h('span', { class: 'lvl builder' }, 'Builder Pro') : null, p.name, titleName(p.title) ? h('span', { class: 'w3-title' }, titleName(p.title)) : null), h('span', { class: 'w3-bubble', hidden: true }));
     tags.append(tag);
     others.set(p.id, { ...p, snaps: p.p ? [{ t: performance.now(), p: p.p, r: p.r || 0, a: p.a || 0 }] : [], tag, walk: 0, bubbleUntil: 0, emote: null, et: 0, trailT: 0 });
     renderList();
@@ -394,12 +396,27 @@ export function startWorld(root, opts) {
       case 'prize': toast(m.coins ? `+${m.coins} coins!` : "You won! (You've hit today's minigame coin limit.)", 2.5); sfx('coin'); if (opts.onPrize) opts.onPrize(); break;
     }
   }
+  // Invite: copy the link, or invite a friend right from here (they get a pop-up with a Join button)
+  const invitePanel = h('div', { class: 'w3-admin panel w3-invite', hidden: true });
+  stage.append(invitePanel);
   async function invite(code) {
     const url = location.href.split('#')[0] + '#/join/' + code;
-    try { await navigator.clipboard.writeText(url); toast('Invite link copied! Send it to a friend.', 2.4); }
-    catch (e) { addLine(null, 'Invite link: ' + url, null, true); }
+    if (!invitePanel.hidden) { invitePanel.hidden = true; return; }
+    const copy = h('button', { class: 'btn', type: 'button', onclick: async () => {
+      try { await navigator.clipboard.writeText(url); toast('Invite link copied! Send it to a friend.', 2.4); } catch (e) { addLine(null, 'Invite link: ' + url, null, true); }
+    } }, 'Copy link');
+    const list = h('ul', { class: 'w3-invite-list' }, h('li', { class: 'small' }, opts.friends ? 'Loading your friends…' : 'Log in to invite friends.'));
+    invitePanel.replaceChildren(h('h3', {}, 'Invite friends'), h('div', { class: 'row' }, copy, h('button', { class: 'btn', type: 'button', onclick: () => { invitePanel.hidden = true; } }, 'Close')), list);
+    invitePanel.hidden = false;
+    if (!opts.friends) return;
+    try {
+      const r = await opts.friends();
+      const fr = (r.friends || []).slice().sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0));
+      list.replaceChildren(...(fr.length ? fr.map((f) => h('li', {}, h('span', { class: 'dot', style: `background:${f.online ? '#44c06a' : '#a3abc2'}` }), f.name, h('span', { class: 'small' }, f.online ? (f.online.name ? ` in ${f.online.name}` : ' online') : ''),
+        h('button', { class: 'btn btn-sun', type: 'button', onclick: async (e) => { const b = e.currentTarget; b.disabled = true; try { await opts.inviteFriend(code, f.name); b.textContent = 'Invited!'; sfx('send'); } catch (err) { b.textContent = err.message.slice(0, 40); } } }, 'Invite'))) : [h('li', { class: 'small' }, 'No friends yet. Add friends from their profile, then invite them here.')]));
+    } catch (e) { list.replaceChildren(h('li', { class: 'small' }, e.message)); }
   }
-  const myTag = h('div', { class: 'w3-tag me' }, h('span', { class: 'w3-name' }, opts.me && opts.me.lvl ? h('span', { class: 'lvl' }, `Lv ${opts.me.lvl}`) : null, (opts.me && opts.me.name) || 'You'), h('span', { class: 'w3-bubble', hidden: true }));
+  const myTag = h('div', { class: 'w3-tag me' }, h('span', { class: 'w3-name' }, opts.me && opts.me.lvl ? h('span', { class: 'lvl' }, `Lv ${opts.me.lvl}`) : null, (opts.me && opts.me.name) || 'You', opts.me && titleName(opts.me.title) ? h('span', { class: 'w3-title' }, titleName(opts.me.title)) : null), h('span', { class: 'w3-bubble', hidden: true }));
   const myBubble = myTag.querySelector('.w3-bubble');
   let myBubbleUntil = 0;
   tags.append(myTag);
@@ -541,7 +558,7 @@ export function startWorld(root, opts) {
   function applyGear() {
     // hangouts (and Test in the builder) unless the maker turned gear off; in minigames only Tag and Paintball
     const ok = world.mode === 'hangout' && world.gear !== 'off' && (!inRound || rs.mode === 'tag' || rs.mode === 'paint');
-    S.mods = ok ? GEAR_MODS[look.gear] || null : null;
+    S.mods = ok && gearAllowed(world, look.gear) ? GEAR_MODS[look.gear] || null : null;
   }
   /* ----- paintball ----- */
   const aim = { from: [0, 0, 0], dir: [0, 0, 1] };
@@ -985,6 +1002,7 @@ export function startWorld(root, opts) {
     cross.hidden = !(pOn2 || (shiftLock && !shopOpen)); cross.classList.toggle('paint', pOn2);
     if (snowballs.length) snowTick(dt, scene);
     if (!fly) tipTick(dt);
+    if (G3.auto) { const ch = G3.tick(dt); if (ch) gfxBtn.textContent = `Graphics: Auto (${GFX[ch].name})`; }
     R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, far: G3.far || 230 });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 

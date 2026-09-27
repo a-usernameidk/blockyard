@@ -57,6 +57,7 @@ function showEvent(e) {
     if (notifyOn('dm')) note(`💬 ${e.from}`, e.text, [['Reply', () => openDMs(e.from), 'btn-sun']]);
     return;
   }
+  if (e.mail === 'invite' && e.join) { note('🎮 ' + e.text, 'Go play with them right now.', [['Join', () => go('#/join/' + e.join), 'btn-grass']], 25); return; }
   if (e.mail === 'coins') { refreshWallet(); if (notifyOn('coins')) note('🪙 ' + e.text, '', [['Mailbox', () => $('#mail-btn').click()]]); return; }
   if (e.mail === 'trade') { if (notifyOn('trade')) note('🔁 ' + e.text, '', [['See trades', () => go('#/closet/trades'), 'btn-sun']]); return; }
   if (e.mail === 'warning') { note('⚠️ ' + e.text, 'Open your mailbox to read it.', [['Mailbox', () => $('#mail-btn').click()]], 15); refreshWallet(); return; }
@@ -183,7 +184,7 @@ function drawLive(t) {
   const msg = {
     invite: t.invited ? 'Say yes to start.' : `Waiting for ${t.them.name} to say yes…`,
     open: t.me.ready && t.them.ready ? 'Swapping…' : t.me.ready ? `You're ready. Waiting for ${t.them.name}…` : t.them.ready ? `${t.them.name} is ready! Check the trade, then press Ready.` : 'Add items or coins, then both press Ready. Changing anything un-readies both of you.',
-    done: 'Trade done! Your new stuff is in your closet.', cancelled: 'This trade was cancelled.', declined: `${t.them.name} said no thanks.`, expired: 'This trade timed out.', failed: "The trade couldn't happen (someone doesn't have those items or coins anymore).",
+    done: 'Trade done! Your new stuff is in My Items.', cancelled: 'This trade was cancelled.', declined: `${t.them.name} said no thanks.`, expired: 'This trade timed out.', failed: "The trade couldn't happen (someone doesn't have those items or coins anymore).",
   }[t.status] || t.status;
   $('#live-status').textContent = msg;
   live.mine = t.me.items.slice();

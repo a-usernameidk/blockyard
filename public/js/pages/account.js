@@ -297,10 +297,13 @@ async function openMail() {
     el('p', {}, m.body),
     el('div', { class: 'row' },
       m.data && m.data.rate ? rateButtons(m) : null,
+      m.data && m.data.go ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#mail-modal')); go(m.data.go); } }, 'Play it') : null,
+      m.data && m.data.profile ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/u/' + m.data.profile); } }, 'See profile') : null,
+      m.data && m.data.join ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/join/' + m.data.join); } }, 'Join') : null,
       m.data && m.data.manage ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/u/' + m.data.manage); } }, `Manage ${m.data.manage}`) : null,
       m.data && m.data.claim ? el('button', { class: 'btn btn-sun', type: 'button', onclick: async (e) => { const b = e.currentTarget; try { const r = await api.mailAction(m.id, 'claim'); setWallet(r.wallet); toast(`+${r.coins} coins!`); b.textContent = 'Claimed'; } catch (err) { b.textContent = err.status === 409 ? 'Claimed' : err.message; } b.disabled = true; } }, `Claim ${m.data.claim} coins`) : null,
       m.kind === 'trade' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet/trades'); } }, 'See trades') : null,
-      m.kind === 'gift' ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet'); } }, 'Open closet') : null,
+      m.kind === 'gift' ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet/mine'); } }, 'Open My Items') : null,
       m.kind === 'earn' && m.data && m.data.game ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/create'); } }, 'My games') : null,
       el('button', { class: 'btn', type: 'button', onclick: async (e) => { try { await api.mailAction(m.id, 'delete'); e.target.closest('.mail').remove(); } catch (err) { toast(err.message); } } }, 'Delete'))))
     : [el('p', { class: 'mail-empty' }, 'No mail yet. Gifts, trade offers and what your levels earn show up here.')]));
