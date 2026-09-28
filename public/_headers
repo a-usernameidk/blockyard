@@ -1,0 +1,3 @@
+# Always check for new files, so players get updates right away (unchanged files still come from the cache).
+/*
+  Cache-Control: no-cache

@@ -111,6 +111,7 @@ async function adminUser(name, action) {
 }
 /* ---------------- one player: coins, items, password, kick, ban ---------------- */
 const allItems = () => KINDS.flatMap((k) => SHOP[k].filter((i) => i.price > 0 || i.need).map((i) => ({ key: itemKey(k, i.id), label: `${i.name} (${k})` })));
+let lastManaged = '';
 export async function manageUser(name) {
   const box = $('#manage-body');
   $('#manage-h').textContent = `Manage ${name}`;
@@ -119,14 +120,16 @@ export async function manageUser(name) {
   let u;
   try { u = await api.adminUser(name); } catch (e) { box.replaceChildren(el('p', { class: 'msg' }, e.message)); return; }
   const self = session.user && session.user.name.toLowerCase() === u.name.toLowerCase();
-  const note = el('p', { class: 'msg', role: 'status' });
+  const note = $('#manage-note');
+  if (lastManaged !== u.name) note.textContent = '';
+  lastManaged = u.name;
   const act = async (action, extra, done) => {
     note.textContent = 'One sec…';
     try {
       const r = await api.adminAct(u.name, action, extra);
       note.textContent = done(r);
       if (self && r.wallet) refreshWallet();
-      if (action !== 'password') setTimeout(() => manageUser(u.name).then(() => { $('#manage-body .msg').textContent = note.textContent; }), 250);
+      if (action !== 'password') setTimeout(() => manageUser(u.name), 250);
       if (tab === 'users' && $('#view-admin') && !$('#view-admin').hidden) findUsers();
     } catch (e) { note.textContent = e.message; }
   };
@@ -184,7 +187,7 @@ export async function manageUser(name) {
     if (!(await ask(`Warn ${u.name}?`, (u.warnings || 0) >= 3 ? 'They already have 3 warnings. Next you will be asked about deleting their account.' : `This will be warning ${(u.warnings || 0) + 1} of 3.`, [{ label: 'Give a warning', value: true, cls: 'btn-sun' }]))) { openModal('#manage-modal'); return; }
     openModal('#manage-modal');
     note.textContent = 'One sec…';
-    try { const r = await warnFlow((x) => api.adminAct(u.name, 'warn', x), u.name); note.textContent = warnText(r, u.name); if (r.deleted) { closeModal($('#manage-modal')); toast(warnText(r, u.name)); findUsers(); return; } openModal('#manage-modal'); setTimeout(() => manageUser(u.name).then(() => { $('#manage-body .msg').textContent = note.textContent; }), 250); } catch (e) { note.textContent = e.message; }
+    try { const r = await warnFlow((x) => api.adminAct(u.name, 'warn', x), u.name); note.textContent = warnText(r, u.name); if (r.deleted) { closeModal($('#manage-modal')); toast(warnText(r, u.name)); findUsers(); return; } openModal('#manage-modal'); setTimeout(() => manageUser(u.name), 250); } catch (e) { note.textContent = e.message; }
   };
   const deleteNow = async () => {
     const ok = await ask(`Delete ${u.name}'s account?`, "Their games, items, coins and messages are deleted too. This can't be undone.", [{ label: 'Delete account', value: true, cls: 'btn-danger' }]);
@@ -220,7 +223,7 @@ export async function manageUser(name) {
     u.ledger.length ? el('ul', { class: 'ledger' }, ...u.ledger.map((l) => el('li', {}, el('span', {}, `${l.why} · ${timeAgo(l.at)}`), el('span', { class: l.delta < 0 ? 'minus' : 'plus' }, (l.delta > 0 ? '+' : '') + l.delta)))) : el('p', { class: 'small' }, 'Nothing yet.'));
   box.replaceChildren(
     el('p', { class: 'small' }, `${u.admin ? 'Admin. ' : ''}${u.banned ? 'Banned. ' : ''}Playing since ${new Date(u.since).toLocaleDateString()}. ${plural(u.games, 'published game')}. `, el('a', { class: 'linkish', href: '#/u/' + u.name, 'data-go': '#/u/' + u.name }, 'Profile')),
-    note, coins, items, roles, special, behave, level, town, pass, safety, history);
+    coins, items, roles, special, behave, level, town, pass, safety, history);
 }
 const timeLeft = (t) => { const m = Math.ceil((t - Date.now()) / 60e3); return m >= 1440 ? `${Math.round(m / 1440)} d` : m >= 60 ? `${Math.round(m / 60)} h` : `${m} min`; };
 // look at and change someone's Tycoon town

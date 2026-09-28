@@ -30,6 +30,8 @@ const TOOLS = [['place', 'Place', '1'], ['break', 'Break', '2'], ['paint', 'Pain
 const ORDER = ['grass', 'dirt', 'stone', 'wood', 'brick', 'sand', 'snow', 'leaves', 'metal', 'plastic', 'neon', 'glass', 'ghost', 'ice', 'lava', 'bounce', 'speed', 'crumble', 'checkpoint', 'beltN', 'beltE', 'beltS', 'beltW', 'teleport', 'moveX', 'moveZ', 'moveY', 'disco', 'goal', 'spawn', 'coin'];
 const LOGIC_ORDER = ['trigger', 'switchOn', 'switchOff', 'marker'];
 const SHOP_ORDER = ['shopstand'];
+const SHAPE_ORDER = ['slab', 'wedge', 'corner', 'stairs', 'cyl', 'ball', 'pole', 'grassRamp', 'stoneRamp', 'woodRamp', 'brickRamp', 'stoneSlab', 'woodSlab', 'woodStairs', 'stoneStairs'];
+const DIR_NAME = ['north', 'east', 'south', 'west'];
 export const worldSig = (w) => { let hh = 2166136261; const s = (w.mode || '') + '|' + (w.b || ''); for (let i = 0; i < s.length; i++) { hh ^= s.charCodeAt(i); hh = Math.imul(hh, 16777619) >>> 0; } return hh.toString(36) + ':' + s.length; };
 
 // opts: { world, title, me, look, room (ticket fn or null), canPublish, onChange(world), onPublish(world, proof), onFriends(), onExit(), low }
@@ -38,7 +40,7 @@ export function startBuilder(root, opts) {
   const typeOf = (m) => (m.game || m.mode);
   let grid = decodeBlocks(opts.world.b || '');
   let proof = opts.proof || null;
-  const ed = { tool: 'place', block: B.plastic, color: 9, box: false, boxA: null, hover: null, undo: [], redo: [] };
+  const ed = { tool: 'place', block: B.plastic, color: 9, turn: 0, box: false, boxA: null, hover: null, undo: [], redo: [] };
   let stopped = false, raf = 0, playing = null;
 
   /* ---------------- page ---------------- */
@@ -72,6 +74,7 @@ export function startBuilder(root, opts) {
   const palette = h('div', { class: 'b3-blocks' });
   const swatches = h('div', { class: 'swatches b3-colors' });
   const blockTip = h('p', { class: 'small b3-tip' });
+  const turnBtn = h('button', { class: 'btn', type: 'button', hidden: true, title: 'Turn the shape (R)', onclick: () => turnShape() }, '↻ Turn (R)');
   const moveRow = h('div', { class: 'b3-move', 'aria-label': 'Move the camera' },
     ...[['Up', 'up'], ['Forward', 'f'], ['Down', 'down'], ['Left', 'l'], ['Back', 'b'], ['Right', 'r']].map(([l, k]) => h('button', { class: 'tbtn', type: 'button', 'data-mv': k }, l)));
   // everything lives in one wide dock right under the building view (no floating window, no little scroll box)
@@ -137,7 +140,7 @@ export function startBuilder(root, opts) {
   drawShopBox();
   const panes = {
     build: h('div', { class: 'b3-pane b3-pane-build' },
-      h('div', { class: 'b3-tools' }, toolRow, boxBtn, undoBtn, redoBtn, blockTip),
+      h('div', { class: 'b3-tools' }, toolRow, boxBtn, turnBtn, undoBtn, redoBtn, blockTip),
       h('div', { class: 'b3-dock-row' }, h('div', { class: 'b3-dock-blocks' }, palette), h('div', { class: 'b3-dock-colors' }, h('h3', {}, 'Color'), swatches))),
     world: h('div', { class: 'b3-pane', hidden: true },
       h('div', { class: 'b3-world' }, h('label', {}, 'Type ', modeSel), h('label', {}, 'Sky ', skySel), h('label', {}, 'Gear ', gearSel)),
@@ -159,7 +162,7 @@ export function startBuilder(root, opts) {
   root.replaceChildren(bar, layout, hint);
 
   let R;
-  try { R = createRenderer(canvas, { low: !!opts.low }); }
+  try { R = createRenderer(canvas, { low: !!opts.low, hd: opts.hd || null }); }
   catch (e) { stage.replaceChildren(h('div', { class: 'overlay' }, h('div', { class: 'panel' }, h('h2', {}, "3D can't start here"), h('p', {}, e.message)))); return { stop() {} }; }
   R.setSky(meta.sky); R.setGrid(grid);
 
@@ -172,13 +175,19 @@ export function startBuilder(root, opts) {
         h('span', { class: 'b3-chip' + (b.glow ? ' glow' : '') + (b.see ? ' see' : '') + (id === 'coin' ? ' coin' : ''), style: `--c:${col}` }), b.name);
     };
     palette.replaceChildren(h('h3', {}, 'Blocks'), h('div', { class: 'b3-grid' }, ...ORDER.map(btn)),
+      h('h3', {}, 'Shapes'), h('div', { class: 'b3-grid' }, ...SHAPE_ORDER.map(btn)),
       h('h3', {}, 'Logic blocks'), h('div', { class: 'b3-grid' }, ...LOGIC_ORDER.map(btn)),
       h('h3', {}, 'Shop blocks'), h('div', { class: 'b3-grid' }, ...SHOP_ORDER.map(btn)));
     swatches.replaceChildren(...PALETTE.map((c, i) => h('button', { class: 'swatch', type: 'button', style: `background:${c}`, 'aria-label': 'Color ' + (i + 1), 'aria-pressed': String(ed.color === i), onclick: () => { ed.color = i; renderPalette(); } })));
     const b = BLOCKS[ed.block];
-    blockTip.textContent = b.tip || (b.tint ? 'Pick a color for this block below.' : '');
+    blockTip.textContent = b.turn ? `${b.tip || ''} It faces the way you look (high side: ${DIR_NAME[turnNow()]}). R turns it.` : b.tip || (b.tint ? 'Pick a color for this block below.' : '');
+    turnBtn.hidden = !b.turn;
     swatches.classList.toggle('dim', !b.tint);
   }
+  // which way a shape faces: the way you're looking (so ramps go up away from you), plus R turns
+  function turnNow() { const look = Math.round(cam.yaw / (Math.PI / 2)); return (((look + ed.turn) % 4) + 4) % 4; }
+  const cval = () => ed.color | (BLOCKS[ed.block] && BLOCKS[ed.block].turn ? turnNow() << 4 : 0);
+  function turnShape() { ed.turn = (ed.turn + 1) % 4; renderPalette(); say(`Turned: the high side faces ${DIR_NAME[turnNow()]}.`); }
   function setTool(t) {
     ed.tool = t; ed.boxA = null;
     for (const b of toolRow.children) b.setAttribute('aria-pressed', String(b.dataset.tool === t));
@@ -196,6 +205,7 @@ export function startBuilder(root, opts) {
     if (sp) { cam.x = sp[0] + 0.5 + (Math.random() - 0.5) * 6; cam.z = sp[2] + 12; cam.y = sp[1] + 8; }
   }
   const look = () => [Math.sin(cam.yaw) * Math.cos(cam.pitch), Math.sin(cam.pitch), -Math.cos(cam.yaw) * Math.cos(cam.pitch)];
+  if (location.search.includes('w3test')) window.__b3 = { find: (t) => [...grid.each()].filter((q) => q[3] === t), look: (yaw) => { cam.yaw = yaw; }, stats: () => R.stats };
   const keys = new Set(), mv = new Set();
   const typing = () => document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT' || document.activeElement.tagName === 'TEXTAREA');
   function onKey(e) {
@@ -213,6 +223,7 @@ export function startBuilder(root, opts) {
       const t = { Digit1: 'place', Digit2: 'break', Digit3: 'paint', Digit4: 'pick' }[e.code];
       if (t) { setTool(t); return; }
       if (e.code === 'KeyB') { setBox(!ed.box); return; }
+      if (e.code === 'KeyR' && BLOCKS[ed.block].turn) { turnShape(); return; }
       if (e.code === 'KeyT') { test(); return; }
       if (e.code === 'KeyV') { setSpec(!spec); return; }
       if (spec && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) { e.preventDefault(); nextSpec(e.code === 'ArrowLeft' ? -1 : 1); return; }
@@ -286,7 +297,7 @@ export function startBuilder(root, opts) {
     if (tool === 'pick') {
       if (!tg.hit) return;
       const t = grid.get(tg.hit.x, tg.hit.y, tg.hit.z);
-      ed.block = t; if (BLOCKS[t].tint) ed.color = grid.color(tg.hit.x, tg.hit.y, tg.hit.z);
+      ed.block = t; if (BLOCKS[t].tint) ed.color = grid.color(tg.hit.x, tg.hit.y, tg.hit.z) & 15;
       renderPalette(); setTool('place'); say(`Picked ${BLOCKS[t].name}.`);
       return;
     }
@@ -301,15 +312,15 @@ export function startBuilder(root, opts) {
       const list = [];
       for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
         if (a.tool === 'break') list.push([x, y, z, 0, 0]);
-        else if (a.tool === 'paint') { if (grid.get(x, y, z)) list.push([x, y, z, ed.block, ed.color]); }
-        else list.push([x, y, z, ed.block, ed.color]);
+        else if (a.tool === 'paint') { if (grid.get(x, y, z)) list.push([x, y, z, ed.block, cval()]); }
+        else list.push([x, y, z, ed.block, cval()]);
       }
       change(list); say(`Filled ${list.length} blocks.`);
       return;
     }
     if (tool === 'break') { if (!tg.hit) return; change([[cell.x, cell.y, cell.z, 0, 0]]); sfx('break'); }
-    else if (tool === 'paint') { if (!tg.hit) return; change([[cell.x, cell.y, cell.z, ed.block, ed.color]]); sfx('place'); }
-    else { change([[cell.x, cell.y, cell.z, ed.block, ed.color]]); sfx('place'); }
+    else if (tool === 'paint') { if (!tg.hit) return; change([[cell.x, cell.y, cell.z, ed.block, cval()]]); sfx('place'); }
+    else { change([[cell.x, cell.y, cell.z, ed.block, cval()]]); sfx('place'); }
   }
 
   /* ---------------- changing blocks (with undo, and sharing with the team) ---------------- */
@@ -554,6 +565,8 @@ export function startBuilder(root, opts) {
         if (tool === 'place' && tg.place && grid.inside(tg.place.x, tg.place.y, tg.place.z)) {
           const b = BLOCKS[ed.block];
           scene.push({ prim: 'cube', color: hexRGB(b.tint ? PALETTE[ed.color] : b.color || '#ffd23f'), alpha: 0.45, glow: 0.3, m: M4.trs(tg.place.x + 0.5, tg.place.y + 0.5, tg.place.z + 0.5, 0, 0, 0, 1.0, 1.0, 1.0) });
+          // shapes that turn: an arrow on top pointing up the slope
+          if (b.turn) { const d = turnNow(), a = -d * Math.PI / 2; scene.push({ prim: 'cube', color: [1, 0.82, 0.25], glow: 1, alpha: 0.9, m: M4.trs(tg.place.x + 0.5 + Math.sin(-a) * 0.18, tg.place.y + 1.05, tg.place.z + 0.5 - Math.cos(-a) * 0.18, a, 0, 0, 0.14, 0.06, 0.62) }); }
           lines.push({ pts: box(tg.place.x, tg.place.y, tg.place.z), color: [1, 1, 1, 0.9] });
         }
         if (tg.hit) lines.push({ pts: box(tg.hit.x, tg.hit.y, tg.hit.z), color: tool === 'break' ? [1, 0.3, 0.4, 1] : [1, 0.36, 0.56, 1] });

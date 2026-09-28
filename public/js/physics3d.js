@@ -1,6 +1,6 @@
 // 3D movement and rules. Fixed 60 steps a second and no randomness, so the same buttons
 // always give the same run. The server replays runs with this exact file to check wins.
-import { Grid, decodeBlocks, scan, idx, B, BLOCKS, SX, SY, SZ } from './world.js';
+import { Grid, decodeBlocks, scan, idx, B, BLOCKS, SX, SY, SZ, SHAPE } from './world.js';
 import { decodeReplay } from './replay.js';
 import { initLogic, logicStep } from './logic.js';
 import { GEAR_MODS } from './cosmetics.js';
@@ -10,7 +10,7 @@ export const P3 = {
   speed: 7, accel: 70, airAccel: 32, friction: 60, iceAccel: 9, iceFriction: 2.5,
   gravity: 32, jump: 11, bounce: 18.5, maxFall: 40,
   coyote: 6, boost: 1.6, boostSteps: 90,
-  halfW: 0.34, height: 1.5,
+  halfW: 0.34, height: 1.5, step: 0.55, snap: 0.45,
   crumbleDelay: 36, crumbleGone: 180, belt: 4,
   moveRange: 4, movePeriod: 240,
 };
@@ -78,6 +78,28 @@ function cellKind(S, x, y, z) {
   return k;
 }
 
+/* ---------------- shapes (ramps, half blocks, stairs, poles...) ----------------
+   Plain cubes never use any of this, so worlds without shapes move exactly like before.
+   shapeHit: does a footprint (the part of the player's box inside the cell, 0..1) with its feet ly0 above the
+   cell's bottom overlap the shape? Leaves the shape's top under the footprint in HTOP, and its x/z box in HX0..HZ1. */
+let HTOP = 1, HX0 = 0, HX1 = 1, HZ0 = 0, HZ1 = 1, HSHAPE = 0;
+// a ramp's highest point over the footprint. dir 0: high side north (-z), 1: east, 2: south, 3: west
+const rampTop = (d, fx0, fx1, fz0, fz1) => (d === 0 ? 1 - fz0 : d === 1 ? fx1 : d === 2 ? fz1 : 1 - fx0);
+const backHalf = (d, fx0, fx1, fz0, fz1) => (d === 0 ? fz0 < 0.5 : d === 1 ? fx1 > 0.5 : d === 2 ? fz1 > 0.5 : fx0 < 0.5);
+function shapeHit(sh, c, fx0, fx1, fz0, fz1, ly0) {
+  const d = (c >> 4) & 3;
+  let top = 1, x0 = 0, x1 = 1, z0 = 0, z1 = 1;
+  if (sh === 1) top = 0.5;
+  else if (sh === 2) top = rampTop(d, fx0, fx1, fz0, fz1);
+  else if (sh === 3) top = Math.min(rampTop(d, fx0, fx1, fz0, fz1), rampTop((d + 1) & 3, fx0, fx1, fz0, fz1));
+  else if (sh === 4) top = backHalf(d, fx0, fx1, fz0, fz1) ? 1 : 0.5;
+  else if (sh === 7) { x0 = z0 = 0.3; x1 = z1 = 0.7; if (fx1 <= x0 || fx0 >= x1 || fz1 <= z0 || fz0 >= z1) return false; }
+  if (top > 1) top = 1; else if (top < 0) top = 0;
+  if (ly0 >= top - 1e-7) return false;
+  HTOP = top; HX0 = x0; HX1 = x1; HZ0 = z0; HZ1 = z1; HSHAPE = sh;
+  return true;
+}
+
 // Does the player's box with its feet at (px, py, pz) overlap a solid block? The block hit is left in HX, HY, HZ.
 let HX = 0, HY = 0, HZ = 0;
 function solidAt(S, px, py, pz) {
@@ -92,15 +114,62 @@ function solidAt(S, px, py, pz) {
       if (z < 0 || z >= SZ) continue;
       for (let x = x0; x <= x1; x++) {
         if (x < 0 || x >= SX) continue;
-        const k = KIND[t[x + z * SX + y * SX * SZ]];
+        const i = x + z * SX + y * SX * SZ, k = KIND[t[i]];
         if (!(k & 1)) continue;
         if ((k & 16) && crumbling && !(cellKind(S, x, y, z) & 1)) continue;
+        const sh = SHAPE[t[i]];
+        if (sh) {
+          if (!shapeHit(sh, S.grid.c[i], Math.max(0, px - hw - x), Math.min(1, px + hw - x), Math.max(0, pz - hw - z), Math.min(1, pz + hw - z), py - y)) continue;
+        } else { HTOP = 1; HX0 = 0; HX1 = 1; HZ0 = 0; HZ1 = 1; HSHAPE = 0; }
         HX = x; HY = y; HZ = z;
         return true;
       }
     }
   }
   return S.movers.length ? moverAt(S, px, py, pz) : false;
+}
+// The highest top of everything the player's box (feet at px, py, pz) overlaps, for stepping up onto it.
+// -1 when there's no shape in it at all (unless you're standing on a shape: cubesOk), or a mover is in the way.
+// So in a world without shapes this is always -1, and nothing about moving changes there.
+function topAround(S, px, py, pz, cubesOk) {
+  const hw = P3.halfW, t = S.t;
+  const x0 = Math.floor(px - hw + 1e-7), x1 = Math.floor(px + hw - 1e-7);
+  const y0 = Math.floor(py + 1e-7), y1 = Math.floor(py + P3.height - 1e-7);
+  const z0 = Math.floor(pz - hw + 1e-7), z1 = Math.floor(pz + hw - 1e-7);
+  let best = -1, shapes = false;
+  for (let y = y0; y <= y1; y++) {
+    if (y < 0 || y >= SY) continue;
+    for (let z = z0; z <= z1; z++) {
+      if (z < 0 || z >= SZ) continue;
+      for (let x = x0; x <= x1; x++) {
+        if (x < 0 || x >= SX) continue;
+        const i = x + z * SX + y * SX * SZ, k = KIND[t[i]];
+        if (!(k & 1)) continue;
+        if ((k & 16) && S.crumbles.size && !(cellKind(S, x, y, z) & 1)) continue;
+        const sh = SHAPE[t[i]];
+        if (sh) {
+          if (!shapeHit(sh, S.grid.c[i], Math.max(0, px - hw - x), Math.min(1, px + hw - x), Math.max(0, pz - hw - z), Math.min(1, pz + hw - z), py - y)) continue;
+          shapes = true;
+          if (y + HTOP > best) best = y + HTOP;
+        } else if (y + 1 > best) best = y + 1;
+      }
+    }
+  }
+  if (!shapes && !cubesOk) return -1;
+  if (S.movers.length && moverAt(S, px, py, pz)) return -1;
+  return best;
+}
+// Walking into a ramp, stairs or a half block: step up onto it (up to P3.step high).
+function stepUp(S) {
+  const cubesOk = S.onGround && S.onShape;
+  if (!HSHAPE && !cubesOk) return false; // bumping a plain cube: a wall, like always
+  const p = S.p, y0 = p.y;
+  const top = topAround(S, p.x, p.y, p.z, cubesOk);
+  if (top < 0 || top <= y0 || top - y0 > P3.step) return false;
+  p.y = top + 1e-4;
+  if (solidAt(S, p.x, p.y, p.z)) { p.y = y0; return false; }
+  S.stepped = true;
+  return true;
 }
 // Does the player's box overlap a moving platform? (It's left in HX, HY, HZ, which can be fractional.)
 function moverAt(S, px, py, pz) {
@@ -126,7 +195,8 @@ function moveX(S, d) {
   const p = S.p;
   p.x += d;
   if (!solidAt(S, p.x, p.y, p.z)) return;
-  p.x = d > 0 ? HX - P3.halfW - 1e-4 : HX + 1 + P3.halfW + 1e-4;
+  if (stepUp(S)) return;
+  p.x = d > 0 ? HX + HX0 - P3.halfW - 1e-4 : HX + HX1 + P3.halfW + 1e-4;
   for (let g = 0; g < 3 && solidAt(S, p.x, p.y, p.z); g++) p.x += d > 0 ? -0.05 : 0.05;
   S.v.x = 0;
 }
@@ -134,7 +204,8 @@ function moveZ(S, d) {
   const p = S.p;
   p.z += d;
   if (!solidAt(S, p.x, p.y, p.z)) return;
-  p.z = d > 0 ? HZ - P3.halfW - 1e-4 : HZ + 1 + P3.halfW + 1e-4;
+  if (stepUp(S)) return;
+  p.z = d > 0 ? HZ + HZ0 - P3.halfW - 1e-4 : HZ + HZ1 + P3.halfW + 1e-4;
   for (let g = 0; g < 3 && solidAt(S, p.x, p.y, p.z); g++) p.z += d > 0 ? -0.05 : 0.05;
   S.v.z = 0;
 }
@@ -142,7 +213,8 @@ function moveY(S, d) {
   const p = S.p;
   p.y += d;
   if (!solidAt(S, p.x, p.y, p.z)) return false;
-  p.y = d > 0 ? HY - P3.height - 1e-4 : HY + 1;
+  S.landShape = d < 0 ? HSHAPE : 0;
+  p.y = d > 0 ? HY - P3.height - 1e-4 : HY + HTOP;
   for (let g = 0; g < 3 && solidAt(S, p.x, p.y, p.z); g++) p.y += d > 0 ? -0.05 : 0.05;
   S.v.y = 0;
   return true;
@@ -282,6 +354,17 @@ export function step3(S, value) {
   const hitY = S.v.y ? moveY(S, S.v.y * dt) : false;
   const wasGround = S.onGround;
   S.onGround = hitY && fallV < 0;
+  // walking down a ramp or stairs: stay on them instead of hopping off every step (only after standing on a shape)
+  if (!S.onGround && wasGround && fallV <= 0) {
+    // after standing on a shape anything counts; otherwise only a shape right below (so plain-cube worlds never snap)
+    const top = topAround(S, S.p.x, S.p.y - P3.snap, S.p.z, !!S.onShape);
+    if (top >= 0 && top <= S.p.y + 1e-6) {
+      const y0 = S.p.y; S.p.y = top;
+      if (solidAt(S, S.p.x, S.p.y, S.p.z)) S.p.y = y0; else { S.onGround = true; S.v.y = 0; S.onShape = true; }
+    }
+  }
+  if (S.onGround && hitY) S.onShape = S.landShape > 0;
+  else if (!S.onGround) S.onShape = S.onShape && S.air < 2;
   if (S.onGround) S.air = 0; else { S.air++; if (S.air > 20) S.tpLock = false; }
   if (S.onGround && !wasGround && fallV < -12) S.events.push({ t: 'land', v: -fallV, x: S.p.x, y: S.p.y, z: S.p.z });
 

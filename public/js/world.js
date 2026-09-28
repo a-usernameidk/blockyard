@@ -58,8 +58,33 @@ export const BLOCKS = [
   { id: 'tbuild', name: 'Plain block', pat: 10, tint: true, old: true },
   // creator shops: a shop keeper stands on it and sells what you set up in the World tab
   { id: 'shopstand', name: 'Shop stand', pat: 4, color: '#e0b12a', tip: 'Your shop: a shop keeper stands here and sells the things you pick in the World tab (Shop). The coins go to you.' },
+  // Shapes (engine upgrade): real shapes, not just cubes. Press R in the builder to turn them (4 ways).
+  // The way a shape faces is saved in the color field's top 2 bits (color & 48), so old worlds are unchanged.
+  { id: 'slab', name: 'Half block', pat: 10, tint: true, shape: 'slab', tip: 'Half as tall. You can walk right up onto it.' },
+  { id: 'wedge', name: 'Ramp', pat: 10, tint: true, shape: 'wedge', turn: true, tip: 'A slope you can walk up. Press R to turn it.' },
+  { id: 'corner', name: 'Corner ramp', pat: 10, tint: true, shape: 'corner', turn: true, tip: 'The corner piece for ramps. Press R to turn it.' },
+  { id: 'stairs', name: 'Stairs', pat: 10, tint: true, shape: 'stairs', turn: true, tip: 'Two steps you can walk up. Press R to turn them.' },
+  { id: 'cyl', name: 'Cylinder', pat: 10, tint: true, shape: 'cyl', tip: 'A round pillar.' },
+  { id: 'ball', name: 'Ball', pat: 10, tint: true, shape: 'ball', tip: 'A big round ball.' },
+  { id: 'pole', name: 'Pole', pat: 12, tint: true, shape: 'pole', tip: 'A thin post. Great for fences and lamp posts.' },
+  { id: 'grassRamp', name: 'Grass ramp', pat: 1, color: '#5fc76b', side: '#9a6a3f', shape: 'wedge', turn: true, tip: 'A grassy hill slope. Press R to turn it.' },
+  { id: 'stoneRamp', name: 'Stone ramp', pat: 3, color: '#a3abc2', shape: 'wedge', turn: true, tip: 'Press R to turn it.' },
+  { id: 'woodRamp', name: 'Wood ramp', pat: 4, color: '#c98b4f', shape: 'wedge', turn: true, tip: 'Press R to turn it.' },
+  { id: 'brickRamp', name: 'Brick roof', pat: 5, color: '#c9563f', shape: 'wedge', turn: true, tip: 'Great for roofs. Press R to turn it.' },
+  { id: 'stoneSlab', name: 'Stone slab', pat: 3, color: '#a3abc2', shape: 'slab' },
+  { id: 'woodSlab', name: 'Wood slab', pat: 4, color: '#c98b4f', shape: 'slab' },
+  { id: 'woodStairs', name: 'Wood stairs', pat: 4, color: '#c98b4f', shape: 'stairs', turn: true, tip: 'Press R to turn them.' },
+  { id: 'stoneStairs', name: 'Stone stairs', pat: 3, color: '#a3abc2', shape: 'stairs', turn: true, tip: 'Press R to turn them.' },
 ];
 export const B = Object.fromEntries(BLOCKS.map((b, i) => [b ? b.id : 'air', i]));
+/* ---------------- shapes ----------------
+   A shape's direction (0-3, turning clockwise seen from above) is in color bits 4-5.
+   0: the high side is north (-z), 1: east (+x), 2: south (+z), 3: west (-x). */
+export const SHAPE_IDS = ['', 'slab', 'wedge', 'corner', 'stairs', 'cyl', 'ball', 'pole'];
+export const SHAPE = new Uint8Array(64); // block type -> shape number (0 = a plain cube)
+BLOCKS.forEach((b, i) => { if (b && b.shape) SHAPE[i] = SHAPE_IDS.indexOf(b.shape); });
+export const rotOf = (c) => (c >> 4) & 3;
+export const isShape = (t) => SHAPE[t] > 0;
 BLOCKS.forEach((b, i) => { if (b) b.n = i; });
 
 export const COLOR_NAMES = ['White', 'Gray', 'Slate', 'Navy', 'Red', 'Orange', 'Yellow', 'Green', 'Teal', 'Blue', 'Purple', 'Pink', 'Brown', 'Tan', 'Sky', 'Forest'];
@@ -118,7 +143,7 @@ export class Grid {
   color(x, y, z) { return this.inside(x, y, z) ? this.c[idx(x, y, z)] : 0; }
   set(x, y, z, t, c = 0) {
     if (!this.inside(x, y, z)) return false;
-    const i = idx(x, y, z), was = this.t[i], cc = t && BLOCKS[t] && BLOCKS[t].tint ? c & 15 : 0;
+    const i = idx(x, y, z), was = this.t[i], bk = t && BLOCKS[t], cc = bk ? (bk.tint ? c & 15 : 0) | (bk.turn ? c & 48 : 0) : 0;
     if (was === t && this.c[i] === cc) return false;
     if (was && !t) this.count--; else if (!was && t) this.count++;
     this.special = null; this.version++;
@@ -167,7 +192,7 @@ export function decodeBlocks(str, grid = new Grid()) {
     const v = [];
     for (let j = 0; j < 7; j++) { const code = str.charCodeAt(k + j); const d = code < 128 ? VAL[code] : -1; if (d < 0) throw new Error('That world data is broken.'); v.push(d); }
     const pos = v[0] | (v[1] << 6) | (v[2] << 12) | (v[3] << 18);
-    const x = pos & 127, z = (pos >> 7) & 127, y = (pos >> 14) & 63, n = v[4] + 1, ty = v[5], co = v[6] & 15;
+    const x = pos & 127, z = (pos >> 7) & 127, y = (pos >> 14) & 63, n = v[4] + 1, ty = v[5], co = v[6] & 63;
     if (!ty || ty >= BLOCKS.length || x + n > SX) throw new Error('That world data is broken.');
     for (let i = 0; i < n; i++) grid.set(x + i, y, z, ty, co);
     if (y < minY) minY = y;

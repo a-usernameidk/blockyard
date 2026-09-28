@@ -5,8 +5,8 @@ import { store } from './api.js';
 export const GFX = {
   perf: { name: 'Extreme performance', info: 'For slow or old Chromebooks: half the pixels, no clouds or shadows, shorter view. Smooth but blurry.', low: true, dpr: () => 0.5, far: 80, clouds: false, shadows: false },
   fast: { name: 'Fast', info: 'Less detail, runs faster.', low: true, dpr: () => 1, far: 140, clouds: true, shadows: true },
-  pretty: { name: 'Pretty', info: 'The normal look.', low: false, dpr: () => Math.min(2, window.devicePixelRatio || 1), far: 230, clouds: true, shadows: true },
-  ultra: { name: 'Extreme quality', info: 'Extra sharp, and you can see much further. Needs a fast computer.', low: false, dpr: () => Math.min(3, (window.devicePixelRatio || 1) * 1.5), far: 320, clouds: true, shadows: true },
+  pretty: { name: 'Pretty', info: 'HD graphics: real shadows from the sun, shiny materials, glowing lights and smooth edges.', low: false, dpr: () => Math.min(2, window.devicePixelRatio || 1), far: 230, clouds: true, shadows: true, hd: { shadowSize: 2048, shadowRange: 44, msaa: 4, bloom: 0.9 } },
+  ultra: { name: 'Extreme quality', info: 'HD graphics turned all the way up: sharper, sharper shadows that reach further, and you see much further. Needs a strong computer.', low: false, dpr: () => Math.min(3, (window.devicePixelRatio || 1) * 1.5), far: 320, clouds: true, shadows: true, hd: { shadowSize: 4096, shadowRange: 70, msaa: 4, bloom: 1 } },
 };
 // Auto: starts at Pretty and watches how smooth the game is. If it gets choppy it steps down
 // (Fast, then Extreme performance); when there's lots of room again it steps back up.
@@ -20,6 +20,7 @@ GFX.auto = {
   get far() { return GFX[AUTO_STEPS[autoAt]].far; },
   get clouds() { return GFX[AUTO_STEPS[autoAt]].clouds; },
   get shadows() { return GFX[AUTO_STEPS[autoAt]].shadows; },
+  get hd() { return GFX.pretty.hd; },
   // called every frame with the frame time; returns the new step name when it changes
   tick(dt) {
     if (!(dt > 0) || dt > 0.5) return null;
