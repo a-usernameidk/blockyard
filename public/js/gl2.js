@@ -137,7 +137,7 @@ float shadowAt(vec4 ls, float ndl) {
   if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;
   float bias = 0.0004 + 0.0012 * (1.0 - ndl);
   float s = 0.0;
-  for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) s += texture(u_shadow, vec3(p.xy + vec2(float(x), float(y)) * u_texel * 1.25, p.z - bias));
+  for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) s += textureLod(u_shadow, vec3(p.xy + vec2(float(x), float(y)) * u_texel * 1.25, p.z - bias), 0.0);
   s /= 9.0;
   vec2 e = min(p.xy, 1.0 - p.xy);
   return mix(1.0, s, smoothstep(0.0, 0.06, min(e.x, e.y)));
@@ -307,7 +307,7 @@ void main() {
 // hd: { shadowSize, shadowRange, msaa, bloom }. Returns null when WebGL 2 isn't there (use the classic renderer then).
 export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
-  if (!gl) return null;
+  if (!gl) { if (typeof window !== 'undefined') window.__hdError = 'WebGL 2 is not available'; return null; }
   const SM = hd.shadowSize || 2048, RANGE = hd.shadowRange || 44, BLOOM = hd.bloom ?? 0.9;
   const compile = (vs, fs) => {
     const p = gl.createProgram();
@@ -491,8 +491,13 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     T = { w, h, hw, hh, qw, qh, ms, scene, sceneFb, h1, h2, q1, q2, h1f: fbFor(h1), h2f: fbFor(h2), q1f: fbFor(q1), q2f: fbFor(q2),
       tex: [scene, h1, h2, q1, q2], rb: [msColor, msDepth] };
     T.fb = [ms, sceneFb, T.h1f, T.h2f, T.q1f, T.q2f];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, ms);
+    T.ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
+  // check now that this graphics card can draw into the buffers (if not, the simpler setup is tried)
+  makeTargets(16, 16);
+  if (!T.ok) throw new Error('HD buffers are not supported here (' + samples + 'x anti-aliasing)');
 
   /* ---------------- frustum ---------------- */
   function planes(m) {

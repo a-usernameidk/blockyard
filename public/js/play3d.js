@@ -171,7 +171,7 @@ export function startWorld(root, opts) {
   R.setSky(world.sky);
   R.setGrid(viewGrid);
   if (isV2) {
-    if (!R.setParts) { msgBox.replaceChildren(h('div', { class: 'panel' }, h('h2', {}, "This world needs newer 3D graphics"), h('p', {}, 'Engine v2 worlds need WebGL 2, which this browser or computer has turned off. Try another browser, or update this one.'))); msgBox.hidden = false; }
+    if (!R.setParts) { msgBox.replaceChildren(h('div', { class: 'panel' }, h('h2', {}, "This world needs newer 3D graphics"), h('p', {}, 'Engine v2 worlds need the HD graphics (WebGL 2), and they did not start on this computer. In Chrome, check Settings > System > "Use graphics acceleration when available" is on, then restart Chrome.'), h('p', { class: 'small' }, 'What went wrong: ' + (window.__hdError || 'unknown') + '.'))); msgBox.hidden = false; }
     else R.setParts(world.parts, (q) => q.k === 'coin'); // the game draws coins itself (they spin, and vanish when grabbed)
   }
 

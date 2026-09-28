@@ -85,7 +85,7 @@ export function startBuilder2(root, opts) {
   let R;
   const hd = opts.hd || GFX.pretty.hd;
   try { R = createRenderer(canvas, { hd }); } catch (e) { root.replaceChildren(h('p', { class: 'msg' }, e.message)); return { stop() {}, getWorld: () => src }; }
-  if (!R.setParts) { root.replaceChildren(bar, h('div', { class: 'panel-note' }, h('h3', {}, 'The v2 editor needs newer 3D graphics'), h('p', {}, 'Engine v2 needs WebGL 2, which this browser or computer has turned off. Try another browser, or update this one.'))); return { stop() {}, getWorld: () => getWorld() }; }
+  if (!R.setParts) { root.replaceChildren(bar, h('div', { class: 'panel-note' }, h('h3', {}, 'The v2 editor needs newer 3D graphics'), h('p', {}, 'Engine v2 needs the HD graphics (WebGL 2), and they did not start on this computer. In Chrome, check Settings > System > "Use graphics acceleration when available" is on, then restart Chrome. Updating Chrome can help too.'), h('p', { class: 'small' }, 'What went wrong: ' + (window.__hdError || 'unknown') + '. If it keeps happening, send this to the Blockyard admins.'))); return { stop() {}, getWorld: () => getWorld() }; }
   R.setSky(meta.sky);
 
   /* ---------------- the world ---------------- */

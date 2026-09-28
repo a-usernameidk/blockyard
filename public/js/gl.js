@@ -1,7 +1,9 @@
 // Blockyard's own 3D renderer (plain WebGL, no libraries).
 // Worlds are split into 16x16x16 chunks. Each chunk becomes one mesh with soft corner shadows
 // (ambient occlusion) and block patterns painted by the shader, so there are no texture files.
-import { BLOCKS, B, PALETTE, SKIES, SX, SY, SZ } from './world.js';
+import { SKIES, SX, SY, SZ } from './world.js';
+import { FACES, meshChunk, hexRGB as hexRGB0 } from './mesh3d.js';
+import { createRendererHD } from './gl2.js';
 
 /* ---------------- tiny matrix library ---------------- */
 export const M4 = {
@@ -68,7 +70,7 @@ export const M4 = {
   },
 };
 
-export const hexRGB = (h) => { const n = parseInt(String(h).slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
+export const hexRGB = hexRGB0;
 
 /* ---------------- shaders ---------------- */
 const VOXEL_VS = `
@@ -77,7 +79,7 @@ uniform mat4 u_vp; uniform vec3 u_cam; uniform vec2 u_fogr;
 varying vec3 v_col; varying vec3 v_wp; varying vec2 v_uv; varying float v_pat; varying float v_fog; varying float v_n; varying float v_glow;
 void main() {
   gl_Position = u_vp * vec4(a_pos, 1.0);
-  v_col = a_col.rgb; v_glow = a_col.a; v_wp = a_pos; v_uv = a_uvp.xy; v_pat = a_uvp.z; v_n = a_uvp.w;
+  v_col = a_col.rgb; v_glow = a_col.a; v_wp = a_pos; v_uv = a_uvp.xy / 200.0; v_pat = a_uvp.z; v_n = a_uvp.w;
   float d = distance(a_pos, u_cam);
   v_fog = clamp((d - u_fogr.x) / (u_fogr.y - u_fogr.x), 0.0, 1.0);
 }`;
@@ -188,39 +190,19 @@ void main() {
 const LINE_VS = `attribute vec3 a_pos; uniform mat4 u_vp; void main() { gl_Position = u_vp * vec4(a_pos, 1.0); }`;
 const LINE_FS = `precision mediump float; uniform vec4 u_color; void main() { gl_FragColor = u_color; }`;
 
-/* ---------------- faces of a cube ---------------- */
-// For each face: normal, the 4 corners seen from outside (counter-clockwise), and the face's right/up directions (for shading corners).
-const FACES = [
-  { n: [1, 0, 0], c: [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]], r: [0, 0, -1], u: [0, 1, 0], shade: 'x+' },
-  { n: [-1, 0, 0], c: [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]], r: [0, 0, 1], u: [0, 1, 0], shade: 'x-' },
-  { n: [0, 1, 0], c: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], r: [1, 0, 0], u: [0, 0, -1], shade: 'y+' },
-  { n: [0, -1, 0], c: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], r: [1, 0, 0], u: [0, 0, 1], shade: 'y-' },
-  { n: [0, 0, 1], c: [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], r: [1, 0, 0], u: [0, 1, 0], shade: 'z+' },
-  { n: [0, 0, -1], c: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]], r: [-1, 0, 0], u: [0, 1, 0], shade: 'z-' },
-];
-const CORNER_UV = [[0, 0], [1, 0], [1, 1], [0, 1]];
-const CORNER_DIR = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-const AO = [0.52, 0.68, 0.84, 1];
-
-// Which pattern and color each face of a block uses.
-function faceLook(t, color, f) {
-  const b = BLOCKS[t];
-  const tint = b.tint ? hexRGB(PALETTE[color & 15]) : hexRGB(b.color || '#ffffff');
-  if (t === B.grass) return f === 2 ? [1, hexRGB(b.color)] : f === 3 ? [2, hexRGB(b.side)] : [21, hexRGB(b.side)];
-  if (t === B.plastic) return [f === 2 ? 30 : 10, tint];
-  if (t === B.bounce) return [f === 2 ? 15 : 31, tint];
-  if (t === B.speed) return [f === 2 ? 16 : 31, tint];
-  if (t === B.checkpoint) return [f === 2 ? 18 : 10, tint];
-  if (t === B.spawn) return [f === 2 ? 20 : 10, tint];
-  if (b.dir) return [f === 2 ? b.pat : 12, tint];
-  if (t === B.teleport) return [f === 2 ? 36 : 11, tint];
-  return [b.pat || 10, tint];
-}
-
 /* ---------------- the renderer ---------------- */
-export function createRenderer(canvas, { low = false, dpr: dprFn = null } = {}) {
+// hd: settings for the HD renderer (gl2.js). Without it, or without WebGL 2, this classic renderer is used.
+export function createRenderer(canvas, { low = false, dpr: dprFn = null, hd = null } = {}) {
+  if (hd && !low) {
+    // try the full HD look, then a simpler one (no anti-aliasing / bloom, smaller shadows) for pickier graphics cards
+    for (const h of [hd, { ...hd, msaa: 0, bloom: 0, shadowSize: 1024 }]) {
+      try { const r = createRendererHD(canvas, { dpr: dprFn, hd: h }); if (r) { if (h !== hd) console.warn('HD graphics: using the simpler setup'); return r; } break; }
+      catch (e) { console.warn('HD graphics failed', e); window.__hdError = String(e && e.message || e); }
+    }
+  }
   const gl = canvas.getContext('webgl', { antialias: !low, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false })
-    || canvas.getContext('experimental-webgl');
+    || canvas.getContext('experimental-webgl')
+    || canvas.getContext('webgl2'); // (when the HD renderer already took this canvas and then failed)
   if (!gl) throw new Error('This browser or computer has 3D graphics (WebGL) turned off.');
   const compile = (vs, fs) => {
     const p = gl.createProgram();
@@ -281,61 +263,15 @@ export function createRenderer(canvas, { low = false, dpr: dprFn = null } = {}) 
   const CS = 16, CX = SX / CS, CY = SY / CS, CZ = SZ / CS;
   let grid = null;
   const chunks = new Map(); // index -> { x, y, z, solid: {buf, n}, glass: {buf, n}, dirty }
-  let skyInfo = SKIES.day, faceShade = {};
-  const setShade = () => {
-    const s = skyInfo.sun, l = Math.hypot(...s);
-    const sun = s.map((v) => v / l);
-    for (const f of FACES) faceShade[f.shade] = skyInfo.amb + (1 - skyInfo.amb) * Math.max(0, f.n[0] * sun[0] + f.n[1] * sun[1] + f.n[2] * sun[2]) * skyInfo.light;
-    // let the bottom and back sides never go completely flat
-    for (const k in faceShade) faceShade[k] = Math.max(faceShade[k], skyInfo.amb * 0.95);
-  };
+  let skyInfo = SKIES.day, light = null;
+  const setShade = () => { const v = skyInfo.sun, l = Math.hypot(...v); light = { amb: skyInfo.amb, light: skyInfo.light, sun: v.map((q) => q / l) }; };
   setShade();
-  const opaqueAt = (x, y, z) => { const t = grid.get(x, y, z); return t && !BLOCKS[t].see && !BLOCKS[t].entity && !BLOCKS[t].ghost; };
 
   function buildChunk(cx, cy, cz) {
     const key = cx + cz * CX + cy * CX * CZ;
     let ch = chunks.get(key);
     if (!ch) { ch = { x: cx, y: cy, z: cz, solid: null, glass: null }; chunks.set(key, ch); }
-    const out = { solid: { pos: [], att: [] }, glass: { pos: [], att: [] } };
-    const x0 = cx * CS, y0 = cy * CS, z0 = cz * CS;
-    const T = grid.t, Cc = grid.c;
-    for (let y = y0; y < y0 + CS; y++) for (let z = z0; z < z0 + CS; z++) for (let x = x0; x < x0 + CS; x++) {
-      const i = x + z * SX + y * SX * SZ, t = T[i];
-      if (!t) continue;
-      const b = BLOCKS[t];
-      if (!b || b.entity) continue;
-      const see = !!b.see;
-      const dest = see ? out.glass : out.solid;
-      for (let f = 0; f < 6; f++) {
-        const F = FACES[f];
-        const nx = x + F.n[0], ny = y + F.n[1], nz = z + F.n[2];
-        const nt = grid.get(nx, ny, nz);
-        if (nt) {
-          const nb = BLOCKS[nt];
-          if (see ? nt === t : (!nb.see && !nb.entity && !nb.ghost)) continue;
-        }
-        const [pat, rgb] = faceLook(t, Cc[i], f);
-        const glow = b.glow ? 1 : 0;
-        const base = glow ? 1 : faceShade[F.shade];
-        const ao = [0, 0, 0, 0];
-        for (let k = 0; k < 4; k++) {
-          if (glow || see) { ao[k] = 3; continue; }
-          const [du, dv] = CORNER_DIR[k];
-          const ax = nx + F.r[0] * du, ay = ny + F.r[1] * du, az = nz + F.r[2] * du;
-          const bx = nx + F.u[0] * dv, by = ny + F.u[1] * dv, bz = nz + F.u[2] * dv;
-          const s1 = opaqueAt(ax, ay, az), s2 = opaqueAt(bx, by, bz);
-          const c = opaqueAt(nx + F.r[0] * du + F.u[0] * dv, ny + F.r[1] * du + F.u[1] * dv, nz + F.r[2] * du + F.u[2] * dv);
-          ao[k] = s1 && s2 ? 0 : 3 - (s1 + s2 + c);
-        }
-        const order = ao[0] + ao[2] < ao[1] + ao[3] ? [1, 2, 3, 1, 3, 0] : [0, 1, 2, 0, 2, 3];
-        for (const k of order) {
-          const c = F.c[k];
-          dest.pos.push(x + c[0], y + c[1], z + c[2]);
-          const sh = glow ? 255 : Math.round(Math.min(1, base * AO[ao[k]]) * 254);
-          dest.att.push(Math.round(rgb[0] * 255), Math.round(rgb[1] * 255), Math.round(rgb[2] * 255), sh, CORNER_UV[k][0], CORNER_UV[k][1], pat, f);
-        }
-      }
-    }
+    const out = meshChunk(grid, cx, cy, cz, light);
     for (const kind of ['solid', 'glass']) {
       const o = out[kind];
       if (ch[kind]) { gl.deleteBuffer(ch[kind].pb); gl.deleteBuffer(ch[kind].ab); ch[kind] = null; }
@@ -418,8 +354,8 @@ export function createRenderer(canvas, { low = false, dpr: dprFn = null } = {}) 
       const m = c[kind];
       gl.bindBuffer(gl.ARRAY_BUFFER, m.pb); gl.vertexAttribPointer(prog.a.a_pos, 3, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, m.ab);
-      gl.vertexAttribPointer(prog.a.a_col, 4, gl.UNSIGNED_BYTE, true, 8, 0);
-      gl.vertexAttribPointer(prog.a.a_uvp, 4, gl.UNSIGNED_BYTE, false, 8, 4);
+      gl.vertexAttribPointer(prog.a.a_col, 4, gl.UNSIGNED_BYTE, true, 12, 0);
+      gl.vertexAttribPointer(prog.a.a_uvp, 4, gl.UNSIGNED_BYTE, false, 12, 4);
       gl.drawArrays(gl.TRIANGLES, 0, m.n);
       state.faces += m.n / 6; state.drawn++;
     }
