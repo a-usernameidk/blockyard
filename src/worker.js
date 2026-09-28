@@ -633,6 +633,12 @@ async function checkFields(ctx, input) {
     if (!run.won) fail(400, "Your recorded run didn't reach the goal. Beat your level in Test, then publish right away.");
     return { kind, desc, visibility, name: level.n, style: level.style, theme: level.theme, w: level.w, h: level.h, data: toWire(level) };
   }
+  // engine v2 is a beta for now: the admin, Builders, Builder Pros and OG players
+  if (input.world && input.world.engine === 2) {
+    const u = needUser(ctx);
+    const r = await ctx.db.prepare('SELECT role, tags FROM users WHERE id = ?').bind(u.id).first();
+    if (!u.admin && !(r && r.role) && !cleanTags(r && r.tags).includes('og')) fail(403, 'Engine v2 is in beta: only Builders and OG players can publish v2 worlds for now. You can still build and test one.');
+  }
   // the heavy part (checking every block, replaying the run) happens in a Durable Object
   const w = await verify(env, { type: 'publish3d', world: input.world, replay: String(input.replay || ''), opts: { maxSteps: maxSteps3d(env) } });
   if (isRude(w.world.n) || isRude(desc)) fail(400, 'Something in the name or description has a blocked word.');

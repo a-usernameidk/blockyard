@@ -14,6 +14,8 @@ import { Grid, decodeBlocks, encodeBlocks, BLOCKS, B, SKIES, MAX_BLOCKS, SX, SY,
 import { GAMES, ROUND, PRIZE, WEAPONS, BOTS, BOT_NAMES, BOT_LOOKS, gameConfig, onHill, lavaLevel, inBox } from '../public/js/games.js';
 import { coinStmts, questBumps, loadEvents, xpStmt, timeXp } from './econ.js';
 import { XP, isSong } from '../public/js/cosmetics.js';
+import { normalizeParts, partsThumb } from '../public/js/parts.js';
+import { runReplay2 } from '../public/js/phys2.js';
 import { cleanDisplay, cleanTags } from '../public/js/names.js';
 
 const MAX_PLAYERS = 16;
@@ -216,7 +218,7 @@ export class Room {
         const out = [];
         for (const e of msg.b.slice(0, 16)) {
           if (!Array.isArray(e)) continue;
-          const x = e[0] | 0, y = e[1] | 0, z = e[2] | 0, t = e[3] | 0, c = (e[4] | 0) & 15;
+          const x = e[0] | 0, y = e[1] | 0, z = e[2] | 0, t = e[3] | 0, c = (e[4] | 0) & 63;
           if (x < 0 || y < 0 || z < 0 || x >= SX || y >= SY || z >= SZ || (t && !LIVE_BLOCKS.includes(t))) continue;
           const i = idx(x, y, z);
           if (!this.edits.has(i) && this.edits.size >= MAX_EDITS) { send(ws, { t: 'sys', m: 'This server has lots of building already. The owner can undo it all to start fresh.' }); break; }
@@ -704,7 +706,7 @@ export class Room {
       const out = [];
       for (const b of op.b) {
         if (!Array.isArray(b)) continue;
-        const x = b[0] | 0, y = b[1] | 0, z = b[2] | 0, t = b[3] | 0, c = (b[4] | 0) & 15;
+        const x = b[0] | 0, y = b[1] | 0, z = b[2] | 0, t = b[3] | 0, c = (b[4] | 0) & 63;
         if (x < 0 || y < 0 || z < 0 || x >= SX || y >= SY || z >= SZ || t < 0 || t >= BLOCKS.length) continue;
         if (t && !d.grid.get(x, y, z) && d.grid.count >= MAX_BLOCKS) { send(ws, { t: 'sys', m: `This world is full (${MAX_BLOCKS} blocks).` }); break; }
         if (t === B.spawn) {
@@ -738,7 +740,14 @@ export class Room {
       if (job.type === '2d') return { ok: true, run: runReplay(job.raw ? job.level : normalizeLevel(job.level), String(job.replay || ''), job.opts || {}) };
       if (job.type === '3d') {
         const world = job.builtin ? builtinWorld(job.builtin).get().world : job.world;
+        if (world && world.engine === 2) return { ok: true, run: runReplay2(world, String(job.replay || ''), job.opts || {}) };
         return { ok: true, run: runReplay3d(world, String(job.replay || ''), job.opts || {}) };
+      }
+      if (job.type === 'publish3d' && job.world && job.world.engine === 2) {
+        // engine v2 (parts): check and clean every part, the picture, and the creator's run for obbies
+        const w = normalizeParts(job.world);
+        const run = w.world.mode === 'obby' ? runReplay2(w.world, String(job.replay || ''), job.opts || {}) : null;
+        return { ok: true, world: w.world, blocks: w.info.blocks, coins: w.info.coins.length, thumb: partsThumb(w.world), run };
       }
       if (job.type === 'publish3d') {
         // check and clean a world, make its little picture, and (for obbies) replay the creator's run

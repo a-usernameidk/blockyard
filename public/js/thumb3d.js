@@ -1,5 +1,6 @@
 // Draws the little raised map of a 3D world used on cards.
 import { BLOCKS, PALETTE, SKIES, readThumb, worldThumb, decodeBlocks } from './world.js';
+import { partsThumb } from './parts.js';
 
 const rgb = (h) => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
 const css = (c, k) => `rgb(${Math.round(Math.min(255, c[0] * k))},${Math.round(Math.min(255, c[1] * k))},${Math.round(Math.min(255, c[2] * k))})`;
@@ -38,4 +39,4 @@ export function drawWorldThumb(cv, thumb, skyId = 'day') {
     c.fillStyle = css(base, b.glow ? 1.15 : 0.95 + 0.1 * ((col + r) % 2)); c.fillRect(x, sy, cs + 0.5, cs * 0.55 + 0.5);
   }
 }
-export function thumbOfWorld(world) { try { return worldThumb(decodeBlocks(world.b)); } catch (e) { return ''; } }
+export function thumbOfWorld(world) { try { return world.engine === 2 ? partsThumb(world) : worldThumb(decodeBlocks(world.b)); } catch (e) { return ''; } }

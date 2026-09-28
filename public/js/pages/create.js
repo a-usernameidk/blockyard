@@ -1,10 +1,12 @@
 // Create: your projects (2D levels and 3D worlds), the editors, building with friends, and publishing.
+import { gfx } from '../settings.js';
 import { $, $$, el, session, show, go, addRoute, ask, toast, openModal, closeModal, copyText, siteBase, needLogin, plural, timeAgo, onLeave, paintCanvas } from '../app.js';
 import { normalizeLevel, encodeShare, isRude, cleanText, LIMITS, toWire } from '../format.js';
 import { openEditor, closeEditor, currentLevel, validate, setMsg, updateMeta, newLevel, getDraft, onEditorChange, attachCollab, detachCollab, applyRemote, loadShared, showCursor, isCollab } from '../editor.js';
 import { store, mine, myWorlds, newId, api, isOnline } from '../api.js';
 import { progress } from '../progress.js';
 import { emptyWorld, normalizeWorld } from '../world.js';
+import { emptyParts, normalizeParts } from '../parts.js';
 import { TEMPLATES_2D, TEMPLATES_3D } from '../templates.js';
 import { drawThumb, thumbWindow, drawBackground, drawTile } from '../render2d.js';
 import { drawPip } from '../art.js';
@@ -38,7 +40,7 @@ async function showCreate() {
   mineBox.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
   $('#proj-shared-wrap').hidden = true; $('#proj-pub-wrap').hidden = true;
   const localCards = [
-    ...myWorlds.list().map((w) => projectCard({ kind: '3d', name: w.world.n, local: true, world: w.world, updated: w.updated, open: () => go('#/build/local/' + w.id), remove: () => removeLocal('3d', w.id, w.world.n), upload: session.user ? () => upload('3d', w.world, () => myWorlds.remove(w.id)) : null })),
+    ...myWorlds.list().map((w) => projectCard({ kind: '3d', name: w.world.n, local: true, world: w.world, updated: w.updated, open: () => go('#/build/local/' + w.id), remove: () => removeLocal('3d', w.id, w.world.n), upload: session.user && w.world.engine !== 2 ? () => upload('3d', w.world, () => myWorlds.remove(w.id)) : null })),
     ...mine.list().map((lv) => projectCard({ kind: '2d', name: lv.n, local: true, level: lv, updated: lv.updated, open: () => go('#/edit/local/' + lv.id), play: () => go('#/play/' + lv.id), remove: () => removeLocal('2d', lv.id, lv.n), upload: session.user ? () => upload('2d', lv, () => mine.remove(lv.id)) : null })),
   ];
   if (!session.user) {
@@ -135,6 +137,8 @@ const rawLevel = (lv) => { const n = normalizeLevel(lv); return { n: n.n, style:
 
 /* ---------------- starting new things ---------------- */
 async function newProject(kind, from) {
+  // Engine v2 worlds are saved in this browser for now (building together comes later)
+  if (kind === '3d' && from && from.engine === 2) { const id = newId(); myWorlds.save({ id, world: from }); go('#/build/local/' + id); return; }
   if (session.user) {
     try {
       const data = kind === '3d' ? (from || emptyWorld('obby')) : rawLevel(from || newLevel('adventure'));
@@ -152,6 +156,14 @@ $('#new-2d').addEventListener('click', async () => {
   if (pick) newProject('2d', TEMPLATES_2D[pick].make());
 });
 $('#new-3d').addEventListener('click', async () => {
+  const engine = await ask('New 3D world', 'Which engine? Engine v1 builds with blocks on a grid (all the templates and minigames). Engine v2 (beta) builds with free parts you can size, move and turn any way, like Roblox Studio.',
+    [{ label: 'Engine v1 (blocks)', value: 'v1', cls: 'btn-grass' }, { label: 'Engine v2 (parts) beta', value: 'v2', cls: 'btn-sun' }]);
+  if (!engine) return;
+  if (engine === 'v2') {
+    const mode = await ask('New Engine v2 world', 'An obby (reach the goal) or a hangout (just chill)?', [{ label: 'Obby', value: 'obby', cls: 'btn-grass' }, { label: 'Hangout', value: 'hangout', cls: 'btn-sun' }]);
+    if (mode) newProject('3d', emptyParts(mode));
+    return;
+  }
   const pick = await ask('New 3D world', 'Pick where to start: a blank obby or hangout, a ready-made minigame (Race, Tag, King of the Hill, Rising Lava, Paintball), or a Logic demo.',
     Object.entries(TEMPLATES_3D).map(([k, t], i) => ({ label: t.name, value: k, cls: i === 0 ? 'btn-grass' : i === 1 ? 'btn-sun' : '' })));
   if (pick) newProject('3d', TEMPLATES_3D[pick].make());
@@ -292,12 +304,18 @@ async function openWorld(id, local) {
   const root = $('#b3-root');
   root.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
   const { startBuilder } = await import('../build3d.js');
+  const { startBuilder2 } = await import('../build2.js');
   const low = store.get('gfx-low', false);
-  const common = { look: progress.data.equip, me: session.user ? { name: session.user.name } : { name: 'You' }, low, onExit: () => go('#/create'), onPublish: (w, proof, api3) => publish3d(w, proof, api3) };
+  const g3 = gfx();
+  const common = { look: progress.data.equip, me: session.user ? { name: session.user.name } : { name: 'You' }, low, hd: !low && g3.hd ? g3.hd : null, onExit: () => go('#/create'), onPublish: (w, proof, api3) => publish3d(w, proof, api3) };
   if (local) {
     const saved = myWorlds.get(id);
     if (!saved) { go('#/create'); toast('That world is gone.'); return; }
     P = { kind: '3d', id, cloud: false, name: saved.world.n };
+    if (saved.world.engine === 2) {
+      builder = startBuilder2(root, { ...common, world: saved.world, proof: saved.proof, onChange: (w) => { myWorlds.save({ id, world: w, proof: builder ? builder.proof : saved.proof }); progress.flush(); }, onProof: (p) => myWorlds.save({ id, world: builder.getWorld(), proof: p }) });
+      return;
+    }
     builder = startBuilder(root, { ...common, world: saved.world, proof: saved.proof, onChange: (w) => { myWorlds.save({ id, world: w, proof: builder ? builder.proof : saved.proof }); progress.stat('saved'); progress.flush(); }, onProof: (p) => myWorlds.save({ id, world: builder.getWorld(), proof: p }) });
     return;
   }
@@ -387,7 +405,7 @@ $('#ed-publish').addEventListener('click', () => {
   startPublish();
 });
 function publish3d(world, proof, h) {
-  try { normalizeWorld(world); } catch (e) { toast(e.message); return; }
+  try { if (world.engine === 2) normalizeParts(world); else normalizeWorld(world); } catch (e) { toast(e.message); return; }
   pub = { kind: '3d', world, proof, test: h && h.test };
   startPublish();
 }

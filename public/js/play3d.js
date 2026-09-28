@@ -2,6 +2,7 @@
 import { createRenderer, M4, hexRGB, raycast } from './gl.js';
 import { decodeBlocks, Grid, BLOCKS, B, SX, SY, SZ, PALETTE, COLOR_NAMES, idx, cleanShop, shopBlasters, WORLD_ITEMS } from './world.js';
 import { createSim, step3, STEP3, packInput, yawIndex, KEY, P3, moverOffset } from './physics3d.js';
+import { createSim2, step2 } from './phys2.js';
 import { encodeReplay } from './replay.js';
 import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
 import { openRoom } from './net.js';
@@ -49,10 +50,13 @@ const EMOTE_LABEL = { wave: 'Wave', dance: 'Dance', cheer: 'Cheer', sit: 'Sit', 
 // opts: { world, title, by, mode, look, me, room (async ticket fn or null), onWin, onExit, onProfile, onTrade, test, low, note }
 export function startWorld(root, opts) {
   const world = opts.world;
-  const physGrid = decodeBlocks(world.b);
-  const viewGrid = decodeBlocks(world.b);
+  // engine v2 worlds are parts, not blocks: an empty block grid, and the v2 movement
+  const isV2 = world.engine === 2;
+  const physGrid = isV2 ? new Grid() : decodeBlocks(world.b);
+  const viewGrid = isV2 ? new Grid() : decodeBlocks(world.b);
   const obby = world.mode !== 'hangout';
-  let S = createSim(world, physGrid);
+  const newSim = () => (isV2 ? createSim2(world) : createSim(world, physGrid));
+  let S = newSim();
   // moving platforms are drawn separately (they don't stay in one place)
   const moverDraw = S.info.movers.map(([x, y, z, t, c]) => ({ x, y, z, axis: BLOCKS[t].mover, color: hexRGB(PALETTE[c & 15]) }));
   for (const m of moverDraw) viewGrid.set(m.x, m.y, m.z, 0);
@@ -121,7 +125,7 @@ export function startWorld(root, opts) {
   let myPerm = ''; // in a private server: 'owner', 'admin', 'builder' or ''
   const srvAdminMe = () => myPerm === 'owner' || myPerm === 'admin';
   const canFly = () => isAdminMe || srvAdminMe();
-  const canBuild = () => !!room && (isAdminMe || !!myPerm);
+  const canBuild = () => !isV2 && !!room && (isAdminMe || !!myPerm); // (building in v2 servers comes later)
   let fly = false, flySpeed = 12, noProof = false;
   const flyBtn = h('button', { class: 'btn', type: 'button', onclick: () => setFly(!fly) }, 'Fly: off');
   const speedBtns = [6, 12, 24].map((v) => h('button', { class: 'btn' + (v === flySpeed ? ' on' : ''), type: 'button', onclick: (e) => { flySpeed = v; speedBtns.forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, v === 6 ? 'Slow' : v === 12 ? 'Fast' : 'Zoom'));
@@ -161,10 +165,15 @@ export function startWorld(root, opts) {
   root.replaceChildren(bar, stage, hint);
 
   let R;
-  try { R = createRenderer(canvas, { low: !!G3.low, dpr: G3.dpr }); }
+  // v2 worlds always use the HD renderer (Extreme performance just draws fewer pixels)
+  try { R = createRenderer(canvas, { low: isV2 ? false : !!G3.low, dpr: G3.dpr, hd: G3.hd || (isV2 ? GFX.pretty.hd : null) }); }
   catch (e) { msgBox.replaceChildren(h('div', { class: 'panel' }, h('h2', {}, "3D can't start here"), h('p', {}, e.message))); return { stop() {} }; }
   R.setSky(world.sky);
   R.setGrid(viewGrid);
+  if (isV2) {
+    if (!R.setParts) { msgBox.replaceChildren(h('div', { class: 'panel' }, h('h2', {}, "This world needs newer 3D graphics"), h('p', {}, 'Engine v2 worlds need WebGL 2, which this browser or computer has turned off. Try another browser, or update this one.'))); msgBox.hidden = false; }
+    else R.setParts(world.parts, (q) => q.k === 'coin'); // the game draws coins itself (they spin, and vanish when grabbed)
+  }
 
   /* ---------------- what's in the world ---------------- */
   const flags = [], goals = [];
@@ -1204,7 +1213,7 @@ export function startWorld(root, opts) {
     if (near !== nearShop) { nearShop = near; shopBtn.hidden = !near; }
   }
   // automated tests can move the player (only with ?w3test in the address)
-  if (location.search.includes('w3test')) window.__w3 = { at: (x, y, z) => { S.p.x = x; S.p.y = y; S.p.z = z; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; }, pos: () => [S.p.x, S.p.y, S.p.z], mods: () => S.mods, cell: (x, y, z) => physGrid.get(x, y, z), yaw: () => cam.yaw, edits: () => edited.size };
+  if (location.search.includes('w3test')) window.__w3 = { stats: () => ({ ...R.stats, err: window.__hdError || null }), cam: (yaw, pitch, dist) => { cam.yaw = yaw; cam.pitch = pitch; cam.dist = dist; }, at: (x, y, z) => { S.p.x = x; S.p.y = y; S.p.z = z; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; }, pos: () => [S.p.x, S.p.y, S.p.z], mods: () => S.mods, cell: (x, y, z) => physGrid.get(x, y, z), yaw: () => cam.yaw, edits: () => edited.size };
   let lastHb = 0;
   function roundTick(px, py, pz, scene, clock) {
     if (!cfg || !rs.phase) return;
@@ -1289,7 +1298,7 @@ export function startWorld(root, opts) {
     }
   }
   function restart() {
-    S = createSim(world, physGrid);
+    S = newSim();
     applyGear();
     scatter();
     drawVars();
@@ -1359,7 +1368,7 @@ export function startWorld(root, opts) {
         prevP = { ...S.p };
         const v = packInput(typing() ? 0 : inputBits(), yawIndex(cam.yaw));
         if (obby) frames.push(v);
-        step3(S, v);
+        if (isV2) step2(S, v); else step3(S, v);
         handleEvents();
         acc -= STEP3;
         if (winShown) break;
