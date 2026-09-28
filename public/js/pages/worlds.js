@@ -14,6 +14,7 @@ import { starsFor } from '../stars.js';
 import { shopPanel } from './closet.js';
 import { gfx } from '../settings.js';
 import { openDMs, startLive } from './social.js';
+import { loadWithProgress } from '../loader.js';
 
 let game = null;
 onLeave('w3', () => { if (game) { game.stop(); game = null; } $('#w3-root').replaceChildren(); });
@@ -234,7 +235,8 @@ async function enterWorld(id, code) {
     } catch (e) { root.replaceChildren(el('div', { class: 'panel-note' }, el('h3', {}, "Couldn't join"), el('p', {}, e.message), el('button', { class: 'btn', type: 'button', 'data-go': '#/worlds' }, 'Back to worlds'))); return; }
   }
   try { w = await loadWorld(id); } catch (e) { if (e.message !== '2d') root.replaceChildren(el('div', { class: 'panel-note' }, el('h3', {}, "That world didn't load"), el('p', {}, e.message))); return; }
-  const { startWorld } = await import('../play3d.js');
+  let startWorld;
+  try { [{ startWorld }] = await loadWithProgress(root, ['play3d.js'], { title: 'Loading ' + (w.name || 'the world') }); } catch { return; }
   if (game) game.stop();
   const multi = !!(session.user && session.online && session.rooms);
   let first = firstTicket; firstTicket = null;

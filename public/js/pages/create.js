@@ -14,6 +14,7 @@ import { drawWorldThumb, thumbOfWorld } from '../thumb3d.js';
 import { openRoom } from '../net.js';
 import { playLevel, onRemix, remixOf, styleTag } from './play.js';
 import { openAccount } from './account.js';
+import { loadWithProgress } from '../loader.js';
 
 /* ---------------- what's open ---------------- */
 // P: { kind: '2d' | '3d', id, cloud (bool), name, role, owner, collaborators, game }
@@ -302,9 +303,8 @@ async function openWorld(id, local) {
   closeSession();
   show('build', 'create');
   const root = $('#b3-root');
-  root.replaceChildren(el('p', { class: 'msg' }, 'Loading…'));
-  const { startBuilder } = await import('../build3d.js');
-  const { startBuilder2 } = await import('../build2.js');
+  let startBuilder, startBuilder2;
+  try { [{ startBuilder }, { startBuilder2 }] = await loadWithProgress(root, ['build3d.js', 'build2.js'], { title: 'Loading the builder' }); } catch { return; }
   const low = store.get('gfx-low', false);
   const g3 = gfx();
   const common = { look: progress.data.equip, me: session.user ? { name: session.user.name } : { name: 'You' }, low, hd: !low && g3.hd ? g3.hd : null, onExit: () => go('#/create'), onPublish: (w, proof, api3) => publish3d(w, proof, api3) };
