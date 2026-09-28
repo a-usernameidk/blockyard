@@ -1,5 +1,6 @@
 // Playing a 3D world: your Pip, the camera, other players, chat, emotes, coins, checkpoints and the goal.
 import { createRenderer, M4, hexRGB, raycast } from './gl.js';
+import { showError, ERRORS } from './loader.js';
 import { decodeBlocks, Grid, BLOCKS, B, SX, SY, SZ, PALETTE, COLOR_NAMES, idx, cleanShop, shopBlasters, WORLD_ITEMS } from './world.js';
 import { createSim, step3, STEP3, packInput, yawIndex, KEY, P3, moverOffset } from './physics3d.js';
 import { createSim2, step2 } from './phys2.js';
@@ -167,11 +168,11 @@ export function startWorld(root, opts) {
   let R;
   // v2 worlds always use the HD renderer (Extreme performance just draws fewer pixels)
   try { R = createRenderer(canvas, { low: isV2 ? false : !!G3.low, dpr: G3.dpr, hd: G3.hd || (isV2 ? GFX.pretty.hd : null) }); }
-  catch (e) { msgBox.replaceChildren(h('div', { class: 'panel' }, h('h2', {}, "3D can't start here"), h('p', {}, e.message))); return { stop() {} }; }
+  catch (e) { const box = h('div'); msgBox.replaceChildren(box); showError(box, { code: 'BY-303', title: '3D graphics can\u2019t start here', list: ['BY-303: ' + e.message], fix: [ERRORS['BY-303']] }); msgBox.hidden = false; return { stop() {} }; }
   R.setSky(world.sky);
   R.setGrid(viewGrid);
   if (isV2) {
-    if (!R.setParts) { msgBox.replaceChildren(h('div', { class: 'panel' }, h('h2', {}, "This world needs newer 3D graphics"), h('p', {}, 'Engine v2 worlds need the HD graphics (WebGL 2), and they did not start on this computer. In Chrome, check Settings > System > "Use graphics acceleration when available" is on, then restart Chrome.'), h('p', { class: 'small' }, 'What went wrong: ' + (window.__hdError || 'unknown') + '.'))); msgBox.hidden = false; }
+    if (!R.setParts) { const box = h('div'); msgBox.replaceChildren(box); const code = (window.__hdError === 'WebGL 2 is not available' ? 'BY-301' : 'BY-302'); showError(box, { code, title: 'This world needs the HD graphics', list: [code + ': ' + (window.__hdError || 'the HD graphics did not start')], fix: [ERRORS[code]] }); msgBox.hidden = false; }
     else R.setParts(world.parts, (q) => q.k === 'coin'); // the game draws coins itself (they spin, and vanish when grabbed)
   }
 

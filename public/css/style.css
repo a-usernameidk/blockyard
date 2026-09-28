@@ -1237,3 +1237,13 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .ld-bar { height: 18px; margin: 10px 0 8px; background: var(--field); border: 3px solid var(--line); border-radius: 999px; overflow: hidden; }
 .ld-fill { height: 100%; width: 0; background: var(--grass); transition: width .15s linear; }
 .ld-what { margin: 0; min-height: 1.4em; overflow-wrap: anywhere; }
+/* error box with a code */
+.err-box { max-width: 760px; }
+.err-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.err-top h3 { margin: 0; }
+.err-code { font: 900 13px ui-monospace, Consolas, monospace; background: #ffd6de; color: #7a1030; border: 2px solid var(--line); border-radius: 8px; padding: 2px 8px; }
+.err-list { margin: 10px 0; padding-left: 20px; display: grid; gap: 4px; font-weight: 700; overflow-wrap: anywhere; }
+.err-fix { margin: 8px 0; }
+.err-fix p { margin: 4px 0 0; }
+.err-btns { gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.err-details { margin: 10px 0 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px ui-monospace, Consolas, monospace; background: var(--field); color: var(--ink); border: 2px solid var(--line); border-radius: 10px; padding: 8px; user-select: all; }

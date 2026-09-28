@@ -13,8 +13,8 @@ const NAMES = {
   'templates.js': 'templates', 'thumb3d.js': 'world pictures', 'settings.js': 'settings',
 };
 // FILEMAP (made by tests/tools/loadmap.mjs)
-const SIZES = {"build3d.js":42916,"gl.js":29276,"world.js":20488,"format.js":9644,"logic.js":12045,"cosmetics.js":20711,"mesh3d.js":11738,"gl2.js":48344,"partsmesh.js":5223,"parts.js":12636,"avatar3d.js":19004,"net.js":1909,"api.js":12232,"audio.js":13212,"play3d.js":115878,"physics3d.js":20920,"replay.js":2804,"engine2d.js":22008,"phys2.js":13856,"musicbox.js":4357,"progress.js":19220,"levels.js":186646,"games.js":5122,"pfp.js":1835,"art.js":32237,"emoji.js":17836,"names.js":2191,"settings.js":3630,"bots3d.js":10967,"tycoon.js":33371,"controls.js":3598,"logicEditor.js":9043,"build2.js":34729};
-const PLANS = {"build3d.js":["build3d.js","gl.js","world.js","format.js","logic.js","cosmetics.js","mesh3d.js","gl2.js","partsmesh.js","parts.js","avatar3d.js","net.js","api.js","audio.js","play3d.js","physics3d.js","replay.js","engine2d.js","phys2.js","musicbox.js","progress.js","levels.js","games.js","pfp.js","art.js","emoji.js","names.js","settings.js","bots3d.js","tycoon.js","controls.js","logicEditor.js"],"build2.js":["build2.js","gl.js","world.js","format.js","logic.js","cosmetics.js","mesh3d.js","gl2.js","partsmesh.js","parts.js","phys2.js","physics3d.js","replay.js","engine2d.js","progress.js","api.js","levels.js","play3d.js","avatar3d.js","net.js","audio.js","musicbox.js","games.js","pfp.js","art.js","emoji.js","names.js","settings.js","bots3d.js","tycoon.js","controls.js"],"play3d.js":["play3d.js","gl.js","world.js","format.js","logic.js","cosmetics.js","mesh3d.js","gl2.js","partsmesh.js","parts.js","physics3d.js","replay.js","engine2d.js","phys2.js","avatar3d.js","net.js","api.js","audio.js","musicbox.js","progress.js","levels.js","games.js","pfp.js","art.js","emoji.js","names.js","settings.js","bots3d.js","tycoon.js","controls.js"]};
+const SIZES = {"build3d.js":42916,"gl.js":29276,"world.js":20488,"format.js":9644,"logic.js":12045,"cosmetics.js":20711,"mesh3d.js":11738,"gl2.js":48344,"partsmesh.js":5223,"parts.js":12636,"avatar3d.js":19004,"net.js":1909,"api.js":12232,"audio.js":13212,"play3d.js":115922,"loader.js":14369,"app.js":6941,"art.js":32237,"progress.js":19220,"levels.js":186646,"physics3d.js":20920,"replay.js":2804,"engine2d.js":22008,"phys2.js":13856,"musicbox.js":4357,"games.js":5122,"pfp.js":1835,"emoji.js":17836,"names.js":2191,"settings.js":3630,"bots3d.js":10967,"tycoon.js":33371,"controls.js":3598,"logicEditor.js":9043,"build2.js":34720};
+const PLANS = {"build3d.js":["build3d.js","gl.js","world.js","format.js","logic.js","cosmetics.js","mesh3d.js","gl2.js","partsmesh.js","parts.js","avatar3d.js","net.js","api.js","audio.js","play3d.js","loader.js","app.js","art.js","progress.js","levels.js","physics3d.js","replay.js","engine2d.js","phys2.js","musicbox.js","games.js","pfp.js","emoji.js","names.js","settings.js","bots3d.js","tycoon.js","controls.js","logicEditor.js"],"build2.js":["build2.js","gl.js","world.js","format.js","logic.js","cosmetics.js","mesh3d.js","gl2.js","partsmesh.js","parts.js","loader.js","app.js","art.js","progress.js","api.js","levels.js","phys2.js","physics3d.js","replay.js","engine2d.js","play3d.js","avatar3d.js","net.js","audio.js","musicbox.js","games.js","pfp.js","emoji.js","names.js","settings.js","bots3d.js","tycoon.js","controls.js"],"play3d.js":["play3d.js","gl.js","world.js","format.js","logic.js","cosmetics.js","mesh3d.js","gl2.js","partsmesh.js","parts.js","loader.js","app.js","art.js","progress.js","api.js","levels.js","physics3d.js","replay.js","engine2d.js","phys2.js","avatar3d.js","net.js","audio.js","musicbox.js","games.js","pfp.js","emoji.js","names.js","settings.js","bots3d.js","tycoon.js","controls.js"]};
 // END FILEMAP
 const nice = (url) => { const f = url.split('/').pop().split('?')[0]; return NAMES[f] ? `${NAMES[f]} (${f})` : f; };
 const IMPORT_RE = /(?:^|[;\s])(?:import|export)\s*(?:[^'"`;]*?\sfrom\s*)?['"](\.{1,2}\/[^'"]+)['"]/g;
@@ -43,7 +43,7 @@ export async function loadWithProgress(root, entries, { title = 'Loading' } = {}
   const rel = (u) => u.startsWith(base.href) ? u.slice(base.href.length) : u;
   const seen = new Set(), sizes = new Map(), got = new Map(), active = new Set();
   const plan = new Set(); for (const e of entries) for (const f of PLANS[e] || [e]) { const u = new URL(f, base).href; if (!done.has(u) || urls.includes(u)) plan.add(u); }
-  let failed = null;
+  const fails = []; // { file, code, why }
   const guess = (u) => sizes.get(u) || SIZES[rel(u)] || 20000;
   const update = () => {
     let have = 0, total = 0;
@@ -53,28 +53,47 @@ export async function loadWithProgress(root, entries, { title = 'Loading' } = {}
   };
   const one = async (u) => {
     active.add(u); update();
-    const r = await fetch(u, { cache: 'no-cache' }).catch(() => null);
-    if (!r || !r.ok) { failed = { file: u, why: r ? 'error ' + r.status : 'no connection' }; active.delete(u); return []; }
+    const stop = new AbortController(), timer = setTimeout(() => stop.abort(), 30000);
+    const bad = (code, why) => { fails.push({ file: u, code, why }); active.delete(u); clearTimeout(timer); return []; };
+    let r;
+    try { r = await fetch(u, { cache: 'no-cache', signal: stop.signal }); }
+    catch (e) { return stop.signal.aborted ? bad('BY-107', 'took more than 30 seconds') : bad(navigator.onLine === false ? 'BY-103' : 'BY-108', navigator.onLine === false ? 'you are offline' : 'the download was cut off (' + (e.message || 'network error') + ')'); }
+    if (r.status === 404) return bad('BY-101', 'not found on the site (404)');
+    if (r.status === 401 || r.status === 403) return bad('BY-104', 'blocked (' + r.status + ')');
+    if (r.status >= 500) return bad('BY-102', 'the server had a problem (' + r.status + ')');
+    if (!r.ok) return bad('BY-106', 'error ' + r.status);
     let text = '';
-    if (r.body && r.body.getReader) {
-      const rd = r.body.getReader(), dec = new TextDecoder(); let n = 0;
-      for (;;) { const { value, done: end } = await rd.read(); if (end) break; n += value.length; text += dec.decode(value, { stream: true }); got.set(u, n); update(); }
-      text += dec.decode();
-    } else text = await r.text();
+    try {
+      if (r.body && r.body.getReader) {
+        const rd = r.body.getReader(), dec = new TextDecoder(); let n = 0;
+        for (;;) { const { value, done: end } = await rd.read(); if (end) break; n += value.length; text += dec.decode(value, { stream: true }); got.set(u, n); update(); }
+        text += dec.decode();
+      } else text = await r.text();
+    } catch (e) { return stop.signal.aborted ? bad('BY-107', 'took more than 30 seconds') : bad('BY-108', 'the download was cut off'); }
+    clearTimeout(timer);
+    // a missing file can come back as the home page (HTML) instead of a 404
+    if (/html/i.test(r.headers.get('content-type') || '') || /^\s*</.test(text)) return bad('BY-105', 'the site sent a web page instead of the code (the file is probably missing)');
+    if (!text.trim()) return bad('BY-109', 'the file is empty');
     sizes.set(u, got.get(u) || text.length); got.set(u, got.get(u) || text.length); active.delete(u); done.add(u); update();
     const next = []; let m; IMPORT_RE.lastIndex = 0;
     while ((m = IMPORT_RE.exec(text))) next.push(new URL(m[1], u).href);
     return next;
   };
   if (need) {
-    let queue = urls.slice();
+    // check every file (the map's list too, so files needed by a missing file are checked as well)
+    let queue = [...new Set([...urls, ...plan])];
     for (const u of queue) seen.add(u);
-    while (queue.length && !failed) {
+    while (queue.length) {
       const batch = queue.splice(0, 6);
       const found = (await Promise.all(batch.map(one))).flat();
       for (const u of found) if (!seen.has(u) && !done.has(u)) { seen.add(u); queue.push(u); }
     }
-    if (failed) { showError(root, `Couldn't download ${nice(failed.file)} (${failed.why}).`, failed.file); throw new Error('load failed'); }
+    if (fails.length) {
+      const codes = [...new Set(fails.map((x) => x.code))];
+      showError(root, { code: codes.join(' '), title: fails.length === 1 ? 'A file didn\u2019t download' : `${fails.length} files didn\u2019t download`,
+        list: fails.map((x) => `${x.code}: ${nice(x.file)} (${pathOf(x.file)}): ${x.why}`), fix: codes.map((c) => ERRORS[c]).filter(Boolean) });
+      throw new Error('load failed');
+    }
   }
 
   // 2) start the code (90 - 99%)
@@ -83,18 +102,73 @@ export async function loadWithProgress(root, entries, { title = 'Loading' } = {}
     set(90 + (i / urls.length) * 9, `Starting ${nice(urls[i])}…`);
     await new Promise((r) => requestAnimationFrame(() => r()));
     try { mods.push(await import(urls[i])); }
-    catch (e) { showError(root, `Couldn't start ${nice(urls[i])}: ${e.message}`, urls[i]); throw e; }
+    catch (e) {
+      const msg = String(e && e.message || e);
+      const code = /export named|provide an export|does not provide/i.test(msg) ? 'BY-202' : /SyntaxError|Unexpected|Invalid or unexpected/i.test(e.name + msg) ? 'BY-201' : /Failed to fetch|dynamically imported module|Importing a module script failed/i.test(msg) ? 'BY-204' : 'BY-203';
+      showError(root, { code, title: 'The code didn\u2019t start', list: [`${code}: ${nice(urls[i])}: ${msg}`], fix: [ERRORS[code]] });
+      throw e;
+    }
   }
   set(99, 'Building the world…');
   await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
   return mods;
 }
 
-function showError(root, text, file) {
-  const path = new URL(file).pathname.replace(/^\//, 'public/');
-  root.replaceChildren(el('div', { class: 'panel-note' },
-    el('h3', {}, 'This part of Blockyard didn’t load'),
-    el('p', {}, text),
-    el('p', { class: 'small' }, `If you run this site: make sure ${path} is uploaded, then refresh.`),
-    el('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, 'Try again')));
+// What each error code means and how to fix it (also in the README under "Error codes").
+export const ERRORS = {
+  'BY-101': 'A code file is missing from the site. Upload it to GitHub in the folder shown (public/js/...), wait for Cloudflare to finish, then refresh.',
+  'BY-102': 'Cloudflare had a problem sending the file. Wait a minute and try again. If it keeps happening, check the Worker in the Cloudflare dashboard.',
+  'BY-103': 'This computer is offline. Check the Wi-Fi and try again.',
+  'BY-104': 'Something blocked the file (a school or work filter, an ad blocker, or the site settings). Try turning off the blocker for this site.',
+  'BY-105': 'The site sent back a web page instead of the code file, so the file is almost surely not uploaded (or it is in the wrong folder).',
+  'BY-106': 'The site answered with an unusual error. Try again, then check the Cloudflare deploy.',
+  'BY-107': 'A file took more than 30 seconds. The internet is very slow or something is holding it up. Try again.',
+  'BY-108': 'The download stopped halfway (network trouble, or an extension blocked it). Try again.',
+  'BY-109': 'A code file on the site is empty. Upload it again (it probably got cut off).',
+  'BY-201': 'A code file is broken (it has a typing mistake or got cut off). Upload that file again from the newest zip.',
+  'BY-202': 'The code files are from different updates (one file needs something a newer version of another file has). Upload ALL files from the newest full zip.',
+  'BY-203': 'The code crashed while starting. Send the details to the Blockyard admins.',
+  'BY-204': 'The browser could not load one of the files it needs. Refresh with Ctrl+Shift+R. If it keeps happening, upload the newest full zip.',
+  'BY-301': 'This browser has no WebGL 2 (newer 3D graphics). Turn on "Use graphics acceleration when available" in Chrome settings > System, restart Chrome, and update your graphics driver.',
+  'BY-302': 'The HD graphics started but then failed on this graphics card. Update Windows and the graphics driver. On Snapdragon laptops, make sure Chrome is the ARM64 version (chrome://settings/help).',
+  'BY-303': 'This browser has 3D graphics (WebGL) turned off completely. Turn on graphics acceleration in the browser settings.',
+};
+export const VERSION = '14.3';
+const pathOf = (u) => { try { return new URL(u).pathname.replace(/^\//, 'public/'); } catch { return u; } };
+
+// Everything useful for finding a problem, as text to copy and send.
+export function debugInfo(extra = []) {
+  let gpu = 'unknown', webgl2 = false, webgl1 = false;
+  try {
+    const c = document.createElement('canvas'); const g2 = c.getContext('webgl2'); webgl2 = !!g2;
+    const g = g2 || document.createElement('canvas').getContext('webgl'); webgl1 = !!g;
+    const x = g && g.getExtension('WEBGL_debug_renderer_info'); if (x) gpu = g.getParameter(x.UNMASKED_RENDERER_WEBGL);
+  } catch { /* no 3D at all */ }
+  return [
+    'Blockyard update ' + VERSION, 'Time: ' + new Date().toISOString(), 'Page: ' + location.href,
+    ...extra,
+    'Browser: ' + navigator.userAgent, 'Platform: ' + (navigator.userAgentData ? navigator.userAgentData.platform : navigator.platform),
+    'Screen: ' + screen.width + 'x' + screen.height + ' @' + devicePixelRatio + 'x', 'Online: ' + navigator.onLine,
+    'WebGL 2: ' + webgl2 + ', WebGL 1: ' + webgl1, 'Graphics card: ' + gpu, 'HD error: ' + (window.__hdError || 'none'),
+  ].join('\n');
+}
+
+// The error box: code, what happened, how to fix it, Try again + Copy details.
+export function showError(root, { code, title, list = [], fix = [], extra = [] }) {
+  const details = debugInfo(['Error: ' + code, ...list]);
+  const copy = el('button', { class: 'btn', type: 'button', onclick: async () => {
+    try { await navigator.clipboard.writeText(details); copy.textContent = 'Copied!'; }
+    catch { pre.hidden = false; copy.textContent = 'Select the text below'; }
+  } }, 'Copy details');
+  const pre = el('pre', { class: 'err-details' }, details); pre.hidden = true;
+  const more = el('button', { class: 'btn', type: 'button', onclick: () => { pre.hidden = !pre.hidden; more.textContent = pre.hidden ? 'Show details' : 'Hide details'; } }, 'Show details');
+  root.replaceChildren(el('div', { class: 'panel-note err-box' },
+    el('div', { class: 'err-top' }, el('span', { class: 'err-code' }, code), el('h3', {}, title)),
+    list.length ? el('ul', { class: 'err-list' }, ...list.map((t) => el('li', {}, t))) : null,
+    ...extra,
+    fix.length ? el('div', { class: 'err-fix' }, el('b', {}, 'How to fix it'), ...[...new Set(fix)].map((t) => el('p', { class: 'small' }, t))) : null,
+    el('div', { class: 'row err-btns' },
+      el('button', { class: 'btn btn-grass', type: 'button', onclick: () => location.reload() }, 'Try again'), copy, more),
+    pre));
+  console.warn('[Blockyard ' + code + ']\n' + details);
 }

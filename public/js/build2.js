@@ -2,6 +2,7 @@
 // Tools: Select, Move (arrows), Resize (dots on the faces), Rotate (dots on the axes), snap, undo, copy/paste,
 // a Properties panel for the selected parts, a Parts list, World settings, Test and Publish (like v1).
 import { createRenderer, M4, hexRGB } from './gl.js';
+import { showError, ERRORS } from './loader.js';
 import { SHAPES2, MATERIALS2, SPECIALS2, cleanPart, normalizeParts, solidOf, rotMat, WORLD2, SIZE2, MAX_PARTS } from './parts.js';
 import { rayHit } from './phys2.js';
 import { SKIES, PALETTE } from './world.js';
@@ -84,8 +85,8 @@ export function startBuilder2(root, opts) {
 
   let R;
   const hd = opts.hd || GFX.pretty.hd;
-  try { R = createRenderer(canvas, { hd }); } catch (e) { root.replaceChildren(h('p', { class: 'msg' }, e.message)); return { stop() {}, getWorld: () => src }; }
-  if (!R.setParts) { root.replaceChildren(bar, h('div', { class: 'panel-note' }, h('h3', {}, 'The v2 editor needs newer 3D graphics'), h('p', {}, 'Engine v2 needs the HD graphics (WebGL 2), and they did not start on this computer. In Chrome, check Settings > System > "Use graphics acceleration when available" is on, then restart Chrome. Updating Chrome can help too.'), h('p', { class: 'small' }, 'What went wrong: ' + (window.__hdError || 'unknown') + '. If it keeps happening, send this to the Blockyard admins.'))); return { stop() {}, getWorld: () => getWorld() }; }
+  try { R = createRenderer(canvas, { hd }); } catch (e) { const box = h('div'); root.replaceChildren(bar, box); showError(box, { code: 'BY-303', title: '3D graphics can\u2019t start here', list: ['BY-303: ' + e.message], fix: [ERRORS['BY-303']] }); return { stop() {}, getWorld: () => src }; }
+  if (!R.setParts) { const box = h('div'); root.replaceChildren(bar, box); const code = (window.__hdError === 'WebGL 2 is not available' ? 'BY-301' : 'BY-302'); showError(box, { code, title: 'The v2 editor needs the HD graphics', list: [code + ': ' + (window.__hdError || 'the HD graphics did not start')], fix: [ERRORS[code]] }); return { stop() {}, getWorld: () => getWorld() }; }
   R.setSky(meta.sky);
 
   /* ---------------- the world ---------------- */
