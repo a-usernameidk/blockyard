@@ -174,13 +174,18 @@ function solidAt(S, px, py, pz) {
 }
 /* ---------------- the ground under the feet ---------------- */
 // top of a part along a straight-down line at (x, z), starting at height yFrom; -Infinity if the line misses it
+// (TN = which way that surface faces: TN[1] is 1 for flat ground and gets smaller the steeper it is)
+const TN = [0, 1, 0];
+const MIN_FLAT = 0.62; // steeper than about 52 degrees is a wall: you can't walk up it or stand on it, you slide off
 function topAt(s, x, z, yFrom) {
   if (x < s.min[0] || x > s.max[0] || z < s.min[2] || z > s.max[2] || s.min[1] > yFrom) return -Infinity;
+  TN[0] = 0; TN[1] = 1; TN[2] = 0;
   if (s.ball) {
     const dx = x - s.c[0], dz = z - s.c[2], h = s.rad * s.rad - dx * dx - dz * dz;
     if (h < 0) return -Infinity;
     const y = s.c[1] + Math.sqrt(h);
-    return y <= yFrom ? y : (s.c[1] - Math.sqrt(h) <= yFrom ? yFrom : -Infinity);
+    if (y <= yFrom) { TN[0] = dx / s.rad; TN[1] = Math.sqrt(h) / s.rad; TN[2] = dz / s.rad; return y; }
+    return s.c[1] - Math.sqrt(h) <= yFrom ? yFrom : -Infinity;
   }
   // the line x, z going down: the part is where every face says "inside"; find the highest such y (<= yFrom)
   let hi = yFrom, lo = -Infinity;
@@ -188,26 +193,31 @@ function topAt(s, x, z, yFrom) {
     const rest = pl[3] - pl[0] * x - pl[2] * z; // n1 * y <= rest
     if (Math.abs(pl[1]) < 1e-9) { if (rest < -1e-9) return -Infinity; continue; }
     const yb = rest / pl[1];
-    if (pl[1] > 0) { if (yb < hi) hi = yb; } else if (yb > lo) lo = yb;
+    if (pl[1] > 0) { if (yb < hi) { hi = yb; TN[0] = pl[0]; TN[1] = pl[1]; TN[2] = pl[2]; } } else if (yb > lo) lo = yb;
   }
   return hi >= lo - 1e-9 ? hi : -Infinity;
 }
 // the highest ground under the player's feet (5 spots: middle and 4 corners), no higher than yFrom; which part it is in SUP
+// walk = true: only ground flat enough to walk on counts. SUPN = which way the found ground faces.
 let SUP = -1;
-function groundAt(S, px, pz, yFrom, yTo) {
+const SUPN = [0, 1, 0];
+function groundAt(S, px, pz, yFrom, yTo, walk = false, spots = SPOTS) {
   const hw = P3.halfW;
-  let best = -Infinity; SUP = -1;
+  let best = -Infinity; SUP = -1; SUPN[0] = 0; SUPN[1] = 1; SUPN[2] = 0;
   for (const i of nearby(S, px - hw, px + hw, pz - hw, pz + hw)) {
     const s = S.solids[i];
     if (!s.walk || s.max[1] < yTo || s.min[1] > yFrom) continue;
-    for (const [dx, dz] of SPOTS) {
+    for (const [dx, dz] of spots) {
       const t = topAt(s, px + dx * hw, pz + dz * hw, yFrom);
-      if (t > best) { best = t; SUP = i; }
+      if (t === -Infinity || (walk && TN[1] < MIN_FLAT)) continue;
+      if (t > best) { best = t; SUP = i; SUPN[0] = TN[0]; SUPN[1] = TN[1]; SUPN[2] = TN[2]; }
     }
   }
   return best >= yTo ? best : -Infinity;
 }
 const SPOTS = [[0, 0], [-1, -1], [1, -1], [1, 1], [-1, 1]];
+// a closer look (25 spots), for when you rest on something small or pointy between the 5 spots
+const FINE = []; for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) FINE.push([a / 2, b / 2]);
 
 /* ---------------- moving ---------------- */
 // sideways: bump into things, or step up onto something low enough (a step, a ramp, a curb)
@@ -216,7 +226,7 @@ function moveSide(S, axis, d) {
   p[axis] += d;
   if (solidAt(S, p.x, p.y, p.z) < 0) return;
   // step up?
-  const g = groundAt(S, p.x, p.z, p.y + P3.step, p.y - 1e-4);
+  const g = groundAt(S, p.x, p.z, p.y + P3.step, p.y - 1e-4, true);
   if (g > p.y - 1e-4 && g - p.y <= P3.step && solidAt(S, p.x, g + 1e-4, p.z) < 0 && (S.onGround || g - p.y < 0.3)) { p.y = g + 1e-4; return; }
   // no: go back, then as far as it can (halving)
   p[axis] -= d;
@@ -261,7 +271,13 @@ export function step2(S, value) {
   if (S.dyn.length) {
     updateDyn(S);
     // ride along on whatever moving part you stand on, and get pushed by moving parts that run into you
-    if (S.standing >= 0 && S.solids[S.standing].dyn && S.onGround) { const n = carry(S, S.standing, S.p); S.p.x = n.x; S.p.y = n.y; S.p.z = n.z; }
+    if (S.standing >= 0 && S.solids[S.standing].dyn && S.onGround) {
+      const n = carry(S, S.standing, S.p), ox = S.p.x, oy = S.p.y, oz = S.p.z;
+      S.p.x = n.x; S.p.y = n.y; S.p.z = n.z;
+      // carried into something that doesn't move (a pole on a carousel, a wall next to a lift): it stops you
+      const hit0 = solidAt(S, S.p.x, S.p.y, S.p.z);
+      if (hit0 >= 0 && !S.solids[hit0].dyn) { S.p.x = ox; S.p.z = oz; if (solidAt(S, S.p.x, S.p.y, S.p.z) >= 0) S.p.y = oy; }
+    }
     const hit = solidAt(S, S.p.x, S.p.y, S.p.z);
     if (hit >= 0 && S.solids[hit].dyn) {
       const n = carry(S, hit, S.p); S.p.x = n.x; S.p.z = n.z; S.p.y = Math.max(S.p.y, n.y);
@@ -305,11 +321,31 @@ export function step2(S, value) {
   S.onGround = hitY && fallV < 0;
   // walking down a slope or off a small step: stay on the ground
   if (!S.onGround && wasGround && fallV <= 0) {
-    const g = groundAt(S, S.p.x, S.p.z, S.p.y + 1e-3, S.p.y - P3.snap);
+    const g = groundAt(S, S.p.x, S.p.z, S.p.y + 1e-3, S.p.y - P3.snap, true);
     if (g > -Infinity && solidAt(S, S.p.x, g + 1e-4, S.p.z) < 0) { S.p.y = g + 1e-4; S.v.y = 0; S.onGround = true; }
   }
-  if (S.onGround) { S.air = 0; const g = groundAt(S, S.p.x, S.p.z, S.p.y + 0.01, S.p.y - 0.1); S.standing = g > -Infinity ? SUP : -1; }
-  else { S.air++; S.standing = -1; }
+  if (S.onGround) {
+    let g = groundAt(S, S.p.x, S.p.z, S.p.y + 0.01, S.p.y - 0.1, true);
+    if (g > -Infinity) { S.air = 0; S.standing = SUP; S.steep = 0; }
+    else {
+      // nothing walkable right under the 5 spots: look closer at what is holding you up (a point, an edge, a steep side)
+      g = groundAt(S, S.p.x, S.p.z, S.p.y + 0.01, S.p.y - 0.6, false, FINE);
+      if (g > -Infinity && SUPN[1] < MIN_FLAT && (S.steep = (S.steep || 0) + 1) < 60) {
+        // what's under you is too steep (a cone, the side of a ball, a sharp roof): you slide off it instead of standing
+        // (the way you slide is picked once and kept, so on a point you don't wobble back and forth)
+        if (S.steep === 1 || S.slideStuck) {
+          let dx = SUPN[0], dz = SUPN[2];
+          if (Math.hypot(dx, dz) < 0.05) { const s = S.solids[SUP]; dx = S.p.x - (s.min[0] + s.max[0]) / 2; dz = S.p.z - (s.min[2] + s.max[2]) / 2; }
+          const l = Math.hypot(dx, dz); S.slide = l > 1e-6 ? [dx / l, dz / l] : [1, 0];
+        }
+        const sp = 6 * dt, ox = S.p.x, oz = S.p.z;
+        S.p.x += S.slide[0] * sp; if (solidAt(S, S.p.x, S.p.y, S.p.z) >= 0) S.p.x = ox;
+        S.p.z += S.slide[1] * sp; if (solidAt(S, S.p.x, S.p.y, S.p.z) >= 0) S.p.z = oz;
+        S.slideStuck = S.p.x === ox && S.p.z === oz;
+        S.onGround = false; S.standing = -1; S.air = P3.coyote;
+      } else { S.air = 0; S.standing = g > -Infinity ? SUP : -1; } // (stuck between steep things for a second: you may stand and jump out)
+    }
+  } else { S.air++; S.standing = -1; if (S.v.y > 0) S.steep = 0; }
   if (S.onGround && !wasGround && fallV < -12) S.events.push({ t: 'land', v: -fallV, x: S.p.x, y: S.p.y, z: S.p.z });
 
   // special parts: what you stand on, and what you touch
@@ -402,3 +438,5 @@ export function rayHit(s, o, d, maxT = 1e9) {
   }
   return t0;
 }
+// (for the tests: is the player stuck inside something, and what's under them)
+export const debug2 = { inside: (S) => solidAt(S, S.p.x, S.p.y, S.p.z), ground: (S, walk) => { const g = groundAt(S, S.p.x, S.p.z, S.p.y + 0.01, S.p.y - 0.1, walk); return { y: g, i: SUP, ny: SUPN[1] }; } };

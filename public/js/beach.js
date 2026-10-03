@@ -112,12 +112,9 @@ export function beachWorld() {
   P('box', [500, G - 8.5, 650], [400, 1, 260], '#d8c08a', 'sand');                // the sea floor
   P('box', [500, (SEA + G - 9) / 2, 655], [400, SEA - (G - 9), 250], '#2a9fd6', 'water', { n: 'Sea' });
   P('box', [500, G - 0.42, 554], [400, 0.1, 9], '#c9b27e', 'smooth', { r: [6.5, 0, 0], nc: true });             // wet sand at the water line
-  // the meadow behind the beach, and grassy dunes: real blades of grass grow on all of it
+  // the meadow behind the beach: real blades of grass grow on it
   P('box', [500, G + 0.25, 395], [400, 0.5, 90], '#5fc76b', 'grass');
-  for (let i = 0; i < 16; i++) { const w = R(14, 34); P('cyl', [R(320, 680), G + R(-0.5, 0.2), R(445, 478)], [w, R(1.2, 2.6), w * R(0.6, 1)], pick(['#5fc76b', '#6fcf6a', '#52b85f']), 'grass'); }
-  for (let i = 0; i < 7; i++) P('wedge', [R(330, 670), G + 0.9, R(380, 430)], [R(16, 30), 2, R(12, 20)], '#58c067', 'grass', { r: [0, pick([0, 90, 180, 270]), 0] });
 
-  for (const [x, z, a] of [[438, 486, 0], [562, 486, 90], [562, 524, 180], [438, 524, 270]]) P('corner', [x, G + 0.7, z], [9, 1.4, 9], '#62c46c', 'grass', { r: [0, a, 0] }); // grassy corner mounds around the boardwalk
 
   /* ---------------- spawn + boardwalk ---------------- */
   for (let x = 440; x <= 560; x += 2) P('box', [x, G + 0.2, 505], [1.85, 0.4, 8], rnd() < 0.5 ? WOOD : '#b98250', 'planks');
@@ -190,6 +187,7 @@ export function beachWorld() {
   const cx = 532, cz = 530;
   P('box', [cx, G + 0.6, cz], [9, 1.2, 9], '#dcc48c', 'sand');
   for (const [dx, dz] of [[-4.5, -4.5], [4.5, -4.5], [4.5, 4.5], [-4.5, 4.5]]) { P('cyl', [cx + dx, G + 1.5, cz + dz], [2.4, 3, 2.4], '#dcc48c', 'sand'); P('cone', [cx + dx, G + 3.8, cz + dz], [2.8, 1.8, 2.8], '#cfb57a', 'sand'); }
+  for (const [dx, dz, a] of [[-6.6, -6.6, 180], [6.6, -6.6, 270], [6.6, 6.6, 0], [-6.6, 6.6, 90]]) P('corner', [cx + dx, G + 0.6, cz + dz], [3, 1.2, 3], '#e3cc97', 'sand', { r: [0, a, 0] });
   P('cyl', [cx, G + 2.6, cz], [3.6, 3, 3.6], '#dcc48c', 'sand'); P('pyramid', [cx, G + 5, cz], [4, 2, 4], '#cfb57a', 'sand');
   P('cyl', [cx, G + 6.8, cz], [0.12, 2, 0.12], DARK, 'wood'); P('wedge', [cx + 0.6, G + 7.3, cz], [0.1, 0.8, 1.2], '#e63946', 'fabric', { r: [0, 90, 0], nc: true });
   for (let i = 0; i < 4; i++) for (let k = -3; k <= 3; k += 2) { const a = i * 90; P('box', [cx + (i % 2 ? (i === 1 ? 4.5 : -4.5) : k), G + 1.5, cz + (i % 2 ? k : (i === 0 ? -4.5 : 4.5))], [0.9, 0.7, 0.9], '#dcc48c', 'sand', { r: [0, a, 0] }); }
@@ -248,9 +246,9 @@ export function beachWorld() {
   P('box', [lx + 6.5, SEA + 3.2, lz], [1.8, 1.2, 1.2], '#c98f2b', 'metal'); P('halfcyl', [lx + 6.5, SEA + 4.1, lz], [1.8, 0.6, 1.2], '#ffd23f', 'metal'); // a treasure chest
 
   /* ---------------- a windmill on the dunes, and a spinning carousel ---------------- */
-  P('cone', [372, G + 6.5, 462], [7, 13, 7], '#f1e2c0', 'brick');
-  for (const a of [0, 90]) P('box', [372, G + 11, 465.8], [1.2, 15, 0.3], '#f5f5f5', 'fabric', { r: [0, 0, a], nc: true, mo: { t: 'spin', d: [0, 0, 40], s: 1 } });
-  P('cyl', [372, G + 11, 464.6], [0.8, 0.8, 2.6], DARK, 'wood', { r: [90, 0, 0] });
+  P('cone', [372, G + 6.5, 432], [7, 13, 7], '#f1e2c0', 'brick');
+  for (const a of [0, 90]) P('box', [372, G + 11, 435.8], [1.2, 15, 0.3], '#f5f5f5', 'fabric', { r: [0, 0, a], nc: true, mo: { t: 'spin', d: [0, 0, 40], s: 1 } });
+  P('cyl', [372, G + 11, 434.6], [0.8, 0.8, 2.6], DARK, 'wood', { r: [90, 0, 0] });
   P('cyl', [600, G + 0.5, 512], [14, 0.8, 14], '#ff5d8f', 'smooth', { mo: { t: 'spin', d: [0, 45, 0], s: 1 } });
   P('cyl', [600, G + 3.4, 512], [1, 5.4, 1], '#ffd23f', 'metal'); P('cone', [600, G + 7.2, 512], [15, 2.6, 15], '#3a86ff', 'fabric');
   for (let i = 0; i < 8; i++) P('ball', [600 + Math.sin(i * 0.785) * 7.2, G + 6.2, 512 + Math.cos(i * 0.785) * 7.2], [0.6, 0.6, 0.6], pick(BRIGHT), 'neon', { g: 1, nc: true, lt: i % 2 ? undefined : { r: 8, b: 0.9 } });
@@ -277,7 +275,7 @@ export function beachWorld() {
   for (let z = 520; z <= 620; z += 12) coin(500, G + 1.6, z);
   for (let i = 0; i < 10; i++) coin(445 + i * 12, G + 1.8, 505);
   for (let i = 0; i < 8; i++) coin(R(340, 660), G - 6, R(630, 740));
-  coin(lx + 6.5, SEA + 5.6, lz); coin(sx, G + 17, sz - 2.5); coin(560, SEA + 2.5, 590); coin(600, G + 2, 506); coin(372, G + 2.6, 470); coin(646, G + 5.5, 490);
+  coin(lx + 6.5, SEA + 5.6, lz); coin(sx, G + 17, sz - 2.5); coin(560, SEA + 2.5, 590); coin(600, G + 2, 506); coin(372, G + 2.2, 441); coin(646, G + 5.5, 490);
   for (const [x, y, z] of [[352, G, 528], [588, G, 536], [lx - 3, SEA + 2.65, lz + 4], [bx - 5, G + 0.6, bz - 3], [404, G - 7.9, 668], [662, G + 0.6, 404]]) P('cone', [x, y + 0.45, z], [1.1, 0.9, 1.1], '#ff9bb8', 'marble', { n: 'Shell', nc: true, g: 0.25, r: [0, R(0, 360), 0] });
 
   return { v: 2, engine: 2, n: 'Sunset Beach', mode: 'hangout', sky: 'sunset', compass: true, parts, scripts: [{ n: 'Beach', src: BEACH_SCRIPT }] };

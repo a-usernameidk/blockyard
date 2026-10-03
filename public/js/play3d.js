@@ -170,7 +170,7 @@ export function startWorld(root, opts) {
   root.replaceChildren(bar, stage, hint);
 
   let R;
-  // v2 worlds always use the HD renderer (Extreme performance just draws fewer pixels)
+  // v2 worlds always use the HD renderer (Potato just draws fewer pixels)
   try { R = createRenderer(canvas, { low: isV2 ? false : !!G3.low, dpr: G3.dpr, hd: G3.hd || (isV2 ? GFX.pretty.hd : null) }); }
   catch (e) { const box = h('div'); msgBox.replaceChildren(box); showError(box, { code: 'BY-303', title: '3D graphics can\u2019t start here', list: ['BY-303: ' + e.message], fix: [ERRORS['BY-303']] }); msgBox.hidden = false; return { stop() {} }; }
   R.setSky(world.sky);

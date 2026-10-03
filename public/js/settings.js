@@ -3,10 +3,11 @@ import { store } from './api.js';
 
 // 3D graphics, from fastest to prettiest. dpr = how many screen pixels each drawn pixel covers.
 export const GFX = {
-  perf: { name: 'Extreme performance', info: 'For slow or old Chromebooks: half the pixels, no clouds or shadows, shorter view. Smooth but blurry.', low: true, dpr: () => 0.5, far: 80, clouds: false, shadows: false },
-  fast: { name: 'Fast', info: 'Less detail, runs faster.', low: true, dpr: () => 1, far: 140, clouds: true, shadows: true },
-  pretty: { name: 'Pretty', info: 'HD graphics: real shadows from the sun, shiny materials, glowing lights and smooth edges.', low: false, dpr: () => Math.min(2, window.devicePixelRatio || 1), far: 230, clouds: true, shadows: true, hd: { shadowSize: 2048, shadowRange: 44, msaa: 4, bloom: 0.9, grass: 4, grassFar: 80 } },
-  ultra: { name: 'Extreme quality', info: 'HD graphics turned all the way up: sharper, sharper shadows that reach further, and you see much further. Needs a strong computer.', low: false, dpr: () => Math.min(3, (window.devicePixelRatio || 1) * 1.5), far: 320, clouds: true, shadows: true, hd: { shadowSize: 4096, shadowRange: 70, msaa: 4, bloom: 1, grass: 7, grassFar: 120 } },
+  perf: { name: 'Potato', info: 'For slow or old computers: half the pixels, no clouds or shadows, short view. Smooth but blurry.', low: true, dpr: () => 0.5, far: 80, clouds: false, shadows: false },
+  fast: { name: 'Low', info: 'The classic look with less detail. Runs fast.', low: true, dpr: () => 1, far: 140, clouds: true, shadows: true },
+  med: { name: 'Medium', info: 'HD graphics on a budget: softer shadows, lighter smoothing, thinner grass, a bit less sharp.', low: false, dpr: () => Math.min(1.25, window.devicePixelRatio || 1), far: 180, clouds: true, shadows: true, hd: { shadowSize: 1024, shadowRange: 36, msaa: 2, bloom: 0.9, grass: 2, grassFar: 60 } },
+  pretty: { name: 'High', info: 'Full HD graphics: real shadows from the sun, shiny materials, glowing lights, smooth edges and thick grass.', low: false, dpr: () => Math.min(2, window.devicePixelRatio || 1), far: 230, clouds: true, shadows: true, hd: { shadowSize: 2048, shadowRange: 44, msaa: 4, bloom: 0.9, grass: 4, grassFar: 80 } },
+  ultra: { name: 'Max', info: 'Everything turned all the way up: extra sharp, sharper shadows that reach further, the thickest grass, and you see much further. Needs a strong computer.', low: false, dpr: () => Math.min(3, (window.devicePixelRatio || 1) * 1.5), far: 320, clouds: true, shadows: true, hd: { shadowSize: 4096, shadowRange: 70, msaa: 4, bloom: 1, grass: 7, grassFar: 120 } },
 };
 // Custom: you pick every setting yourself (Settings > 3D graphics > Custom)
 export const CUSTOM_DEFAULT = { far: 230, scale: 100, hd: true, shadows: 'high', aa: 4, glow: true, clouds: true, grass: 'high' };
@@ -21,10 +22,10 @@ function customMode() {
     hd: c.hd ? { shadowSize: sq[0], shadowRange: sq[1], msaa: [0, 2, 4].includes(Number(c.aa)) ? Number(c.aa) : 4, bloom: c.glow ? 0.9 : 0, noShadow: c.shadows === 'off', grass: { off: 0, low: 2, high: 4, ultra: 8 }[c.grass] ?? 4, grassFar: c.grass === 'ultra' ? 120 : 80 } : null };
 }
 Object.defineProperty(GFX, 'custom', { enumerable: true, get: customMode });
-// Auto: starts at Pretty and watches how smooth the game is. If it gets choppy it steps down
-// (Fast, then Extreme performance); when there's lots of room again it steps back up.
-const AUTO_STEPS = ['perf', 'fast', 'pretty'];
-let autoAt = 2, fpsAvg = 60, calm = 0, since = 0;
+// Auto: starts at High and watches how smooth the game is. If it gets choppy it steps down
+// (Medium, Low, then Potato); when there's lots of room again it steps back up.
+const AUTO_STEPS = ['perf', 'fast', 'med', 'pretty'];
+let autoAt = 3, fpsAvg = 60, calm = 0, since = 0;
 GFX.auto = {
   name: 'Auto', auto: true, low: false,
   info: 'Picks for you: it watches how smooth the game runs and turns the quality down or up by itself. Best for most computers.',
@@ -46,7 +47,7 @@ GFX.auto = {
     return null;
   },
 };
-export const GFX_ORDER = ['auto', 'perf', 'fast', 'pretty', 'ultra', 'custom'];
+export const GFX_ORDER = ['auto', 'perf', 'fast', 'med', 'pretty', 'ultra', 'custom'];
 export function gfxMode() {
   const m = store.get('gfx', '');
   return GFX[m] ? m : store.get('gfx-low', false) ? 'fast' : 'auto';

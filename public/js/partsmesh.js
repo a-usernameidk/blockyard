@@ -49,7 +49,17 @@ function partTris(q, put) {
       for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a0 = i / nu, a1 = (i + 1) / nu, b0 = j / nv, b1 = (j + 1) / nv; pt(a0, b0); pt(a1, b0); pt(a1, b1); pt(a0, b0); pt(a1, b1); pt(a0, b1); }
       return;
     }
-    for (let t = 1; t + 1 < f.length; t++) { corner(f[0]); corner(f[t]); corner(f[t + 1]); }
+    // Big faces are cut into smaller triangles (no side longer than 40 studs). Some graphics chips draw huge
+    // triangles wrong (half of a big floor goes missing), and smaller ones also get nicer light and fog.
+    const nrm = (vi) => (flat ? n : vn[vi]);
+    const tri = (a, b, c, na, nb, nc, depth) => {
+      const big = Math.max(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]), Math.hypot(b[0] - c[0], b[1] - c[1], b[2] - c[2]), Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]));
+      if (big <= 40 || depth >= 5) { put(W(a), uvOf(a), dim, N(na), face); put(W(b), uvOf(b), dim, N(nb), face); put(W(c), uvOf(c), dim, N(nc), face); return; }
+      const mid = (p, q2) => [(p[0] + q2[0]) / 2, (p[1] + q2[1]) / 2, (p[2] + q2[2]) / 2];
+      const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a), nab = mid(na, nb), nbc = mid(nb, nc), nca = mid(nc, na);
+      tri(a, ab, ca, na, nab, nca, depth + 1); tri(ab, b, bc, nab, nb, nbc, depth + 1); tri(ca, bc, c, nca, nbc, nc, depth + 1); tri(ab, bc, ca, nab, nbc, nca, depth + 1);
+    };
+    for (let t = 1; t + 1 < f.length; t++) tri(L[f[0]], L[f[t]], L[f[t + 1]], nrm(f[0]), nrm(f[t]), nrm(f[t + 1]), 0);
   });
 }
 

@@ -1,9 +1,9 @@
-// Blockyard's HD renderer (WebGL 2): used by the Pretty and Extreme quality graphics settings.
+// Blockyard's HD renderer (WebGL 2): used by the Medium, High and Max graphics settings.
 // Same blocks and shapes as the classic renderer (mesh3d.js builds both), plus:
 //   real sun shadows (a shadow map that follows you, soft edges), light worked out for every pixel
 //   (sky light from above, bounce light from the ground, shiny plastic / metal / glass / ice),
 //   glowing things that bloom, 4x anti-aliasing, and filmic colors.
-// The classic renderer (gl.js) stays for Fast and Extreme performance, and for computers without WebGL 2.
+// The classic renderer (gl.js) stays for Low and Potato, and for computers without WebGL 2.
 import { SKIES, SX, SY, SZ } from './world.js';
 import { FACES, meshChunk, hexRGB, CS } from './mesh3d.js';
 import { meshParts } from './partsmesh.js';
@@ -269,13 +269,17 @@ void main() {
   vec4 c = shade(col * m, N, v_wp, v_ls, spec, shin, 1.0, v_glow);
   if (p == 47.0) {
     // the sky mirrored in the water (more at a low angle), the sun's sparkle, then the foam on top
-    vec3 V = normalize(u_cam - v_wp), R = reflect(-V, N);
+    vec3 V = normalize(u_cam - v_wp);
+    bool below = face == 2.0 && dot(N, V) < 0.0; // looking up at the surface from under the water
+    if (below) N = -N;
+    vec3 R = reflect(-V, N);
     float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
     vec3 skyc = mix(u_fog, u_fog * vec3(0.7, 0.85, 1.15), clamp(R.y * 1.4, 0.0, 1.0));
     float glint = pow(max(dot(R, u_sunDir), 0.0), 260.0) * 1.8 + pow(max(dot(R, u_sunDir), 0.0), 24.0) * 0.16;
     c.rgb = mix(c.rgb, skyc, 0.12 + 0.72 * fres) + normalize(u_sunCol + 0.001) * glint;
     c.rgb = mix(c.rgb, vec3(0.97), foam * 0.75);
     a = clamp(mix(0.58, 0.95, fres) + foam * 0.35, 0.0, 1.0);
+    if (below) { c.rgb = mix(v_col * 1.25 + 0.12, skyc * 1.1, 0.35 + 0.4 * fres); a = 0.72; } // a bright, rippling ceiling
   }
   o = vec4(c.rgb, u_glass > 0.5 ? a * v_alpha : c.a);
 }`;
