@@ -121,8 +121,14 @@ export const GEOM2 = {
   halfcyl: (() => { const h = ring(0.5, 8, 0, Math.PI, false).map(([x, z]) => [x, z * 2 - 0.5]); return prism(h, h); })(), // flat side south, round side north... stretched to fill its box
   pyramid: { v: [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5], [0, 0.5, 0]], f: [[0, 1, 2, 3], [1, 0, 4], [2, 1, 4], [3, 2, 4], [0, 3, 4]] },
 };
+// rounder versions of the round shapes, only for drawing (32 sides; what you bump into keeps 16)
+export const GEOM2_HI = { ...GEOM2,
+  cyl: prism(ring(0.5, 32), ring(0.5, 32)),
+  cone: (() => { const b = ring(0.5, 32), v = [[0, 0.5, 0], ...b.map(([x, z]) => [x, -0.5, z])], f = [b.map((_, i) => 1 + i)]; for (let i = 0; i < 32; i++) f.push([0, 1 + ((i + 1) % 32), 1 + i]); return { v, f }; })(),
+  halfcyl: (() => { const h = ring(0.5, 16, 0, Math.PI, false).map(([x, z]) => [x, z * 2 - 0.5]); return prism(h, h); })(),
+};
 // fix every face to wind counter-clockwise from outside (checked against the shape's middle), so rendering and planes agree
-for (const g of Object.values(GEOM2)) {
+for (const g of [...Object.values(GEOM2), GEOM2_HI.cyl, GEOM2_HI.cone, GEOM2_HI.halfcyl]) {
   const c = g.v.reduce((a, p) => [a[0] + p[0] / g.v.length, a[1] + p[1] / g.v.length, a[2] + p[2] / g.v.length], [0, 0, 0]);
   g.f = g.f.map((f) => {
     const [a, b, d] = [g.v[f[0]], g.v[f[1]], g.v[f[2]]];

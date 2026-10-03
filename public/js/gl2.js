@@ -207,49 +207,81 @@ in vec3 a_pos; in vec2 a_uv; in vec2 a_dim; in vec4 a_col; in vec4 a_mat; in vec
 uniform mat4 u_vp; uniform mat4 u_lvp; uniform mat4 u_model; uniform float u_time;
 // the sea's waves: height at (x, z), used to move the water's surface and to light it
 float waveH(vec2 q, float t) { return 0.10 * sin(q.x * 0.35 + t * 1.1) + 0.07 * sin(q.y * 0.5 - t * 1.4 + q.x * 0.2) + 0.04 * sin((q.x + q.y) * 0.9 + t * 2.0); }
-out vec3 v_col; out vec3 v_wp; out vec2 v_uv; out vec2 v_dim; out float v_pat; out float v_face; out float v_alpha; out vec3 v_n; out float v_glow; out vec4 v_ls;
+out vec3 v_col; out vec3 v_wp; out vec2 v_uv; out vec2 v_dim; out float v_pat; out float v_face; out float v_alpha; out vec3 v_n; out float v_glow; out vec4 v_ls; out float v_round;
 void main() {
   vec3 wp = (u_model * vec4(a_pos, 1.0)).xyz;
   if (a_mat.x == 47.0 && a_nao.y > 0.9) wp.y += waveH(wp.xz, u_time) - 0.12; // water: the top rolls
   gl_Position = u_vp * vec4(wp, 1.0);
-  v_col = a_col.rgb; v_glow = a_col.a; v_wp = wp; v_uv = a_uv; v_dim = a_dim; v_pat = a_mat.x; v_face = a_mat.y; v_alpha = a_mat.z / 255.0;
+  v_col = a_col.rgb; v_glow = a_col.a; v_wp = wp; v_uv = a_uv; v_dim = a_dim; v_pat = a_mat.x; v_face = a_mat.y; v_alpha = a_mat.z / 255.0; v_round = a_mat.w;
   v_n = normalize(mat3(u_model) * a_nao.xyz); v_ls = u_lvp * vec4(wp + v_n * 0.03, 1.0);
 }`;
+// Materials are drawn smooth (soft noise, no big pixels), each with its own little bumps that catch the light
+// (wood grain, gaps between planks, mortar, stones, sand ripples), and flat parts get softly rounded edges.
 const PART_FS = HEAD + `
-in vec3 v_col; in vec3 v_wp; in vec2 v_uv; in vec2 v_dim; in float v_pat; in float v_face; in float v_alpha; in vec3 v_n; in float v_glow; in vec4 v_ls;
+in vec3 v_col; in vec3 v_wp; in vec2 v_uv; in vec2 v_dim; in float v_pat; in float v_face; in float v_alpha; in vec3 v_n; in float v_glow; in vec4 v_ls; in float v_round;
 uniform float u_time; uniform float u_glass;
 out vec4 o;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 // the sea's waves: height at (x, z), used to move the water's surface and to light it
 float waveH(vec2 q, float t) { return 0.10 * sin(q.x * 0.35 + t * 1.1) + 0.07 * sin(q.y * 0.5 - t * 1.4 + q.x * 0.2) + 0.04 * sin((q.x + q.y) * 0.9 + t * 2.0); }
 float vnoise(vec2 p) { vec2 i = floor(p), g = fract(p); g = g * g * (3.0 - 2.0 * g); return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), g.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), g.x), g.y); }
+float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { v += a * vnoise(p); p = p * 2.03 + 17.1; a *= 0.5; } return v; }
 ` + LIGHT + `
 void main() {
-  vec2 u = v_uv, f = fract(u), cell = floor(u);
+  vec2 u = v_uv;
   vec3 N = normalize(v_n); float foam = 0.0;
   float face = floor(v_face + 0.5), p = floor(v_pat + 0.5);
-  float seed = floor(v_wp.x) * 0.37 + floor(v_wp.y) * 1.71 + floor(v_wp.z) * 0.93 + face * 1.7;
-  float n = hash(floor(f * 8.0) + cell * 7.13 + seed);
+  float seed = face * 1.7 + v_dim.x * 0.37 + v_dim.y * 0.91; // different for every face, the same all over one face
   float edge = min(min(u.x, u.y), min(v_dim.x - u.x, v_dim.y - u.y));
-  float m = mix(0.84, 1.0, smoothstep(0.0, 0.07, edge));
+  float near = 1.0 - smoothstep(22.0, 60.0, distance(v_wp, u_cam)); // fine detail fades out far away (so it doesn't shimmer)
+  float g1 = fbm(u * 0.9 + seed), g2 = vnoise(u * 9.0 + seed * 3.1), g3 = mix(0.5, vnoise(u * 31.0 + seed), near);
+  float m = 1.0, hgt = 0.0, bump = 0.0;
   vec3 col = v_col; float a = 1.0, spec = 0.1, shin = 16.0;
-  if (p == 30.0) { vec2 q = f - 0.5; m *= 0.98 + 0.03 * n; if (face == 2.0 && length(q) < 0.26) m *= (q.x + q.y < 0.0 ? 1.1 : 0.88); spec = 0.38; shin = 56.0; }
-  else if (p == 40.0) { spec = 0.45; shin = 64.0; }
-  else if (p == 4.0) { m *= 0.9 + 0.07 * sin(u.y * 11.0 + sin(u.x * 1.3 + seed) * 2.5) + 0.04 * n; }
-  else if (p == 41.0) { float row = floor(u.y * 2.0); float fx = fract(u.x / 3.0 + hash(vec2(row, seed)) ); if (fract(u.y * 2.0) < 0.06 || fx < 0.015) m *= 0.68; else m *= 0.9 + 0.12 * hash(vec2(row, floor(u.x / 3.0 + hash(vec2(row, seed))))); }
-  else if (p == 3.0) { m *= 0.88 + 0.12 * hash(floor(u * 3.0) + seed) + 0.04 * n; }
-  else if (p == 5.0) { float row = floor(u.y * 3.0); float fx = fract(u.x * 1.5 + mod(row, 2.0) * 0.5); if (fract(u.y * 3.0) < 0.1 || fx < 0.05) col = vec3(0.86, 0.82, 0.76); else m *= 0.92 + 0.12 * hash(vec2(floor(u.x * 1.5 + mod(row, 2.0) * 0.5), row)); }
-  else if (p == 42.0) { vec2 g = u * 2.0, id = floor(g); float d = 9.0, d2 = 9.0; for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) { vec2 c = id + vec2(float(i), float(j)); vec2 pt = c + vec2(hash(c), hash(c + 3.1)) * 0.7 + 0.15; float e = length(g - pt); if (e < d) { d2 = d; d = e; } else if (e < d2) d2 = e; } m *= d2 - d < 0.08 ? 0.62 : 0.9 + 0.1 * hash(id); }
-  else if (p == 43.0) { float v = sin(u.x * 1.7 + u.y * 2.3 + 2.5 * sin(u.y * 1.1 + u.x * 0.6 + seed)); col = mix(col, col * 0.72, smoothstep(0.9, 1.0, abs(v))); spec = 0.45; shin = 70.0; }
-  else if (p == 12.0) { m *= 0.94 + 0.07 * hash(vec2(floor(u.y * 48.0), cell.x + seed)); spec = 0.6; shin = 48.0; }
-  else if (p == 44.0) { vec2 q = fract(u * 3.0) - 0.5; float d = abs(q.x * 0.7 + q.y) + abs(q.x - q.y * 0.7) * 0.6; m *= d < 0.18 ? 1.15 : 0.93; spec = 0.6; shin = 40.0; }
-  else if (p == 9.0) { float fr = step(edge, 0.06); col = mix(col, vec3(1.0), 0.35 + 0.4 * fr); a = mix(0.3, 0.9, fr); m = 1.0; spec = 0.9; shin = 110.0; }
-  else if (p == 8.0) { float s2 = fract((u.x + u.y) * 1.2); m *= s2 < 0.06 ? 1.1 : 0.97; spec = 0.75; shin = 80.0; }
-  else if (p == 11.0) { m = 1.0 + 0.2 * (1.0 - smoothstep(0.0, 0.15, edge)); spec = 0.0; }
-  else if (p == 1.0) { m *= 0.9 + 0.18 * n; if (n > 0.93) col *= vec3(0.85, 1.05, 0.8); }
-  else if (p == 2.0) { m *= 0.88 + 0.2 * n; }
-  else if (p == 46.0) { if (v_dim.y - u.y < 0.22 + 0.06 * hash(vec2(floor(u.x * 8.0), seed))) m *= 0.95 + 0.08 * n; else { col = vec3(0.604, 0.416, 0.247); m *= 0.88 + 0.2 * n; } }
-  else if (p == 6.0) { m *= 0.91 + 0.1 * n + 0.045 * sin(u.x * 2.6 + 1.6 * sin(u.y * 0.9 + seed)) + 0.05 * vnoise(u * 0.6 + seed); if (n > 0.986) { spec = 1.0; shin = 120.0; } } // sand: wind ripples and sparkles
+  if (p == 30.0) { m = 0.975 + 0.03 * g2 + 0.02 * g3; spec = 0.4; shin = 60.0; }
+  else if (p == 40.0) { spec = 0.5; shin = 70.0; }
+  else if (p == 4.0) {
+    float w = u.y * 5.0 + fbm(vec2(u.x * 0.5, u.y * 2.5) + seed) * 4.0, gr = 0.5 + 0.5 * sin(w * 6.2831);
+    m = 0.84 + 0.14 * gr + 0.05 * g3; hgt = gr * 0.5 + g3 * 0.2; bump = 0.035; spec = 0.14; shin = 24.0;
+  }
+  else if (p == 41.0) {
+    float row = floor(u.y * 2.0), off = hash(vec2(row, 3.7)) * 3.0, fx = fract((u.x + off) / 3.0), fy = fract(u.y * 2.0);
+    float gap = smoothstep(0.0, 0.05, min(fy, 1.0 - fy)) * smoothstep(0.0, 0.012, min(fx, 1.0 - fx));
+    float id = hash(vec2(row, floor((u.x + off) / 3.0)));
+    float w = u.y * 14.0 + fbm(vec2(u.x * 0.7, u.y * 4.0) + id * 9.0) * 3.0, gr = 0.5 + 0.5 * sin(w * 6.2831);
+    m = (0.8 + 0.18 * id + 0.08 * gr + 0.04 * g3) * mix(0.42, 1.0, gap); hgt = gap + gr * 0.12; bump = 0.05; spec = 0.14; shin = 24.0;
+  }
+  else if (p == 3.0) { m = 0.78 + 0.3 * g1 + 0.08 * g2 + 0.05 * g3; hgt = g1 * 0.7 + g2 * 0.3; bump = 0.07; spec = 0.08; }
+  else if (p == 5.0) {
+    float by = u.y * 3.0, row = floor(by), bx = u.x * 1.5 + mod(row, 2.0) * 0.5;
+    vec2 bf = vec2(fract(bx), fract(by));
+    float mort = smoothstep(0.0, 0.045, min(bf.x, 1.0 - bf.x)) * smoothstep(0.0, 0.09, min(bf.y, 1.0 - bf.y));
+    float id = hash(vec2(floor(bx), row));
+    col = mix(vec3(0.8, 0.77, 0.71), col * (0.84 + 0.26 * id), mort); m = 0.93 + 0.09 * g2 + 0.04 * g3; hgt = mort + g2 * 0.15; bump = 0.07; spec = 0.06;
+  }
+  else if (p == 42.0) {
+    vec2 g = u * 2.0, id = floor(g); float d = 9.0, d2 = 9.0, tone = 0.5;
+    for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) { vec2 c = id + vec2(float(i), float(j)); vec2 pt = c + vec2(hash(c), hash(c + 3.1)) * 0.7 + 0.15; float e = length(g - pt); if (e < d) { d2 = d; d = e; tone = hash(c + 7.7); } else if (e < d2) d2 = e; }
+    float st = smoothstep(0.02, 0.16, d2 - d);
+    m = mix(0.5, 0.82 + 0.24 * tone + 0.05 * g3, st); hgt = st * (1.0 - d * 0.45); bump = 0.1; spec = 0.08;
+  }
+  else if (p == 43.0) { float v = sin(u.x * 1.7 + u.y * 2.3 + 2.5 * sin(u.y * 1.1 + u.x * 0.6 + seed) + g1 * 3.0); col = mix(col, col * 0.7, smoothstep(0.86, 1.0, abs(v))); m = 0.97 + 0.04 * g1; spec = 0.5; shin = 80.0; }
+  else if (p == 12.0) { float br = mix(0.5, vnoise(vec2(u.x * 1.2 + seed, u.y * 22.0)), near); m = 0.95 + 0.05 * br + 0.03 * g1; spec = 0.75; shin = 50.0; } // brushed metal: faint soft lines
+  else if (p == 44.0) { vec2 q = fract(u * 3.0) - 0.5; float d = abs(q.x * 0.7 + q.y) + abs(q.x - q.y * 0.7) * 0.6, rise = 1.0 - smoothstep(0.12, 0.2, d); m = 0.9 + 0.14 * rise + 0.04 * g1; hgt = rise; bump = 0.07; spec = 0.7; shin = 44.0; }
+  else if (p == 9.0) { float fr = (1.0 - smoothstep(0.03, 0.08, edge)) * (1.0 - v_round); col = mix(col, vec3(1.0), 0.35 + 0.4 * fr); a = mix(0.3, 0.9, fr); spec = 0.9; shin = 110.0; }
+  else if (p == 8.0) { m = 0.95 + 0.07 * g1 + 0.06 * smoothstep(0.55, 0.9, vnoise(vec2((u.x + u.y) * 1.1, (u.x - u.y) * 5.0) + seed)); spec = 0.85; shin = 90.0; }
+  else if (p == 11.0) { m = 1.0 + 0.15 * (1.0 - smoothstep(0.0, 0.15, edge)) * (1.0 - v_round); spec = 0.0; }
+  else if (p == 1.0) { m = 0.82 + 0.3 * g1 + 0.06 * g3; col = mix(col, col * vec3(1.18, 1.05, 0.7), smoothstep(0.5, 0.8, vnoise(u * 0.35 + seed)) * 0.35); }
+  else if (p == 2.0) { m = 0.8 + 0.3 * g1 + 0.08 * g3; hgt = g1; bump = 0.05; }
+  else if (p == 46.0) {
+    float line = 0.3 + 0.2 * vnoise(vec2(u.x * 2.2, seed)) + 0.06 * vnoise(vec2(u.x * 9.0, 1.0));
+    col = mix(col, vec3(0.604, 0.416, 0.247), smoothstep(line - 0.04, line + 0.04, v_dim.y - u.y)); m = 0.84 + 0.26 * g1 + 0.06 * g3; hgt = g1; bump = 0.04;
+  }
+  else if (p == 6.0) {
+    // sand: soft dunes of light and dark, wind ripples you can see the light on, fine grains, a few sparkles
+    float rip = sin(u.x * 2.6 + 1.6 * sin(u.y * 0.9 + seed) + g1 * 2.5);
+    m = 0.9 + 0.12 * g1 + 0.03 * rip + 0.05 * g3; hgt = rip * 0.45 + g3 * 0.55; bump = face == 2.0 ? 0.028 : 0.012;
+    if (near > 0.3 && hash(floor(u * 38.0) + seed) > 0.992) { spec = 1.0; shin = 160.0; }
+  }
   else if (p == 47.0) {
     // water: the slope of the waves (big rollers + little ripples) tilts the surface, so light and sky move on it
     vec2 q = v_wp.xz; float t = u_time, e = 0.3;
@@ -262,10 +294,32 @@ void main() {
     float crest = smoothstep(0.11, 0.2, h0) * smoothstep(0.35, 0.75, vnoise(q * 1.9 + vec2(t * 0.6, -t * 0.4)));
     float shore = (1.0 - smoothstep(0.0, 1.3, edge)) * (0.55 + 0.45 * sin(edge * 9.0 - t * 2.5)) * step(1.5, face) * step(face, 2.5);
     foam = clamp(crest * 0.7 + shore * 0.8, 0.0, 1.0);
-    a = 0.62; spec = 1.0; shin = 220.0; m = 1.0;
+    a = 0.62; spec = 1.0; shin = 220.0;
   }
-  else if (p == 45.0) { float w = step(0.5, fract(u.x * 10.0)) + step(0.5, fract(u.y * 10.0)); m *= 0.9 + 0.05 * w + 0.03 * n; spec = 0.02; }
-  else { m *= 0.97 + 0.04 * n; }
+  else if (p == 45.0) { float wv = sin(u.x * 52.0) * sin(u.y * 52.0) * near; m = 0.93 + 0.05 * wv + 0.05 * g2; hgt = wv; bump = 0.015; spec = 0.02; }
+  else { m = 0.97 + 0.04 * g2; }
+
+  // how the surface, its coordinates and its bumps change from pixel to pixel (needed for the two effects below)
+  vec3 dpx = dFdx(v_wp), dpy = dFdy(v_wp);
+  vec2 dux = dFdx(u), duy = dFdy(u);
+  float hx = dFdx(hgt), hy = dFdy(hgt);
+  bool plain = p != 47.0 && p != 9.0;
+  // rounded edges: near the edge of a flat face the surface "turns" toward the next face, so edges catch a soft highlight
+  if (plain && v_round < 0.5) {
+    float d2 = dux.x * duy.y - dux.y * duy.x;
+    if (abs(d2) > 1e-12) {
+      vec3 T = (dpx * duy.y - dpy * dux.y) / d2, B = (dpy * dux.x - dpx * duy.x) / d2;
+      float bw = min(0.07, 0.25 * min(v_dim.x, v_dim.y));
+      float ex = max(0.0, 1.0 - (v_dim.x - u.x) / bw) - max(0.0, 1.0 - u.x / bw), ey = max(0.0, 1.0 - (v_dim.y - u.y) / bw) - max(0.0, 1.0 - u.y / bw);
+      N = normalize(N + (T / max(length(T), 1e-6) * ex + B / max(length(B), 1e-6) * ey) * 0.75);
+      m *= mix(0.9, 1.0, smoothstep(0.0, bw * 0.5, edge));
+    }
+  }
+  // little bumps: the height of the material tilts the light (so grain, gaps and ripples look carved, not painted)
+  if (plain && bump > 0.0 && near > 0.0) {
+    vec3 r1 = cross(dpy, N), r2 = cross(N, dpx); float det = dot(dpx, r1);
+    if (abs(det) > 1e-12) N = normalize(abs(det) * N - bump * near * sign(det) * (hx * r1 + hy * r2));
+  }
   vec4 c = shade(col * m, N, v_wp, v_ls, spec, shin, 1.0, v_glow);
   if (p == 47.0) {
     // the sky mirrored in the water (more at a low angle), the sun's sparkle, then the foam on top
@@ -439,6 +493,20 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     const cube = [];
     for (const f of FACES) { const pts = f.c.map((c) => c.map((v) => v - 0.5)); for (const k of [0, 1, 2, 0, 2, 3]) cube.push(...pts[k], ...f.n); }
     makePrim('cube', cube);
+    // a cube with soft, rounded corners (players and pets are made of these in HD)
+    {
+      const rc = [], r = 0.2, ts = [-0.5, -0.4, -0.3, 0, 0.3, 0.4, 0.5];
+      const pt = (ax, sgn, s, t) => {
+        const p = [0, 0, 0]; p[ax] = sgn * 0.5; p[(ax + 1) % 3] = s; p[(ax + 2) % 3] = t;
+        const c = p.map((v) => Math.max(-(0.5 - r), Math.min(0.5 - r, v))), d = [p[0] - c[0], p[1] - c[1], p[2] - c[2]], l = Math.hypot(...d) || 1;
+        return [c[0] + d[0] / l * r, c[1] + d[1] / l * r, c[2] + d[2] / l * r, d[0] / l, d[1] / l, d[2] / l];
+      };
+      for (let ax = 0; ax < 3; ax++) for (const sgn of [-1, 1]) for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) {
+        const q = [pt(ax, sgn, ts[i], ts[j]), pt(ax, sgn, ts[i + 1], ts[j]), pt(ax, sgn, ts[i + 1], ts[j + 1]), pt(ax, sgn, ts[i], ts[j + 1])];
+        for (const k of [0, 1, 2, 0, 2, 3]) rc.push(...q[k]);
+      }
+      makePrim('rcube', rc);
+    }
     const cyl = [], S = 20;
     for (let i = 0; i < S; i++) {
       const a0 = i / S * Math.PI * 2, a1 = (i + 1) / S * Math.PI * 2;

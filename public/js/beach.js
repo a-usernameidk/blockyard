@@ -141,20 +141,27 @@ export function beachWorld() {
 
   /* ---------------- palm trees ---------------- */
   const palm = (x, z, h, lean, turn) => {
-    const c = Math.cos(turn), s = Math.sin(turn), seg = 6;
+    const c = Math.cos(turn), s = Math.sin(turn), seg = 8;
     let tx = x, tz = z;
+    // the trunk: rings that get thinner and lean over more toward the top
     for (let i = 0; i < seg; i++) {
       const k = (i + 0.5) / seg, off = lean * k * k * h * 0.5;
       tx = x + c * off; tz = z + s * off;
-      P('cyl', [tx, G + k * h, tz], [0.95 - i * 0.07, h / seg + 0.25, 0.95 - i * 0.07], i % 2 ? '#8b6239' : '#9a6e42', 'wood', { r: [s * lean * 14 * k, 0, -c * lean * 14 * k] });
+      P('cyl', [tx, G + k * h, tz], [1.05 - i * 0.065, h / seg + 0.3, 1.05 - i * 0.065], i % 2 ? '#8b6239' : '#9a6e42', 'wood', { r: [s * lean * 14 * k, 0, -c * lean * 14 * k] });
     }
-    const top = G + h + 0.2, n = 9;
+    // the leaves: each one is 3 pieces that go up, out, then droop down, getting narrower to a point
+    const top = G + h + 0.25, n = 8;
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * 360 + R(-10, 10), ar = a * Math.PI / 180, len = R(4.2, 5.6);
-      const droop = R(14, 30);
-      P('wedge', [tx + Math.sin(ar) * len * 0.42, top - 0.2 - Math.sin(droop * Math.PI / 180) * len * 0.42, tz - Math.cos(ar) * len * 0.42], [1.7, 0.7, len], pick([LEAF, '#4aa855', '#378f43', '#56b660']), 'fabric', { r: [-droop, a + 180, 0], nc: true });
+      const a = (i / n) * 360 + R(-12, 12), ar = a * Math.PI / 180, green = pick([LEAF, '#4aa855', '#378f43', '#56b660']);
+      let px = tx, py = top, pz = tz, pitch = R(-30, -16);
+      for (let k = 0; k < 3; k++) {
+        const len = [2.2, 2.1, 1.9][k], pr = pitch * Math.PI / 180;
+        const dx = Math.sin(ar) * Math.cos(pr), dy = -Math.sin(pr), dz = Math.cos(ar) * Math.cos(pr);
+        P(k === 2 ? 'wedge' : 'box', [px + dx * len / 2, py + dy * len / 2, pz + dz * len / 2], [[1.7, 1.45, 1.1][k], k === 2 ? 0.3 : 0.14, len + 0.15], green, 'fabric', { r: [pitch, a + (k === 2 ? 180 : 0), 0], nc: true });
+        px += dx * len; py += dy * len; pz += dz * len; pitch += R(24, 32);
+      }
     }
-    for (let i = 0; i < 3; i++) P('ball', [tx + R(-0.6, 0.6), top - 0.5, tz + R(-0.6, 0.6)], [0.6, 0.6, 0.6], '#6b4423', 'wood', { nc: true });
+    for (let i = 0; i < 3; i++) P('ball', [tx + R(-0.7, 0.7), top - 0.55, tz + R(-0.7, 0.7)], [0.65, 0.65, 0.65], '#6b4423', 'wood', { nc: true });
   };
   const palmSpots = [];
   for (let i = 0; i < 26; i++) {
@@ -164,7 +171,13 @@ export function beachWorld() {
   }
 
   /* ---------------- rocks, in the sand and in the water ---------------- */
-  for (let i = 0; i < 70; i++) { const s = R(0.6, 3.2), z = R(540, 660), x = R(310, 690); if (Math.abs(x - 500) < 6) continue; P('ball', [x, Math.max(G - 8, G - (z - 550) * 0.114) + s * 0.2, z], [s, s, s], pick([ROCK, '#7a8499', '#9aa3b5', '#6f7689']), 'stone'); }
+  // (each rock is a few lumps pushed together, so no two look the same and none is a perfect ball)
+  for (let i = 0; i < 60; i++) {
+    const s = R(0.8, 3.2), z = R(540, 660), x = R(310, 690); if (Math.abs(x - 500) < 7) continue;
+    const y = Math.max(G - 8, G - (z - 550) * 0.114), col = pick([ROCK, '#7a8499', '#9aa3b5', '#6f7689']);
+    P('ball', [x, y + s * 0.18, z], [s, s, s], col, 'stone');
+    for (let k = 0; k < 2; k++) { const t = s * R(0.45, 0.75), a = R(0, 6.28); P('ball', [x + Math.cos(a) * s * 0.42, y + t * 0.2, z + Math.sin(a) * s * 0.42], [t, t, t], col, 'stone'); }
+  }
 
   /* ---------------- umbrellas, towels and chairs ---------------- */
   const BRIGHT = ['#e63946', '#ff7b25', '#ffd23f', '#3a86ff', '#9b5de5', '#ff5d8f', '#4cc9f0', '#f5f5f5'];

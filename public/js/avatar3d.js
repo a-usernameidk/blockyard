@@ -30,18 +30,18 @@ export function avatarParts(st, out = []) {
   const box = (x, y, z, sx, sy, sz, color, ry = 0, rx = 0, rz = 0, extra) => add('cube', color, M4.trs(x, y, z, ry, rx, rz, sx, sy, sz), extra);
   const at = (x, y, z, sx, sy, sz, color, prim = 'cube', ry = 0, rx = 0, rz = 0, extra) => add(prim, color, M4.trs(x, y, z, ry, rx, rz, sx, sy, sz), extra);
   // a limb that swings from a pivot at its top
-  const limb = (px, py, pz, rx, rz, sx, sy, sz, color) => add('cube', color, M4.mul(M4.trs(px, py, pz, 0, rx, rz), M4.trs(0, -sy / 2, 0, 0, 0, 0, sx, sy, sz)));
+  const limb = (px, py, pz, rx, rz, sx, sy, sz, color) => add('rcube', color, M4.mul(M4.trs(px, py, pz, 0, rx, rz), M4.trs(0, -sy / 2, 0, 0, 0, 0, sx, sy, sz)));
 
   const by = 0.62 + bob - sit;
   // feet
-  box(-0.2, 0.09 + liftL, footL, 0.26, 0.18, 0.38, INK);
-  box(0.2, 0.09 + liftR, footR, 0.26, 0.18, 0.38, INK);
+  at(-0.2, 0.1 + liftL, footL, 0.28, 0.2, 0.4, INK, 'rcube');
+  at(0.2, 0.1 + liftR, footR, 0.28, 0.2, 0.4, INK, 'rcube');
   // body (the head is the body, like Pip)
-  add('cube', col, M4.mul(M4.trs(0, by, 0, 0, lean, 0), M4.trs(0, 0, 0, 0, 0, 0, 0.86, 0.82, 0.78)));
-  box(0, by - 0.36, 0, 0.8, 0.1, 0.72, shade(col, 0.82));
+  add('rcube', col, M4.mul(M4.trs(0, by, 0, 0, lean, 0), M4.trs(0, 0, 0, 0, 0, 0, 0.88, 0.84, 0.8)));
+  at(0, by - 0.33, 0, 0.84, 0.2, 0.76, shade(col, 0.82), 'rcube');
   // arms
-  limb(-0.47, by + 0.12, 0, armL, armLz, 0.13, 0.36, 0.13, shade(col, 0.9));
-  limb(0.47, by + 0.12, 0, armR, armRz, 0.13, 0.36, 0.13, shade(col, 0.9));
+  limb(-0.48, by + 0.12, 0, armL, armLz, 0.16, 0.4, 0.16, shade(col, 0.9));
+  limb(0.48, by + 0.12, 0, armR, armRz, 0.16, 0.4, 0.16, shade(col, 0.9));
   // face
   const blink = (Math.floor(t * 10) % 37 === 0) ? 0.15 : 1;
   for (const s of [-1, 1]) {

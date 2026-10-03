@@ -236,6 +236,7 @@ export function createRenderer(canvas, { low = false, dpr: dprFn = null, hd = nu
       for (const k of [0, 1, 2, 0, 2, 3]) cube.push(...pts[k], ...f.n);
     }
     makePrim('cube', cube);
+    makePrim('rcube', cube); // (the HD renderer has a rounded cube; the classic look keeps the plain one)
     const cyl = [], S = 14;
     for (let i = 0; i < S; i++) {
       const a0 = i / S * Math.PI * 2, a1 = (i + 1) / S * Math.PI * 2;
