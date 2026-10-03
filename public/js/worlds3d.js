@@ -1,5 +1,7 @@
 // The built-in 3D worlds: the Plaza and Snowy Town (hangouts), one world per minigame, and the obbies.
 // Each one is built by code the first time it's needed. `way` is the route the test bot follows.
+import { beachWorld } from './beach.js';
+import { normalizeParts } from './parts.js';
 import { Grid, B, encodeBlocks } from './world.js';
 import { SPOTS, padColor, COLLECT_PAD } from './tycoon.js';
 
@@ -407,5 +409,10 @@ export const TOWN = make({ id: 'town', name: 'Snowy Town', mode: 'hangout', sky:
   box(62, 0, 44, 66, 0, 52, B.stone); box(62, 0, 76, 66, 0, 106, B.stone); box(76, 0, 62, 108, 0, 66, B.stone); box(46, 0, 62, 52, 0, 66, B.stone);
 });
 
-export const WORLDS3D = [PLAZA, TOWN, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA, TYCOON, SUNNY, TOWER, LAVA, FACTORY, SKY];
+// Sunset Beach: the Engine v2 show-off world (made of parts, with scripts). See beach.js.
+let beachCache = null;
+export const BEACH = { id: 'beach', name: 'Sunset Beach', mode: 'hangout', sky: 'sunset', v2: true,
+  blurb: 'Engine v2 showcase: swim in a rolling sea, walk through real grass, ride the boat and the lift, play volleyball and find 6 shells.',
+  get() { if (!beachCache) beachCache = { world: normalizeParts(beachWorld()).world, way: [] }; return beachCache; } };
+export const WORLDS3D = [PLAZA, BEACH, TOWN, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA, TYCOON, SUNNY, TOWER, LAVA, FACTORY, SKY];
 export const builtinWorld = (id) => WORLDS3D.find((w) => w.id === id) || null;

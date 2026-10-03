@@ -537,7 +537,7 @@ export function startBuilder2(root, opts) {
     const g0 = Math.round(cam.x / 4) * 4, h0 = Math.round(cam.z / 4) * 4, pts = [];
     for (let k = -8; k <= 8; k++) { pts.push(g0 + k * 4, 0.01, h0 - 32, g0 + k * 4, 0.01, h0 + 32, g0 - 32, 0.01, h0 + k * 4, g0 + 32, 0.01, h0 + k * 4); }
     lines.push({ pts, color: [1, 1, 1, 0.12] });
-    R.frame({ eye, target: [eye[0] + f[0], eye[1] + f[1], eye[2] + f[2]], fov: 1.1, time: clock, parts: scene, lines, far: 420 });
+    R.frame({ eye, target: [eye[0] + f[0], eye[1] + f[1], eye[2] + f[2]], fov: 1.1, time: clock, parts: scene, lines, far: 420, skyClouds: true, player: [0, -999, 0] });
   }
   setTool('select'); setSnap(1); rebuild(); drawProps(); drawExplorer(); drawWorldPane(); renderProof();
   raf = requestAnimationFrame(loop);

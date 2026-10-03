@@ -141,7 +141,7 @@ export class Room {
         // 2D levels (world '2:...') use pixels, so much bigger numbers
         const flat = typeof me.world === 'string' && me.world.startsWith('2:');
         const st = flat ? { p: [Math.round(Math.max(-2000, Math.min(60000, p[0]))), Math.round(Math.max(-4000, Math.min(12000, p[1]))), 0], r: (Number(msg.r) || 0) < 0 ? -1 : 1, a: (msg.a | 0) & 255 }
-          : { p: p.map((v, i) => Math.round(Math.max(-40, Math.min(i === 1 ? SY + 40 : SX + 40, v)) * 100) / 100), r: Math.round((Number(msg.r) || 0) * 100) / 100, a: (msg.a | 0) & 255 };
+          : { p: p.map((v, i) => Math.round(Math.max(-40, Math.min(i === 1 ? 540 : 1040, v)) * 100) / 100), r: Math.round((Number(msg.r) || 0) * 100) / 100, a: (msg.a | 0) & 255 };
         this.pos.set(me.id, st);
         // remember it on the socket now and then so a waking room knows where everyone is
         if (!lim.saved || Date.now() - lim.saved > 1500) { lim.saved = Date.now(); ws.serializeAttachment({ ...me, ...st }); }

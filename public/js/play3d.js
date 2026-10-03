@@ -1512,7 +1512,7 @@ export function startWorld(root, opts) {
     // frames a second (Settings > Show FPS)
     if (!hudFps.hidden && dt > 0 && dt < 0.5) { fpsAvg += (1 / dt - fpsAvg) * 0.08; fpsT += dt; if (fpsT > 0.5) { fpsT = 0; hudFps.textContent = Math.round(fpsAvg) + ' FPS'; } }
     if (isV2 && R.setDyn) frameV2();
-    R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, lines, far: G3.far || 230 });
+    R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, lines, far: G3.far || 230, skyClouds: isV2 && G3.clouds !== false, player: [S.p.x, S.p.y, S.p.z] });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 
     // name tags and chat bubbles

@@ -7,6 +7,7 @@
 import { SKIES, SX, SY, SZ } from './world.js';
 import { FACES, meshChunk, hexRGB, CS } from './mesh3d.js';
 import { meshParts } from './partsmesh.js';
+import { growGrass } from './grass.js';
 
 /* ---------------- math ---------------- */
 const mul = (a, b, out = new Float32Array(16)) => {
@@ -203,10 +204,13 @@ void main() {
 // Engine v2 parts: patterns tile once per stud (uv is in studs), a soft bevel at the part's edges (dim = the face's size)
 const PART_VS = HEAD + `
 in vec3 a_pos; in vec2 a_uv; in vec2 a_dim; in vec4 a_col; in vec4 a_mat; in vec4 a_nao;
-uniform mat4 u_vp; uniform mat4 u_lvp; uniform mat4 u_model;
+uniform mat4 u_vp; uniform mat4 u_lvp; uniform mat4 u_model; uniform float u_time;
+// the sea's waves: height at (x, z), used to move the water's surface and to light it
+float waveH(vec2 q, float t) { return 0.10 * sin(q.x * 0.35 + t * 1.1) + 0.07 * sin(q.y * 0.5 - t * 1.4 + q.x * 0.2) + 0.04 * sin((q.x + q.y) * 0.9 + t * 2.0); }
 out vec3 v_col; out vec3 v_wp; out vec2 v_uv; out vec2 v_dim; out float v_pat; out float v_face; out float v_alpha; out vec3 v_n; out float v_glow; out vec4 v_ls;
 void main() {
   vec3 wp = (u_model * vec4(a_pos, 1.0)).xyz;
+  if (a_mat.x == 47.0 && a_nao.y > 0.9) wp.y += waveH(wp.xz, u_time) - 0.12; // water: the top rolls
   gl_Position = u_vp * vec4(wp, 1.0);
   v_col = a_col.rgb; v_glow = a_col.a; v_wp = wp; v_uv = a_uv; v_dim = a_dim; v_pat = a_mat.x; v_face = a_mat.y; v_alpha = a_mat.z / 255.0;
   v_n = normalize(mat3(u_model) * a_nao.xyz); v_ls = u_lvp * vec4(wp + v_n * 0.03, 1.0);
@@ -216,9 +220,13 @@ in vec3 v_col; in vec3 v_wp; in vec2 v_uv; in vec2 v_dim; in float v_pat; in flo
 uniform float u_time; uniform float u_glass;
 out vec4 o;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+// the sea's waves: height at (x, z), used to move the water's surface and to light it
+float waveH(vec2 q, float t) { return 0.10 * sin(q.x * 0.35 + t * 1.1) + 0.07 * sin(q.y * 0.5 - t * 1.4 + q.x * 0.2) + 0.04 * sin((q.x + q.y) * 0.9 + t * 2.0); }
+float vnoise(vec2 p) { vec2 i = floor(p), g = fract(p); g = g * g * (3.0 - 2.0 * g); return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), g.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), g.x), g.y); }
 ` + LIGHT + `
 void main() {
   vec2 u = v_uv, f = fract(u), cell = floor(u);
+  vec3 N = normalize(v_n); float foam = 0.0;
   float face = floor(v_face + 0.5), p = floor(v_pat + 0.5);
   float seed = floor(v_wp.x) * 0.37 + floor(v_wp.y) * 1.71 + floor(v_wp.z) * 0.93 + face * 1.7;
   float n = hash(floor(f * 8.0) + cell * 7.13 + seed);
@@ -241,12 +249,78 @@ void main() {
   else if (p == 1.0) { m *= 0.9 + 0.18 * n; if (n > 0.93) col *= vec3(0.85, 1.05, 0.8); }
   else if (p == 2.0) { m *= 0.88 + 0.2 * n; }
   else if (p == 46.0) { if (v_dim.y - u.y < 0.22 + 0.06 * hash(vec2(floor(u.x * 8.0), seed))) m *= 0.95 + 0.08 * n; else { col = vec3(0.604, 0.416, 0.247); m *= 0.88 + 0.2 * n; } }
-  else if (p == 6.0) { m *= 0.94 + 0.1 * n; }
-  else if (p == 47.0) { vec3 q = v_wp * 0.9; float w = sin(q.x * 1.3 + u_time * 1.6) + sin(q.z * 1.1 - u_time * 1.2) + 0.6 * sin((q.x - q.z) * 2.3 + u_time * 2.1); col = mix(col, col * 1.35 + 0.08, 0.35 + 0.12 * w); a = 0.62; spec = 1.0; shin = 90.0; }
+  else if (p == 6.0) { m *= 0.91 + 0.1 * n + 0.045 * sin(u.x * 2.6 + 1.6 * sin(u.y * 0.9 + seed)) + 0.05 * vnoise(u * 0.6 + seed); if (n > 0.986) { spec = 1.0; shin = 120.0; } } // sand: wind ripples and sparkles
+  else if (p == 47.0) {
+    // water: the slope of the waves (big rollers + little ripples) tilts the surface, so light and sky move on it
+    vec2 q = v_wp.xz; float t = u_time, e = 0.3;
+    float h0 = waveH(q, t);
+    vec2 slope = vec2(waveH(q + vec2(e, 0.0), t) - h0, waveH(q + vec2(0.0, e), t) - h0) / e;
+    slope += 0.10 * vec2(sin(q.x * 2.3 + t * 2.6 + sin(q.y * 1.7) * 1.5), sin(q.y * 2.9 - t * 2.2 + sin(q.x * 1.3) * 1.5));
+    slope += 0.05 * vec2(vnoise(q * 3.1 + t * 0.9) - 0.5, vnoise(q * 3.1 - t * 0.8 + 9.0) - 0.5);
+    if (face == 2.0) N = normalize(vec3(-slope.x * 1.6, 1.0, -slope.y * 1.6));
+    // foam: on the wave tops, and where the water ends
+    float crest = smoothstep(0.11, 0.2, h0) * smoothstep(0.35, 0.75, vnoise(q * 1.9 + vec2(t * 0.6, -t * 0.4)));
+    float shore = (1.0 - smoothstep(0.0, 1.3, edge)) * (0.55 + 0.45 * sin(edge * 9.0 - t * 2.5)) * step(1.5, face) * step(face, 2.5);
+    foam = clamp(crest * 0.7 + shore * 0.8, 0.0, 1.0);
+    a = 0.62; spec = 1.0; shin = 220.0; m = 1.0;
+  }
   else if (p == 45.0) { float w = step(0.5, fract(u.x * 10.0)) + step(0.5, fract(u.y * 10.0)); m *= 0.9 + 0.05 * w + 0.03 * n; spec = 0.02; }
   else { m *= 0.97 + 0.04 * n; }
-  vec4 c = shade(col * m, normalize(v_n), v_wp, v_ls, spec, shin, 1.0, v_glow);
+  vec4 c = shade(col * m, N, v_wp, v_ls, spec, shin, 1.0, v_glow);
+  if (p == 47.0) {
+    // the sky mirrored in the water (more at a low angle), the sun's sparkle, then the foam on top
+    vec3 V = normalize(u_cam - v_wp), R = reflect(-V, N);
+    float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+    vec3 skyc = mix(u_fog, u_fog * vec3(0.7, 0.85, 1.15), clamp(R.y * 1.4, 0.0, 1.0));
+    float glint = pow(max(dot(R, u_sunDir), 0.0), 260.0) * 1.8 + pow(max(dot(R, u_sunDir), 0.0), 24.0) * 0.16;
+    c.rgb = mix(c.rgb, skyc, 0.12 + 0.72 * fres) + normalize(u_sunCol + 0.001) * glint;
+    c.rgb = mix(c.rgb, vec3(0.97), foam * 0.75);
+    a = clamp(mix(0.58, 0.95, fres) + foam * 0.35, 0.0, 1.0);
+  }
   o = vec4(c.rgb, u_glass > 0.5 ? a * v_alpha : c.a);
+}`;
+// Grass blades: one little blade drawn once for every blade in the world (instancing), bent by the wind and by the player.
+const GRASS_VS = HEAD + `
+in vec2 a_v; in vec4 a_i0; in vec4 a_i1; in float a_i2;
+uniform mat4 u_vp; uniform mat4 u_lvp; uniform float u_time; uniform vec3 u_cam; uniform vec3 u_player; uniform vec2 u_range;
+out vec3 v_wp; out vec4 v_ls; out float v_h; out float v_tint; out float v_kind; out vec3 v_n; out vec3 v_lawn;
+void main() {
+  float h = a_v.y, cs = cos(a_i0.w), sn = sin(a_i0.w);
+  vec3 base = a_i0.xyz;
+  float fade = 1.0 - smoothstep(u_range.x, u_range.y, distance(base.xz, u_cam.xz)); // far blades shrink away
+  float height = a_i1.x * fade;
+  float w = a_i1.y * (a_i1.w > 0.5 ? (h > 0.72 ? 1.5 : 0.22) : 1.0 - h * h * 0.92);
+  // wind: each blade waves a bit by itself, and big gusts roll across the whole field
+  float ph = base.x * 0.31 + base.z * 0.27 + a_i1.z * 6.0;
+  vec2 wind = vec2(sin(u_time * 1.7 + ph) + 0.5 * sin(u_time * 3.3 + ph * 2.1), cos(u_time * 1.3 + ph * 0.8)) * 0.11;
+  wind += vec2(1.0, 0.45) * 0.34 * (0.5 + 0.5 * sin(u_time * 0.8 - base.x * 0.09 - base.z * 0.05)) * (0.6 + 0.4 * sin(u_time * 0.23 + base.z * 0.02));
+  vec2 lean = vec2(-sn, cs) * 0.2;
+  // a player walking through pushes the blades away
+  vec2 away = base.xz - u_player.xz; float pd = length(away);
+  float push = (1.0 - smoothstep(0.35, 1.7, pd)) * step(abs(base.y - u_player.y), 1.6);
+  vec2 bend = (wind + lean) * (1.0 - push) + (away / max(pd, 0.001)) * 0.8 * push;
+  float k = h * h, drop = sqrt(max(1.0 - dot(bend, bend) * k, 0.2));
+  vec3 p = base + vec3(cs, 0.0, sn) * a_v.x * w + vec3(bend.x, 0.0, bend.y) * k * height + vec3(0.0, h * height * drop, 0.0);
+  v_wp = p; gl_Position = u_vp * vec4(p, 1.0);
+  v_ls = u_lvp * vec4(base + vec3(0.0, 0.5, 0.0), 1.0); // (a bit above the ground, so the ground doesn't shade its own grass)
+  v_h = h; v_tint = a_i1.z; v_kind = a_i1.w; v_n = normalize(vec3(bend.x * 0.7, 1.0, bend.y * 0.7));
+  v_lawn = vec3(floor(a_i2 / 65536.0), mod(floor(a_i2 / 256.0), 256.0), mod(a_i2, 256.0)) / 255.0;
+}`;
+const GRASS_FS = HEAD + `
+in vec3 v_wp; in vec4 v_ls; in float v_h; in float v_tint; in float v_kind; in vec3 v_n; in vec3 v_lawn;
+out vec4 o;
+` + LIGHT + `
+void main() {
+  // dark at the roots, bright at the tip, in the lawn's own color; some blades drier, some greener
+  vec3 col = v_lawn * mix(vec3(0.42, 0.5, 0.38), vec3(1.12, 1.18, 0.8), v_h);
+  col = mix(col, col * vec3(1.25, 1.12, 0.7), smoothstep(0.72, 1.0, v_tint) * 0.55);
+  col *= 0.86 + 0.28 * fract(v_tint * 7.31);
+  if (v_kind > 0.5 && v_h > 0.72) col = v_kind < 1.5 ? vec3(0.98, 0.97, 0.93) : v_kind < 2.5 ? vec3(1.0, 0.82, 0.2) : v_kind < 3.5 ? vec3(1.0, 0.45, 0.62) : vec3(0.66, 0.5, 1.0);
+  vec4 c = shade(col, normalize(v_n), v_wp, v_ls, 0.1, 14.0, mix(0.5, 1.0, v_h), 0.0);
+  // the sun shining through the tips when you look toward it
+  vec3 V = normalize(u_cam - v_wp);
+  c.rgb += vec3(0.18, 0.2, 0.05) * pow(max(dot(-V, u_sunDir), 0.0), 3.0) * v_h * v_h;
+  o = vec4(c.rgb, 0.0);
 }`;
 const MODEL_VS = HEAD + `
 in vec3 a_pos; in vec3 a_nrm;
@@ -272,15 +346,25 @@ const DEPTH_VS = HEAD + `in vec3 a_pos; uniform mat4 u_lvp; uniform mat4 u_model
 const DEPTH_FS = HEAD + `out vec4 o; void main() { o = vec4(1.0); }`;
 const SKY_VS = HEAD + `in vec2 a_pos; out vec2 v_p; void main() { v_p = a_pos; gl_Position = vec4(a_pos, 0.9999, 1.0); }`;
 const SKY_FS = HEAD + `
-in vec2 v_p; uniform mat4 u_inv; uniform vec3 u_top; uniform vec3 u_bottom; uniform float u_stars; uniform vec3 u_sun; uniform vec3 u_sunTint;
+in vec2 v_p; uniform mat4 u_inv; uniform vec3 u_top; uniform vec3 u_bottom; uniform float u_stars; uniform vec3 u_sun; uniform vec3 u_sunTint; uniform float u_time; uniform float u_cloud;
 out vec4 o;
 float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float n2(vec2 p) { vec2 i = floor(p), g = fract(p); g = g * g * (3.0 - 2.0 * g); return mix(mix(hash(vec3(i, 1.0)), hash(vec3(i + vec2(1.0, 0.0), 1.0)), g.x), mix(hash(vec3(i + vec2(0.0, 1.0), 1.0)), hash(vec3(i + vec2(1.0, 1.0), 1.0)), g.x), g.y); }
+float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * n2(p); p = p * 2.03 + 7.1; a *= 0.5; } return v; }
 void main() {
   vec4 a = u_inv * vec4(v_p, 1.0, 1.0);
   vec3 d = normalize(a.xyz / a.w);
   float t = clamp(d.y * 1.3 + 0.12, 0.0, 1.0);
   vec3 c = mix(u_bottom, u_top, pow(t, 0.8));
   float s = max(dot(d, normalize(u_sun)), 0.0);
+  if (u_cloud > 0.0 && d.y > 0.01) {
+    // soft clouds drifting on the wind: thick parts are shaded, edges facing the sun glow
+    vec2 uv = d.xz / (d.y + 0.14) * 1.25 + vec2(u_time * 0.011, u_time * 0.004);
+    float f = fbm(uv), cl = smoothstep(0.47, 0.76, f) * smoothstep(0.01, 0.22, d.y) * u_cloud;
+    float thick = fbm(uv + normalize(u_sun).xz * 0.22);
+    vec3 lit = u_sunTint * 0.75 + 0.3, dark = mix(u_bottom, u_top, 0.5) * 0.72 + 0.05;
+    c = mix(c, mix(lit, dark, smoothstep(0.35, 0.8, thick)) * (1.0 - u_stars * 0.6), cl * 0.92);
+  }
   // a soft glow around the sun, a bright disc, and a warm haze near the horizon
   c += u_sunTint * (pow(s, 900.0) * 2.0 + pow(s, 60.0) * 0.25 + pow(s, 6.0) * 0.12) * (1.0 - u_stars * 0.75);
   c = mix(c, c * 1.08 + vec3(0.03), (1.0 - smoothstep(0.0, 0.25, abs(d.y))) * 0.6);
@@ -336,7 +420,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     return { p, u, a };
   };
   const P = {
-    chunk: compile(CHUNK_VS, CHUNK_FS), part: compile(PART_VS, PART_FS), model: compile(MODEL_VS, MODEL_FS), depth: compile(DEPTH_VS, DEPTH_FS),
+    chunk: compile(CHUNK_VS, CHUNK_FS), part: compile(PART_VS, PART_FS), grass: compile(GRASS_VS, GRASS_FS), model: compile(MODEL_VS, MODEL_FS), depth: compile(DEPTH_VS, DEPTH_FS),
     sky: compile(SKY_VS, SKY_FS), line: compile(LINE_VS, LINE_FS),
     bright: compile(QUAD_VS, BRIGHT_FS), blur: compile(QUAD_VS, BLUR_FS), final: compile(QUAD_VS, FINAL_FS),
   };
@@ -430,8 +514,45 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     gl.bindVertexArray(null);
     return { fb, ub, vao, dvao, n: mesh.n };
   }
+  /* grass blades (engine v2): grown on Grass parts, drawn with instancing */
+  const GRASS = hd.grass ?? 4, GRASS_FAR = hd.grassFar || 85;
+  const bladeBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, bladeBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5, 0, 0.5, 0, -0.42, 0.34, 0.42, 0.34, -0.27, 0.68, 0.27, 0.68, 0, 1]), gl.STATIC_DRAW);
+  let lawns = [], grassT = 0, grassCount = 0;
+  function growNow(parts, skip) {
+    for (const A of lawns) { gl.deleteBuffer(A.buf); gl.deleteVertexArray(A.vao); }
+    lawns = []; grassCount = 0;
+    if (GRASS <= 0) return;
+    const a = P.grass.a;
+    for (const A of growGrass(parts || [], skip, GRASS)) {
+      const buf = gl.createBuffer(), vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, bladeBuf); gl.enableVertexAttribArray(a.a_v); gl.vertexAttribPointer(a.a_v, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, A.data, gl.STATIC_DRAW);
+      for (const [loc, size, off] of [[a.a_i0, 4, 0], [a.a_i1, 4, 16], [a.a_i2, 1, 32]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 36, off); gl.vertexAttribDivisor(loc, 1); }
+      lawns.push({ min: A.min, max: A.max, n: A.n, buf, vao }); grassCount += A.n;
+    }
+    gl.bindVertexArray(null);
+  }
+  // (in the editor the parts change all the time: regrow at most a few times a second)
+  function growSoon(parts, skip) { clearTimeout(grassT); if (!lawns.length && !grassCount) growNow(parts, skip); else grassT = setTimeout(() => growNow(parts, skip), 350); }
+  function drawGrass(Pl, player) {
+    if (!lawns.length) return;
+    const prog = P.grass, e = state.eye;
+    gl.useProgram(prog.p); lightUniforms(prog);
+    gl.uniform1f(prog.u.u_time, state.time); gl.uniform3fv(prog.u.u_player, player || [0, -999, 0]); gl.uniform2f(prog.u.u_range, GRASS_FAR * 0.55, GRASS_FAR);
+    for (const A of lawns) {
+      if (!areaVisible(Pl, A)) continue;
+      const dx = Math.max(A.min[0] - e[0], 0, e[0] - A.max[0]), dz = Math.max(A.min[2] - e[2], 0, e[2] - A.max[2]);
+      if (dx * dx + dz * dz > GRASS_FAR * GRASS_FAR) continue;
+      gl.bindVertexArray(A.vao); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 7, A.n); state.faces += A.n * 5; state.drawn++;
+    }
+    gl.bindVertexArray(null);
+  }
   // parts: the world's parts (engine v2). skip(q, i): leave some out (coins the game draws itself).
   function setParts(parts, skip, layer = 'main') {
+    if (layer === 'main') growSoon(parts, skip);
     for (const A of partLayers.get(layer) || []) for (const k of ['solid', 'glass']) if (A[k]) freePart(A[k]);
     partLayers.set(layer, meshParts(parts || [], skip).map((A) => ({ min: A.min, max: A.max, solid: A.solid && uploadPart(A.solid), glass: A.glass && uploadPart(A.glass) })));
   }
@@ -698,6 +819,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
       gl.uniform3fv(prog.u.u_top, hexRGB(sk.top)); gl.uniform3fv(prog.u.u_bottom, hexRGB(sk.bottom));
       gl.uniform1f(prog.u.u_stars, skyId === 'night' || skyId === 'space' ? 1 : 0);
       gl.uniform3fv(prog.u.u_sun, sk.sun); gl.uniform3fv(prog.u.u_sunTint, L.sun.map((v) => Math.min(1, v)));
+      gl.uniform1f(prog.u.u_time, state.time); gl.uniform1f(prog.u.u_cloud, scene.skyClouds ? 1 : 0);
       quad(prog);
     }
     const Pl = planes(state.vp);
@@ -706,6 +828,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     if (grid) drawChunks('solid', Pl);
     drawPartMeshes('solid', Pl);
     gl.disable(gl.CULL_FACE);
+    drawGrass(Pl, scene.player || scene.target);
     drawParts(parts, false);
     gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     for (const l of scene.lines || []) drawLines(l.pts, l.color);
@@ -760,7 +883,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   return {
     gl, hd: true, setGrid, setParts, setDyn, dynMesh, dynMove, dynClear, setLights, setSky, markDirty, frame, project, ray, resize,
     get lost() { return lost; },
-    get stats() { return { faces: state.faces, chunks: chunks.size, drawn: state.drawn, hd: true, shadows: shadowOk, samples }; },
+    get stats() { return { faces: state.faces, chunks: chunks.size, drawn: state.drawn, hd: true, shadows: shadowOk, samples, grass: grassCount }; },
     get size() { return { w: W, h: H }; },
     destroy() {
       for (const ch of chunks.values()) for (const k of ['solid', 'glass']) if (ch[k]) freeMesh(ch[k]);

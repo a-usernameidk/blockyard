@@ -82,6 +82,7 @@ function customBox() {
     check('HD graphics (shadows, shine, glow)', c.hd, (on) => set({ hd: on })),
     seg('Shadows', [['off', 'Off'], ['low', 'Low'], ['high', 'High'], ['ultra', 'Ultra']], c.shadows, 'shadows'),
     seg('Smooth edges', [[0, 'Off'], [2, '2x'], [4, '4x']], c.aa, 'aa'),
+    seg('3D grass', [['off', 'Off'], ['low', 'Low'], ['high', 'High'], ['ultra', 'Ultra']], c.grass, 'grass'),
     check('Glow (bloom)', c.glow, (on) => set({ glow: on })),
     check('Clouds', c.clouds, (on) => set({ clouds: on })),
     el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', onclick: () => { setCustomGfx(CUSTOM_DEFAULT); showSettings(); toast('Custom settings are back to normal.'); } }, 'Reset custom settings')),

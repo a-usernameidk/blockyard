@@ -40,6 +40,15 @@ function partTris(q, put) {
     const uvOf = (l) => (ay >= ax && ay >= az ? [l[0] + sx / 2, l[2] + sz / 2] : ax >= az ? [l[2] + sz / 2, l[1] + sy / 2] : [l[0] + sx / 2, l[1] + sy / 2]);
     const dim = ay >= ax && ay >= az ? [sx, sz] : ax >= az ? [sz, sy] : [sx, sy];
     const corner = (vi) => put(W(L[vi]), uvOf(L[vi]), dim, flat ? N(n) : N(vn[vi]), face);
+    // water: a flat top is cut into a grid of small squares, so the renderer can make waves on it
+    if (q.m === 'water' && f.length === 4 && face === 2 && N(n)[1] > 0.99) {
+      const A = L[f[0]], B = L[f[1]], D = L[f[3]], C2 = L[f[2]];
+      const nu = Math.max(1, Math.min(96, Math.round(Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]) / 1.5))), nv = Math.max(1, Math.min(96, Math.round(Math.hypot(D[0] - A[0], D[1] - A[1], D[2] - A[2]) / 1.5)));
+      const at = (a, b) => [0, 1, 2].map((k) => (A[k] * (1 - a) + B[k] * a) * (1 - b) + (D[k] * (1 - a) + C2[k] * a) * b);
+      const pt = (a, b) => { const l = at(a, b); put(W(l), uvOf(l), dim, N(n), face); };
+      for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a0 = i / nu, a1 = (i + 1) / nu, b0 = j / nv, b1 = (j + 1) / nv; pt(a0, b0); pt(a1, b0); pt(a1, b1); pt(a0, b0); pt(a1, b1); pt(a0, b1); }
+      return;
+    }
     for (let t = 1; t + 1 < f.length; t++) { corner(f[0]); corner(f[t]); corner(f[t + 1]); }
   });
 }
