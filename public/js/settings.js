@@ -8,6 +8,19 @@ export const GFX = {
   pretty: { name: 'Pretty', info: 'HD graphics: real shadows from the sun, shiny materials, glowing lights and smooth edges.', low: false, dpr: () => Math.min(2, window.devicePixelRatio || 1), far: 230, clouds: true, shadows: true, hd: { shadowSize: 2048, shadowRange: 44, msaa: 4, bloom: 0.9 } },
   ultra: { name: 'Extreme quality', info: 'HD graphics turned all the way up: sharper, sharper shadows that reach further, and you see much further. Needs a strong computer.', low: false, dpr: () => Math.min(3, (window.devicePixelRatio || 1) * 1.5), far: 320, clouds: true, shadows: true, hd: { shadowSize: 4096, shadowRange: 70, msaa: 4, bloom: 1 } },
 };
+// Custom: you pick every setting yourself (Settings > 3D graphics > Custom)
+export const CUSTOM_DEFAULT = { far: 230, scale: 100, hd: true, shadows: 'high', aa: 4, glow: true, clouds: true };
+export const customGfx = () => ({ ...CUSTOM_DEFAULT, ...(store.get('gfx-custom', null) || {}) });
+export function setCustomGfx(patch) { store.set('gfx-custom', { ...customGfx(), ...patch }); }
+const SHADOW_Q = { low: [1024, 36], high: [2048, 44], ultra: [4096, 70] };
+function customMode() {
+  const c = customGfx(), sq = SHADOW_Q[c.shadows] || SHADOW_Q.high;
+  const far = Math.min(400, Math.max(40, Number(c.far) || 230)), scale = Math.min(200, Math.max(25, Number(c.scale) || 100));
+  return { name: 'Custom', low: !c.hd, dpr: () => Math.min(3, Math.max(0.25, (window.devicePixelRatio || 1) * scale / 100)), far, clouds: !!c.clouds, shadows: c.shadows !== 'off',
+    info: 'Your own settings: view distance, sharpness, shadows, smooth edges, glow and clouds.',
+    hd: c.hd ? { shadowSize: sq[0], shadowRange: sq[1], msaa: [0, 2, 4].includes(Number(c.aa)) ? Number(c.aa) : 4, bloom: c.glow ? 0.9 : 0, noShadow: c.shadows === 'off' } : null };
+}
+Object.defineProperty(GFX, 'custom', { enumerable: true, get: customMode });
 // Auto: starts at Pretty and watches how smooth the game is. If it gets choppy it steps down
 // (Fast, then Extreme performance); when there's lots of room again it steps back up.
 const AUTO_STEPS = ['perf', 'fast', 'pretty'];
@@ -33,7 +46,7 @@ GFX.auto = {
     return null;
   },
 };
-export const GFX_ORDER = ['auto', 'perf', 'fast', 'pretty', 'ultra'];
+export const GFX_ORDER = ['auto', 'perf', 'fast', 'pretty', 'ultra', 'custom'];
 export function gfxMode() {
   const m = store.get('gfx', '');
   return GFX[m] ? m : store.get('gfx-low', false) ? 'fast' : 'auto';

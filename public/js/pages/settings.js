@@ -3,7 +3,7 @@
 import { $, el, session, show, addRoute, toast, plural, needLogin } from '../app.js';
 import { api, store } from '../api.js';
 import { VERSION } from '../loader.js';
-import { THEMES, themeMode, setTheme, GFX, GFX_ORDER, gfxMode, setGfx } from '../settings.js';
+import { THEMES, themeMode, setTheme, GFX, GFX_ORDER, gfxMode, setGfx, customGfx, setCustomGfx, CUSTOM_DEFAULT } from '../settings.js';
 import { isMuted, setMuted, isMusicOn, setMusicOn, unlockAudio, VOLUMES, getVolume, setVolume, sfx } from '../audio.js';
 import { ACTIONS, keyOf, keyLabel, setKey, resetKeys, RESERVED, SENS, sensitivity, setSensitivity, invertY, setInvertY } from '../controls.js';
 import { NOTIFY, notifyOn } from './social.js';
@@ -63,6 +63,32 @@ function controlsBox() {
     el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', onclick: () => { stopWaiting(); resetKeys(); draw(); toast('Keys are back to normal.'); } }, 'Reset keys')));
 }
 
+function pickGfx(v) {
+  setGfx(v); toast(`Graphics: ${GFX[v].name}`);
+  const box = document.querySelector('.gfx-custom'); if (box) box.hidden = v !== 'custom';
+}
+// Custom graphics: every switch by itself (shown when Custom is picked)
+function customBox() {
+  const c = customGfx();
+  const set = (patch) => { setCustomGfx(patch); if (gfxMode() !== 'custom') setGfx('custom'); };
+  const seg = (label, options, value, key) => el('div', { class: 'gfx-row' }, el('span', { class: 'gfx-lbl' }, label), el('div', { class: 'seg' }, ...options.map(([v, n]) => {
+    const b = el('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(String(v) === String(value)), onclick: () => { set({ [key]: v }); for (const x of b.parentElement.children) x.setAttribute('aria-pressed', String(x === b)); } }, n);
+    return b;
+  })));
+  const box = el('div', { class: 'gfx-custom' },
+    el('h3', {}, 'Custom settings'),
+    slider('View distance', 40, 400, 10, c.far, (v) => `${v} blocks`, (v) => set({ far: v })),
+    slider('Sharpness', 25, 200, 25, c.scale, (v) => `${v}%`, (v) => set({ scale: v })),
+    check('HD graphics (shadows, shine, glow)', c.hd, (on) => set({ hd: on })),
+    seg('Shadows', [['off', 'Off'], ['low', 'Low'], ['high', 'High'], ['ultra', 'Ultra']], c.shadows, 'shadows'),
+    seg('Smooth edges', [[0, 'Off'], [2, '2x'], [4, '4x']], c.aa, 'aa'),
+    check('Glow (bloom)', c.glow, (on) => set({ glow: on })),
+    check('Clouds', c.clouds, (on) => set({ clouds: on })),
+    el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', onclick: () => { setCustomGfx(CUSTOM_DEFAULT); showSettings(); toast('Custom settings are back to normal.'); } }, 'Reset custom settings')),
+    el('p', { class: 'small' }, 'Lower view distance and sharpness run faster. Shadows, smooth edges and glow need HD graphics. Changes count the next time you enter a 3D world.'));
+  box.hidden = gfxMode() !== 'custom';
+  return box;
+}
 async function showSettings() {
   show('settings', '');
   const body = $('#settings-body');
@@ -73,7 +99,9 @@ async function showSettings() {
     section('Look', el('p', { class: 'small' }, 'Light or dark colors for the whole site.'),
       choice('theme', Object.entries(THEMES).map(([k, v]) => [k, v]), themeMode(), (v) => { setTheme(v); toast(`Theme: ${THEMES[v]}`); })),
     section('3D graphics', el('p', { class: 'small' }, 'How worlds are drawn. If 3D feels slow or choppy, pick a faster one. You can also switch with the Graphics button inside a world.'),
-      choice('gfx', GFX_ORDER.map((k) => [k, GFX[k].name, GFX[k].info]), gfxMode(), (v) => { setGfx(v); toast(`Graphics: ${GFX[v].name}`); })),
+      choice('gfx', GFX_ORDER.map((k) => [k, GFX[k].name, GFX[k].info]), gfxMode(), pickGfx),
+      customBox(),
+      check('Show FPS (frames a second) in 3D worlds', store.get('show-fps', false), (on) => store.set('show-fps', on))),
     section('Sound',
       check('Sound on', !isMuted(), (on) => { setMuted(!on); renderMute(); unlockAudio(); }),
       check('Music on', isMusicOn(), (on) => { setMusicOn(on); renderMute(); unlockAudio(); }),

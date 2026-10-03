@@ -91,6 +91,8 @@ export function startWorld(root, opts) {
   const tags = h('div', { class: 'w3-tags', 'aria-hidden': 'true' });
   const pill = (cls) => h('span', { class: 'w3-pill ' + (cls || '') });
   const hudTime = pill(), hudCoins = pill(), hudDeaths = pill(), hudNet = pill('w3-net');
+  const hudFps = pill('w3-fps'); hudFps.hidden = !store.get('show-fps', false);
+  let fpsAvg = 60, fpsT = 0;
   const toastEl = h('div', { class: 'w3-toast', 'aria-live': 'polite' });
   const fade = h('div', { class: 'w3-fade' });
   const log = h('ol', { class: 'w3-log', 'aria-live': 'polite' });
@@ -110,7 +112,7 @@ export function startWorld(root, opts) {
   const hudBoard = h('span', { class: 'w3-vars' }), logBox = h('div', { class: 'w3-log', hidden: true }), water = h('div', { class: 'w3-water', hidden: true });
   const boardVals = new Map(), scriptLog = []; let v2Lights = [];
   const sayBox = h('div', { class: 'w3-say', 'aria-live': 'polite', hidden: true });
-  const stage = h('div', { class: 'w3-stage' }, canvas, tags, h('div', { class: 'w3-hud' }, hudTime, hudCoins, hudDeaths, hudVars, hudBoard, hudNet), water, toastEl, sayBox, logBox, fade, players, chat, emoteBar, joy, jumpBtn, menu, winBox, msgBox);
+  const stage = h('div', { class: 'w3-stage' }, canvas, tags, h('div', { class: 'w3-hud' }, hudTime, hudCoins, hudDeaths, hudVars, hudBoard, hudNet, hudFps), water, toastEl, sayBox, logBox, fade, players, chat, emoteBar, joy, jumpBtn, menu, winBox, msgBox);
   const restartBtn = h('button', { class: 'btn', type: 'button', title: 'Start over from the beginning' }, 'Restart');
   const resetBtn = h('button', { class: 'btn', type: 'button', title: 'Go back to your last checkpoint (R)' }, 'Respawn');
   const inviteBtn = h('button', { class: 'btn', type: 'button', hidden: true }, 'Invite');
@@ -1507,6 +1509,8 @@ export function startWorld(root, opts) {
     if (snowballs.length) snowTick(dt, scene);
     if (!fly) tipTick(dt);
     if (G3.auto) { const ch = G3.tick(dt); if (ch) gfxBtn.textContent = `Graphics: Auto (${GFX[ch].name})`; }
+    // frames a second (Settings > Show FPS)
+    if (!hudFps.hidden && dt > 0 && dt < 0.5) { fpsAvg += (1 / dt - fpsAvg) * 0.08; fpsT += dt; if (fpsT > 0.5) { fpsT = 0; hudFps.textContent = Math.round(fpsAvg) + ' FPS'; } }
     if (isV2 && R.setDyn) frameV2();
     R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, lines, far: G3.far || 230 });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }

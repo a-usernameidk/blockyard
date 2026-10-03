@@ -1279,3 +1279,10 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .bs-ref code { font: 12px ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
 .b2-motion select { font-size: 14px; padding: 4px 6px; }
 @media (max-width: 760px) { .bs-row { grid-template-columns: 1fr; } .bs-box { height: 300px; } }
+/* custom graphics settings */
+.gfx-custom { margin: 10px 0; padding: 12px 14px; border: 3px dashed var(--line); border-radius: 14px; display: grid; gap: 9px; }
+.gfx-custom h3 { margin: 0; font-size: 17px; }
+.gfx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gfx-lbl { font: 800 14px Nunito, system-ui, sans-serif; min-width: 110px; }
+.gfx-row .seg-btn { padding: 5px 11px; font-size: 13px; }
+.w3-fps { font-variant-numeric: tabular-nums; }
