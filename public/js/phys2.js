@@ -115,7 +115,7 @@ function scriptHost(S) {
       else if (m === 'color') { const c = String(a[0]).toLowerCase(); const h = NAMED_COLORS[c] || (/^#[0-9a-f]{6}$/.test(c) ? c : null); if (!h) throw Object.assign(new Error(`"${a[0]}" isn't a color. Use "#ff0000" or a name like "red".`), { bs: true }); x.q.c = h; visual(x); }
       else if (m === 'glow') { x.q.g = Math.max(0, Math.min(1, a[0] || 0)); visual(x); }
       else if (m === 'see') { x.q.t = Math.max(0, Math.min(1, a[0] || 0)); visual(x); }
-      else if (m === 'size') { x.q.z = [0, 1, 2].map((k) => Math.max(0.1, Math.min(200, a[k] ?? x.q.z[k]))); if (x.q.s === 'ball') x.q.z = [x.q.z[0], x.q.z[0], x.q.z[0]]; x.reshape = true; visual(x); }
+      else if (m === 'size') { x.q.z = [0, 1, 2].map((k) => Math.max(0.1, Math.min(1000, a[k] ?? x.q.z[k]))); if (x.q.s === 'ball') x.q.z = [x.q.z[0], x.q.z[0], x.q.z[0]]; x.reshape = true; visual(x); }
     },
     playerGet: (k) => (k === 'x' ? S.p.x : k === 'y' ? S.p.y : k === 'z' ? S.p.z : k === 'coins' ? S.coins : k === 'deaths' ? S.deaths : k === 'time' ? S.runSteps / 60 : null),
     playerDo: (m, a) => {

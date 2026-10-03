@@ -178,7 +178,7 @@ export function beachWorld() {
   }
 
   /* ---------------- beach volleyball (scripted) ---------------- */
-  for (const [x, z, sx, sz] of [[470, 524, 16.4, 0.3], [470, 540, 16.4, 0.3], [462, 532, 0.3, 16], [478, 532, 0.3, 16]]) P('box', [x, G + 0.04, z], [sx, 0.08, sz], '#f5f5f5', 'smooth', { nc: true });
+  for (const [x, z, sx, sz] of [[470, 524, 16.4, 0.3], [470, 540, 16.4, 0.3], [462, 532, 0.3, 16], [478, 532, 0.3, 16]]) P('box', [x, G + 0.05, z], [sx, 0.1, sz], '#f5f5f5', 'smooth', { nc: true });
   for (const z of [523.4, 540.6]) P('cyl', [470, G + 1.7, z], [0.35, 3.4, 0.35], '#3b3f55', 'metal');
   P('box', [470, G + 2.4, 532], [0.15, 1.6, 17], '#f5f5f5', 'fabric', { t: 0.45 });
   P('ball', [464, G + 1.4, 532], [1.6, 1.6, 1.6], '#fff3c4', 'smooth', { n: 'Ball', nc: true });

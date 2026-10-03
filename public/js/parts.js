@@ -10,7 +10,7 @@ import { checkScripts, LIMITS_BS } from './bscript.js';
 export const ENGINE2 = 2;
 export const MAX_PARTS = 10000;
 export const WORLD2 = { x: 1000, y: 500, z: 1000 }; // parts must be inside 0..x, 0..y, 0..z
-export const SIZE2 = { min: 0.1, max: 200 };
+export const SIZE2 = { min: 0.1, max: 1000 }; // (a part can be as big as the whole world)
 
 export const SHAPES2 = [
   { id: 'box', name: 'Box' }, { id: 'wedge', name: 'Ramp' }, { id: 'corner', name: 'Corner ramp' },
