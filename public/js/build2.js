@@ -3,7 +3,9 @@
 // a Properties panel for the selected parts, a Parts list, World settings, Test and Publish (like v1).
 import { createRenderer, M4, hexRGB } from './gl.js';
 import { showError, ERRORS } from './loader.js';
-import { SHAPES2, MATERIALS2, SPECIALS2, cleanPart, normalizeParts, solidOf, rotMat, WORLD2, SIZE2, MAX_PARTS } from './parts.js';
+import { checkScripts, LIMITS_BS } from './bscript.js';
+import { LESSONS, SNIPPETS, REFERENCE } from './bsdocs.js';
+import { SHAPES2, MATERIALS2, SPECIALS2, MOTIONS2, cleanPart, normalizeParts, solidOf, rotMat, WORLD2, SIZE2, MAX_PARTS } from './parts.js';
 import { rayHit } from './phys2.js';
 import { SKIES, PALETTE } from './world.js';
 import { MUSIC, isSong } from './cosmetics.js';
@@ -22,7 +24,7 @@ const h = (tag, attrs = {}, ...kids) => {
   for (const c of kids.flat()) if (c != null && c !== false) e.append(c);
   return e;
 };
-export const worldSig2 = (w) => { let hh = 2166136261; const s = (w.mode || '') + '|' + JSON.stringify(w.parts || []); for (let i = 0; i < s.length; i++) { hh ^= s.charCodeAt(i); hh = Math.imul(hh, 16777619) >>> 0; } return hh.toString(36) + ':' + s.length; };
+export const worldSig2 = (w) => { let hh = 2166136261; const s = (w.mode || '') + '|' + JSON.stringify(w.parts || []) + (w.scripts && w.scripts.length ? '|' + JSON.stringify(w.scripts) : ''); for (let i = 0; i < s.length; i++) { hh ^= s.charCodeAt(i); hh = Math.imul(hh, 16777619) >>> 0; } return hh.toString(36) + ':' + s.length; };
 const TOOLS = [['select', 'Select', '1'], ['move', 'Move', '2'], ['resize', 'Resize', '3'], ['rotate', 'Rotate', '4']];
 const SNAPS = [[1, '1'], [0.5, '0.5'], [0.25, '0.25'], [0, 'Off']];
 const DEFAULT_SIZE = { box: [4, 1, 4], wedge: [4, 2, 4], corner: [4, 2, 4], cyl: [2, 4, 2], cone: [3, 4, 3], ball: [3, 3, 3], halfcyl: [4, 2, 2], pyramid: [4, 3, 4] };
@@ -46,6 +48,8 @@ export function startBuilder2(root, opts) {
   const src = opts.world || {};
   const meta = { n: src.n || 'My world', mode: src.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[src.sky] ? src.sky : 'day', compass: src.compass === true, music: isSong(src.music) ? src.music : '' };
   let parts = (src.parts || []).map((q, i) => { try { return cleanPart(q, i); } catch (e) { return null; } }).filter(Boolean);
+  let scripts = (Array.isArray(src.scripts) ? src.scripts : []).slice(0, LIMITS_BS.scripts).map((x, i) => ({ n: String((x && x.n) || 'Script ' + (i + 1)).slice(0, 30), src: String((x && x.src) || '').slice(0, LIMITS_BS.chars) }));
+  let curScript = 0;
   let sel = new Set(), tool = 'select', snap = 1, proof = opts.proof || null, stopped = false, raf = 0, playing = null;
   const undo = [], redo = [];
   let clip = null;
@@ -72,11 +76,13 @@ export function startBuilder2(root, opts) {
   const props = h('div', { class: 'b2-props' });
   const explorer = h('div', { class: 'b2-explorer' });
   const worldPane = h('div', { class: 'b3-pane', hidden: true });
+  const scriptPane = h('div', { class: 'b3-pane bs-pane', hidden: true });
   const panes = {
     build: h('div', { class: 'b3-pane' }, tools, h('div', { class: 'b3-dock-row b2-row' }, h('div', {}, h('h3', {}, 'Add a part'), shapeBtns, h('h3', {}, 'Properties'), props), h('div', {}, h('h3', {}, 'Parts'), explorer))),
+    scripts: scriptPane,
     world: worldPane,
   };
-  const tabBtns = Object.keys(panes).map((k) => h('button', { class: 'tab', role: 'tab', type: 'button', 'data-dock': k, 'aria-selected': String(k === 'build'), onclick: () => setDock(k) }, { build: 'Build', world: 'World' }[k]));
+  const tabBtns = Object.keys(panes).map((k) => h('button', { class: 'tab', role: 'tab', type: 'button', 'data-dock': k, 'aria-selected': String(k === 'build'), onclick: () => setDock(k) }, { build: 'Build', scripts: 'Scripts', world: 'World' }[k]));
   function setDock(k) { for (const b of tabBtns) b.setAttribute('aria-selected', String(b.dataset.dock === k)); for (const [n, p] of Object.entries(panes)) p.hidden = n !== k; }
   const dock = h('div', { class: 'b3-dock' }, h('div', { class: 'tabs b3-dock-tabs', role: 'tablist', 'aria-label': 'Editor tools' }, ...tabBtns), ...Object.values(panes));
   const hint = h('p', { class: 'hint' }, `Click a part to select it (Shift-click for more). Drag the arrows (Move), face dots (Resize) or axis dots (Rotate). Drag empty space to look around; ${['fwd', 'left', 'back', 'right'].map(keyName).join(' ')} fly, ${keyName('jump')} up, ${keyName('shift')} down, scroll to zoom. Arrow keys and Page Up/Down nudge, R turns 90°, F looks at the selection. Keys: 1-4 tools, Ctrl+D duplicate, Ctrl+C / Ctrl+V, Del, Ctrl+Z, T test.`);
@@ -96,11 +102,14 @@ export function startBuilder2(root, opts) {
     solids = parts.map(solidOf);
     if (all) R.setParts(parts, (q, i) => sel.has(i), 'main');
     R.setParts(parts, (q, i) => !sel.has(i), 'sel');
+    R.setLights(parts.filter((q) => q.lt).map((q) => ({ p: q.p, range: q.lt.r, color: hexRGB(q.c), power: q.lt.b })));
   }
   function getWorld() {
     const w = { v: 2, engine: 2, n: meta.n, mode: meta.mode, sky: meta.sky, parts: parts.map((q) => ({ ...q })) };
     if (meta.compass) w.compass = true;
     if (meta.music) w.music = meta.music;
+    const used = scripts.filter((x) => x.src.trim());
+    if (used.length) w.scripts = used.map((x) => ({ n: x.n, src: x.src }));
     return w;
   }
   let saveT = 0;
@@ -117,16 +126,20 @@ export function startBuilder2(root, opts) {
   function setSnap(v) { snap = v; for (const b of snapRow.children) b.setAttribute('aria-pressed', String(Number(b.dataset.snap) === v)); }
   const sn = (v) => (snap ? Math.round(v / snap) * snap : r3(v));
   function place(q) { q.p = [Math.max(0, Math.min(WORLD2.x, q.p[0])), Math.max(0, Math.min(WORLD2.y, q.p[1])), Math.max(0, Math.min(WORLD2.z, q.p[2]))]; return q; }
-  function insert(shape) {
-    if (parts.length >= MAX_PARTS) return say(`That's the most parts a world can have (${MAX_PARTS}).`);
-    const size = [...DEFAULT_SIZE[shape]];
-    // in front of you, sitting on whatever is there
+  // in front of you, sitting on whatever is there
+  function spotAhead() {
     const f = look(), d = 8;
     let x = cam.x + f[0] * d, z = cam.z + f[2] * d;
     const r = pickRay(W() / 2, H() / 2);
     const hit = r ? castParts(r.o, r.d, 60) : null;
     if (hit) { x = r.o[0] + r.d[0] * hit.t; z = r.o[2] + r.d[2] * hit.t; }
     let y = 0; for (const s of solids) if (x >= s.min[0] && x <= s.max[0] && z >= s.min[2] && z <= s.max[2] && s.max[1] > y && s.max[1] < cam.y) y = s.max[1];
+    return { x, y, z };
+  }
+  function insert(shape) {
+    if (parts.length >= MAX_PARTS) return say(`That's the most parts a world can have (${MAX_PARTS}).`);
+    const size = [...DEFAULT_SIZE[shape]];
+    const { x, y, z } = spotAhead();
     snapshot();
     const q = place({ s: shape, p: [snap ? sn(x) : r3(x), r3(y + size[1] / 2), snap ? sn(z) : r3(z)], z: size, r: [0, 0, 0], c: '#a3abc2', m: 'plastic' });
     const last = selParts()[0];
@@ -195,8 +208,126 @@ export function startBuilder2(root, opts) {
         h('label', { class: 'check' }, walk, ' Players walk through it')),
       numRow('Position', 'p', 0, 1000, snap || 0.05), numRow('Size', 'z', SIZE2.min, SIZE2.max, snap || 0.05), numRow('Turn', 'r', -360, 360, snap ? 15 : 1),
       h('div', { class: 'b2-color' }, h('span', { class: 'b2-lbl' }, 'Color'), color, sw),
+      motionRow(q, set), lightRow(q, set),
       many ? h('p', { class: 'small' }, `Changes go to all ${list.length} selected parts (position: use Move).`) : null);
   }
+  // Motion: move back and forth, spin or swing by itself (no script needed). Light: glows onto things near it.
+  function motionRow(q, set) {
+    const mo = q.mo || null, kind = mo ? mo.t : '';
+    const sel2 = h('select', { 'aria-label': 'Motion' }, h('option', { value: '' }, 'Stays still'), ...Object.entries(MOTIONS2).map(([v, n]) => h('option', { value: v }, n)));
+    sel2.value = kind;
+    sel2.addEventListener('change', () => set((x) => { const t = sel2.value; if (!t) delete x.mo; else x.mo = { t, d: t === 'move' ? [0, 6, 0] : t === 'spin' ? [0, 90, 0] : [0, 0, 40], s: t === 'spin' ? 1 : 2 }; return x; }));
+    const row = h('div', { class: 'b2-xyz b2-motion' }, h('span', { class: 'b2-lbl' }, 'Motion'), sel2);
+    if (mo) {
+      const unit = kind === 'move' ? 'How far' : kind === 'spin' ? 'Degrees a second' : 'Degrees each way';
+      row.append(h('span', { class: 'small' }, unit), ...[0, 1, 2].map((k) => {
+        const inp = h('input', { type: 'number', step: kind === 'move' ? '1' : '15', value: String(mo.d[k]), 'aria-label': `Motion ${AXN[k]}` });
+        inp.addEventListener('change', () => set((x) => { if (!x.mo) return x; const d = [...x.mo.d]; d[k] = Number(inp.value) || 0; x.mo = { ...x.mo, d }; return x; }));
+        return h('label', {}, h('span', { style: `color:${AXC[k]}` }, AXN[k]), inp);
+      }));
+      if (kind !== 'spin') {
+        const secs = h('input', { type: 'number', step: '0.5', min: '0.2', max: '60', value: String(mo.s), 'aria-label': 'Motion seconds' });
+        secs.addEventListener('change', () => set((x) => { if (x.mo) x.mo = { ...x.mo, s: Number(secs.value) || 2 }; return x; }));
+        row.append(h('label', {}, h('span', {}, 'Seconds'), secs));
+      }
+    }
+    return row;
+  }
+  function lightRow(q, set) {
+    const r = h('input', { type: 'range', min: '0', max: '40', step: '1', value: String(q.lt ? q.lt.r : 0), 'aria-label': 'Light' });
+    const out = h('span', { class: 'small' }, q.lt ? `reaches ${q.lt.r} studs (in the part's color)` : 'off');
+    r.addEventListener('change', () => set((x) => { const v = Number(r.value); if (v > 0) x.lt = { r: v, b: (x.lt && x.lt.b) || 1 }; else delete x.lt; return x; }));
+    return h('div', { class: 'b2-xyz' }, h('span', { class: 'b2-lbl' }, 'Light'), r, out);
+  }
+
+  /* ---------------- Scripts tab: Blockscript ---------------- */
+  const code = h('textarea', { class: 'bs-code', spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', wrap: 'off', 'aria-label': 'Script code', placeholder: 'Write Blockscript here, or press Lessons to learn it.\n\non start {\n  say("Hello!")\n}' });
+  const gutter = h('div', { class: 'bs-gutter', 'aria-hidden': 'true' });
+  const status = h('p', { class: 'bs-status small', role: 'status' });
+  const scriptList = h('div', { class: 'bs-list' });
+  const side = h('div', { class: 'bs-side' });
+  let sideMode = 'lessons', lessonAt = 0;
+  const cur = () => scripts[curScript];
+  function checkNow() {
+    const lines = code.value.split('\n').length;
+    const bad = checkScripts(scripts);
+    const mine = bad.find((b) => cur() && b.script === cur().n);
+    gutter.replaceChildren(...Array.from({ length: lines }, (_, i) => h('div', { class: mine && mine.line === i + 1 ? 'bad' : '' }, String(i + 1))));
+    gutter.scrollTop = code.scrollTop;
+    status.dataset.ok = String(!bad.length);
+    status.textContent = !cur() ? '' : mine ? '\u26a0 ' + mine.msg : bad.length ? `\u26a0 "${bad[0].script}" has a mistake: ${bad[0].msg}` : cur().src.trim() ? '\u2713 No mistakes. Press Test to try it.' : 'Empty script.';
+    for (const b of scriptList.querySelectorAll('[data-i]')) b.classList.toggle('bad', bad.some((x) => scripts[b.dataset.i] && x.script === scripts[b.dataset.i].n));
+  }
+  code.addEventListener('input', () => { if (!cur()) { scripts.push({ n: 'Script 1', src: '' }); curScript = 0; drawScriptList(); } cur().src = code.value.slice(0, LIMITS_BS.chars); checkNow(); save(); });
+  code.addEventListener('scroll', () => { gutter.scrollTop = code.scrollTop; });
+  code.addEventListener('keydown', (e) => {
+    // Tab indents, Enter keeps the indent (and adds one after "{")
+    if (e.key === 'Tab') { e.preventDefault(); typeIn('  '); }
+    else if (e.key === 'Enter') {
+      const before = code.value.slice(0, code.selectionStart), line = before.slice(before.lastIndexOf('\n') + 1);
+      const ind = (line.match(/^\s*/) || [''])[0] + (/\{\s*$/.test(line) ? '  ' : '');
+      if (ind) { e.preventDefault(); typeIn('\n' + ind); }
+    } else if (e.key === '}') {
+      const before = code.value.slice(0, code.selectionStart), line = before.slice(before.lastIndexOf('\n') + 1);
+      if (/^\s{2,}$/.test(line)) { e.preventDefault(); code.setRangeText('}', code.selectionStart - 2, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); }
+    }
+  });
+  function typeIn(text) { code.focus(); code.setRangeText(text, code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); }
+  function openScript(i) { curScript = Math.max(0, Math.min(scripts.length - 1, i)); code.value = cur() ? cur().src : ''; drawScriptList(); checkNow(); }
+  function newScript(src0 = '', name) {
+    if (scripts.length >= LIMITS_BS.scripts) { say(`A world can have up to ${LIMITS_BS.scripts} scripts.`); return false; }
+    let n = name || 'Script ' + (scripts.length + 1); let k = 2; while (scripts.some((x) => x.n === n)) n = (name || 'Script') + ' ' + k++;
+    scripts.push({ n, src: src0 }); openScript(scripts.length - 1); save(); return true;
+  }
+  function drawScriptList() {
+    scriptList.replaceChildren(
+      ...scripts.map((x, i) => h('button', { class: 'bs-tab' + (i === curScript ? ' on' : ''), type: 'button', 'data-i': String(i), onclick: () => openScript(i) }, x.n)),
+      h('button', { class: 'btn bs-new', type: 'button', onclick: () => newScript() }, '+ New script'),
+      cur() ? h('button', { class: 'btn', type: 'button', onclick: async () => { const n = prompt('Script name', cur().n); if (n && n.trim()) { cur().n = n.trim().slice(0, 30); drawScriptList(); checkNow(); save(); } } }, 'Rename') : null,
+      cur() ? h('button', { class: 'btn btn-danger', type: 'button', onclick: () => { if (cur().src.trim() && !confirm(`Delete "${cur().n}"?`)) return; scripts.splice(curScript, 1); openScript(curScript); save(); } }, 'Delete') : null);
+  }
+  // a lesson's parts, set down in front of the camera
+  function addKit(kit) {
+    if (!kit || !kit.length) return 0;
+    const at = spotAhead(); snapshot(); let added = 0; const first = parts.length;
+    for (const [n, shape, d, z, c, m] of kit) {
+      if (parts.length >= MAX_PARTS) break;
+      parts.push(cleanPart({ s: shape, p: [sn(at.x + d[0]), r3(at.y + d[1]), sn(at.z + d[2])], z, r: [0, 0, 0], c, m, n })); added++;
+    }
+    sel = new Set(Array.from({ length: added }, (_, k) => first + k)); changed();
+    return added;
+  }
+  function drawSide() {
+    const tabs = h('div', { class: 'seg bs-seg' }, ...[['lessons', 'Lessons'], ['insert', 'Quick insert'], ['ref', 'Cheat sheet']].map(([k, n]) => h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(sideMode === k), onclick: () => { sideMode = k; drawSide(); } }, n)));
+    let body;
+    if (sideMode === 'lessons') {
+      const L = LESSONS[lessonAt];
+      body = h('div', { class: 'bs-lesson' },
+        h('select', { 'aria-label': 'Lesson', onchange: (e) => { lessonAt = Number(e.target.value); drawSide(); } }, ...LESSONS.map((x, i) => { const o = h('option', { value: String(i) }, x.title); o.selected = i === lessonAt; return o; })),
+        ...L.text.map((t) => h('p', { class: 'small' }, t)),
+        h('pre', { class: 'bs-pre' }, L.code),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn btn-grass', type: 'button', onclick: () => {
+            const made = addKit(L.kit);
+            if (!newScript(L.code + '\n', 'Lesson ' + (lessonAt + 1))) return;
+            say(made ? `Added the code and ${made} part${made === 1 ? '' : 's'} for it. Press Test!` : 'Added the code. Press Test!');
+          } }, L.kit ? 'Use this code (adds its parts too)' : 'Use this code'),
+          lessonAt < LESSONS.length - 1 ? h('button', { class: 'btn', type: 'button', onclick: () => { lessonAt++; drawSide(); } }, 'Next lesson \u2192') : null));
+    } else if (sideMode === 'insert') {
+      body = h('div', {}, h('p', { class: 'small' }, 'Click to drop code where your cursor is.'), h('div', { class: 'bs-snips' }, ...SNIPPETS.map(([n, c]) => h('button', { class: 'btn', type: 'button', onclick: () => {
+        if (!cur()) newScript();
+        const named = parts.filter((q) => q.n).map((q) => q.n), pick = selParts().find((q) => q.n);
+        typeIn(c.replace(/"Name"/g, '"' + ((pick && pick.n) || named[0] || 'Name') + '"')); // (uses the selected part's name)
+      } }, n))),
+      h('p', { class: 'small' }, 'Names in your world: ' + ([...new Set(parts.filter((q) => q.n).map((q) => q.n))].slice(0, 30).join(', ') || 'none yet. Name a part in Build > Properties > Name.')));
+    } else {
+      body = h('div', { class: 'bs-ref' }, ...REFERENCE.map(([head, rows]) => h('details', { open: head === 'When things happen' }, h('summary', {}, head), h('table', {}, ...rows.map(([c, d]) => h('tr', {}, h('td', {}, h('code', {}, c)), h('td', { class: 'small' }, d)))))));
+    }
+    side.replaceChildren(tabs, body);
+  }
+  scriptPane.append(scriptList, h('div', { class: 'bs-row' }, h('div', { class: 'bs-editor' }, h('div', { class: 'bs-box' }, gutter, code), status), side));
+  drawScriptList(); openScript(0); drawSide();
+
   function drawExplorer() {
     const show = parts.slice(0, 300);
     explorer.replaceChildren(h('p', { class: 'small' }, `${parts.length} part${parts.length === 1 ? '' : 's'}`),
@@ -226,7 +357,7 @@ export function startBuilder2(root, opts) {
   const W = () => canvas.clientWidth || 640, H = () => canvas.clientHeight || 400;
   function pickRay(sx, sy) { try { return R.ray(sx, sy); } catch (e) { return null; } }
   function castParts(o, d, maxT = 400) { let best = null; for (let i = 0; i < solids.length; i++) { const t = rayHit(solids[i], o, d, maxT); if (t != null && (!best || t < best.t)) best = { t, i }; } return best; }
-  if (location.search.includes('w3test')) window.__b2 = { parts: () => parts, sel: () => [...sel], cam: (x, y, z, yaw, pitch) => Object.assign(cam, { x, y, z, yaw, pitch }), select: (l) => selectOnly(l), stats: () => R.stats, handles: () => handles().map((g) => ({ ...g, s: R.project(...g.at) })) };
+  if (location.search.includes('w3test')) window.__b2 = { scripts: () => scripts, lesson: (i) => { lessonAt = i; sideMode = 'lessons'; drawSide(); }, parts: () => parts, sel: () => [...sel], cam: (x, y, z, yaw, pitch) => Object.assign(cam, { x, y, z, yaw, pitch }), select: (l) => selectOnly(l), stats: () => R.stats, handles: () => handles().map((g) => ({ ...g, s: R.project(...g.at) })) };
 
   /* ---------------- handles (the arrows and dots) ---------------- */
   // each: { kind: 'move'|'resize'|'rotate', axis: 0-2, sign, at: [x,y,z], dir: world direction, r: pick radius }

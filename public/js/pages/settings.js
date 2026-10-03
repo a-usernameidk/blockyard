@@ -67,7 +67,7 @@ async function showSettings() {
   show('settings', '');
   const body = $('#settings-body');
   // which update is running (if this is old, the new files didn't get deployed, or the browser kept old ones)
-  $('#view-settings .lede').textContent = 'These are saved on this computer. Blockyard update ' + VERSION + ' (Sept 28, 2026).';
+  $('#view-settings .lede').textContent = 'These are saved on this computer. Blockyard update ' + VERSION + ' (Oct 3, 2026).';
   const notes = NOTIFY.map(([k, label]) => check(label, notifyOn(k), (on) => { const s = store.get('notify', {}); s[k] = on; store.set('notify', s); }));
   body.replaceChildren(
     section('Look', el('p', { class: 'small' }, 'Light or dark colors for the whole site.'),

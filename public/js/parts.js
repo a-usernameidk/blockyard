@@ -5,6 +5,7 @@
 import { cleanText, isRude } from './format.js';
 import { SKIES, PALETTE, B } from './world.js';
 import { isSong } from './cosmetics.js';
+import { checkScripts, LIMITS_BS } from './bscript.js';
 
 export const ENGINE2 = 2;
 export const MAX_PARTS = 10000;
@@ -27,6 +28,7 @@ export const MATERIALS2 = [
   { id: 'glass', name: 'Glass', pat: 9, see: true }, { id: 'ice', name: 'Ice', pat: 8, slip: true },
   { id: 'neon', name: 'Neon', pat: 11, glow: true }, { id: 'grass', name: 'Grass', pat: 1 },
   { id: 'sand', name: 'Sand', pat: 6 }, { id: 'fabric', name: 'Fabric', pat: 45 },
+  { id: 'water', name: 'Water (swim in it)', pat: 47, see: true, water: true },
 ];
 export const MATERIAL2 = Object.fromEntries(MATERIALS2.map((m, i) => [m.id, i]));
 // special jobs a part can have (any shape can be any of these)
@@ -39,7 +41,11 @@ const hex = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toLow
 
 /* ---------------- one part ----------------
    { s: shape, p: [x,y,z] center, z: [sx,sy,sz] size, r: [rx,ry,rz] degrees, c: '#rrggbb', m: material,
-     t?: see-through 0-1, g?: glow 0-1, nc?: walk through, k?: special, n?: name } */
+     t?: see-through 0-1, g?: glow 0-1, nc?: walk through, k?: special, n?: name,
+     mo?: motion { t: 'move' | 'spin' | 'swing', d: [x,y,z] (move: how far; spin: degrees a second; swing: degrees each way),
+                  s: seconds (move: one way; swing: a full swing), w?: seconds to wait at each end (move) },
+     lt?: light { r: range in studs, b: brightness 0.2-3 } (glows in its own color) } */
+export const MOTIONS2 = { move: 'Move back and forth', spin: 'Spin', swing: 'Swing' };
 export function cleanPart(q, i = 0) {
   if (!q || typeof q !== 'object') throw new Error(`Part ${i + 1} is broken.`);
   const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
@@ -58,6 +64,15 @@ export function cleanPart(q, i = 0) {
   if (q.nc === true) out.nc = true;
   if (SPECIALS2[q.k]) out.k = q.k;
   const n = cleanText(q.n, 30); if (n && !isRude(n)) out.n = n;
+  if (q.mo && MOTIONS2[q.mo.t]) {
+    const d = Array.isArray(q.mo.d) ? q.mo.d : [];
+    const lim = q.mo.t === 'move' ? 200 : 720;
+    out.mo = { t: q.mo.t, d: [0, 1, 2].map((k) => r3(num(d[k], -lim, lim, 0))), s: r3(num(q.mo.s, 0.2, 60, 2)) };
+    const w = num(q.mo.w, 0, 30, 0); if (w > 0 && q.mo.t === 'move') out.mo.w = r3(w);
+    if (!out.mo.d.some((v) => v)) delete out.mo;
+  }
+  if (q.lt && typeof q.lt === 'object') { const r = num(q.lt.r, 0, 60, 0); if (r > 0) out.lt = { r: r3(r), b: r3(num(q.lt.b, 0.2, 3, 1)) }; }
+  if (MATERIALS2[MATERIAL2[out.m]].water) out.nc = true; // you swim through water
   return out;
 }
 
@@ -74,6 +89,12 @@ export function normalizeParts(w, { needGoal } = {}) {
   const world = { v: 2, engine: ENGINE2, n: cleanText(w.n, 40) || 'My world', mode, sky: SKIES[w.sky] ? w.sky : 'day', parts };
   if (w.compass === true) world.compass = true;
   if (isSong(w.music)) world.music = w.music;
+  if (Array.isArray(w.scripts) && w.scripts.length) {
+    if (w.scripts.length > LIMITS_BS.scripts) throw new Error(`A world can have up to ${LIMITS_BS.scripts} scripts.`);
+    world.scripts = w.scripts.map((x, i) => ({ n: cleanText(x && x.n, 30) || 'Script ' + (i + 1), src: String((x && x.src) || '').slice(0, LIMITS_BS.chars) }));
+    const bad = checkScripts(world.scripts);
+    if (bad.length) throw new Error(`Script "${bad[0].script}" has a mistake: ${bad[0].msg}`);
+  }
   return { world, info: { blocks: parts.length, coins: parts.filter((q) => q.k === 'coin') } };
 }
 
@@ -142,6 +163,22 @@ export function solidOf(q) {
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   for (const p of v) for (let k = 0; k < 3; k++) { if (p[k] < min[k]) min[k] = p[k]; if (p[k] > max[k]) max[k] = p[k]; }
   return { v, planes, min, max };
+}
+
+/* ---------------- moving parts ---------------- */
+const r6 = (v) => Math.round(v * 1e6) / 1e6;
+const ease = (x) => r6(0.5 - 0.5 * Math.cos(Math.PI * x)); // smooth start and stop
+// motion offset at t seconds: { dp: [x,y,z], dr: [x,y,z] }
+export function motionAt(mo, t) {
+  if (!mo) return null;
+  if (mo.t === 'move') {
+    const w = mo.w || 0, leg = mo.s + w, per = leg * 2, u = ((t % per) + per) % per;
+    const f = u < mo.s ? ease(u / mo.s) : u < leg ? 1 : u < leg + mo.s ? 1 - ease((u - leg) / mo.s) : 0;
+    return { dp: [r6(mo.d[0] * f), r6(mo.d[1] * f), r6(mo.d[2] * f)], dr: [0, 0, 0] };
+  }
+  if (mo.t === 'spin') return { dp: [0, 0, 0], dr: [r6((mo.d[0] * t) % 360), r6((mo.d[1] * t) % 360), r6((mo.d[2] * t) % 360)] };
+  const k = r6(Math.sin(2 * Math.PI * t / mo.s)); // swing
+  return { dp: [0, 0, 0], dr: [r6(mo.d[0] * k), r6(mo.d[1] * k), r6(mo.d[2] * k)] };
 }
 
 /* ---------------- a little picture of the world from above (for the Worlds page) ----------------

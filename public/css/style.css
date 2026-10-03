@@ -1247,3 +1247,35 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .err-fix p { margin: 4px 0 0; }
 .err-btns { gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .err-details { margin: 10px 0 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px ui-monospace, Consolas, monospace; background: var(--field); color: var(--ink); border: 2px solid var(--line); border-radius: 10px; padding: 8px; user-select: all; }
+/* engine v2: under water, and the script log while testing */
+.w3-water { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(rgba(40, 140, 220, .28), rgba(20, 80, 170, .42)); }
+.w3-log { position: absolute; left: 10px; bottom: 10px; max-width: min(520px, 70%); padding: 6px 9px; border-radius: 10px; background: rgba(20, 24, 44, .78); color: #e8ecff; font: 12px ui-monospace, Consolas, monospace; pointer-events: none; overflow-wrap: anywhere; }
+.w3-log .bad { color: #ff9aa8; }
+/* Blockscript editor (Engine v2 > Scripts) */
+.bs-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.bs-list .btn { padding: 4px 10px; font-size: 13px; }
+.bs-tab { font: 800 13px Nunito, system-ui, sans-serif; color: var(--ink); background: var(--field); border: 2px solid var(--line); border-radius: 9px 9px 0 0; padding: 5px 10px; cursor: pointer; }
+.bs-tab.on { background: var(--sun); color: #1d1d2c; }
+.bs-tab.bad::after { content: ' \26A0'; color: #d11a3a; }
+.bs-row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.bs-box { display: flex; height: 380px; border: 3px solid var(--line); border-radius: 12px; overflow: hidden; background: #171a2e; }
+.bs-gutter { flex: none; width: 40px; padding: 10px 6px 10px 0; overflow: hidden; text-align: right; color: #6b7399; background: #11142a; font: 13px/1.5 ui-monospace, Consolas, monospace; user-select: none; }
+.bs-gutter .bad { background: #d11a3a; color: #fff; border-radius: 0 6px 6px 0; }
+.bs-code { flex: 1; min-width: 0; height: 100%; max-width: none; margin: 0; padding: 10px; border: 0; border-radius: 0; resize: none; outline: none; background: #171a2e; color: #e8ecff; caret-color: #ffd23f; font: 13px/1.5 ui-monospace, Consolas, monospace; tab-size: 2; white-space: pre; overflow: auto; }
+.bs-status { margin: 6px 0 0; min-height: 1.4em; font-weight: 800; overflow-wrap: anywhere; }
+.bs-status[data-ok="true"] { color: var(--grass-ink, #1f8a43); }
+.bs-status[data-ok="false"] { color: #d11a3a; }
+.bs-side { max-height: 430px; overflow-y: auto; padding-right: 4px; }
+.bs-seg { margin-bottom: 8px; }
+.bs-seg .seg-btn { padding: 5px 9px; font-size: 13px; }
+.bs-lesson select { width: 100%; font-size: 14px; padding: 5px 8px; }
+.bs-lesson p { margin: 7px 0 0; }
+.bs-pre { margin: 8px 0; padding: 9px; border-radius: 10px; border: 2px solid var(--line); background: #171a2e; color: #e8ecff; font: 12px/1.45 ui-monospace, Consolas, monospace; overflow-x: auto; white-space: pre; max-height: 230px; }
+.bs-snips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.bs-snips .btn, .bs-lesson .btn { padding: 5px 10px; font-size: 13px; }
+.bs-ref summary { font: 800 14px Nunito, system-ui, sans-serif; cursor: pointer; padding: 4px 0; }
+.bs-ref table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+.bs-ref td { padding: 3px 6px 3px 0; vertical-align: top; border-top: 1px solid rgba(128, 128, 160, .25); }
+.bs-ref code { font: 12px ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.b2-motion select { font-size: 14px; padding: 4px 6px; }
+@media (max-width: 760px) { .bs-row { grid-template-columns: 1fr; } .bs-box { height: 300px; } }

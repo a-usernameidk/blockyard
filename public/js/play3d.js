@@ -107,8 +107,10 @@ export function startWorld(root, opts) {
   const joy = h('div', { class: 'w3-joy', 'aria-hidden': 'true' }, h('div', { class: 'w3-knob' }));
   const jumpBtn = h('button', { class: 'tbtn tbtn-jump w3-jump', type: 'button', 'aria-label': 'Jump' }, 'Jump');
   const hudVars = h('span', { class: 'w3-vars' });
+  const hudBoard = h('span', { class: 'w3-vars' }), logBox = h('div', { class: 'w3-log', hidden: true }), water = h('div', { class: 'w3-water', hidden: true });
+  const boardVals = new Map(), scriptLog = []; let v2Lights = [];
   const sayBox = h('div', { class: 'w3-say', 'aria-live': 'polite', hidden: true });
-  const stage = h('div', { class: 'w3-stage' }, canvas, tags, h('div', { class: 'w3-hud' }, hudTime, hudCoins, hudDeaths, hudVars, hudNet), toastEl, sayBox, fade, players, chat, emoteBar, joy, jumpBtn, menu, winBox, msgBox);
+  const stage = h('div', { class: 'w3-stage' }, canvas, tags, h('div', { class: 'w3-hud' }, hudTime, hudCoins, hudDeaths, hudVars, hudBoard, hudNet), water, toastEl, sayBox, logBox, fade, players, chat, emoteBar, joy, jumpBtn, menu, winBox, msgBox);
   const restartBtn = h('button', { class: 'btn', type: 'button', title: 'Start over from the beginning' }, 'Restart');
   const resetBtn = h('button', { class: 'btn', type: 'button', title: 'Go back to your last checkpoint (R)' }, 'Respawn');
   const inviteBtn = h('button', { class: 'btn', type: 'button', hidden: true }, 'Invite');
@@ -173,8 +175,34 @@ export function startWorld(root, opts) {
   R.setGrid(viewGrid);
   if (isV2) {
     if (!R.setParts) { const box = h('div'); msgBox.replaceChildren(box); const code = (window.__hdError === 'WebGL 2 is not available' ? 'BY-301' : 'BY-302'); showError(box, { code, title: 'This world needs the HD graphics', list: [code + ': ' + (window.__hdError || 'the HD graphics did not start')], fix: [ERRORS[code]] }); msgBox.hidden = false; }
-    else R.setParts(world.parts, (q) => q.k === 'coin'); // the game draws coins itself (they spin, and vanish when grabbed)
+    else syncV2();
   }
+  // engine v2: still parts are one big mesh; moving parts (motion, or named in a script) are drawn on their own every frame
+  function syncV2() {
+    R.setParts(world.parts, (q, i) => q.k === 'coin' || S.live.has(i)); // (the game draws coins itself: they spin, and vanish when grabbed)
+    R.setDyn(S.dyn.map((i) => ({ i, q: S.live.get(i).q })));
+    v2Lights = world.parts.map((q, i) => (q.lt ? { i, p: q.p, range: q.lt.r, color: hexRGB(q.c), power: q.lt.b } : null)).filter(Boolean);
+    boardVals.clear(); drawBoard(); scriptLog.length = 0; drawLog();
+  }
+  function frameV2() {
+    for (const i of S.dyn) { const L = S.live.get(i); R.dynMove(i, L.p, L.R, L.hide); }
+    for (const l of v2Lights) { const L = S.live.get(l.i); if (L) { l.p = L.p; l.hide = L.hide; l.color = hexRGB(L.q.c); } }
+    R.setLights(v2Lights);
+    water.hidden = !S.swim;
+    if (S.script.length) {
+      for (const e of S.script) {
+        if (e.t === 'say') logicSay(e.text);
+        else if (e.t === 'sound') sfx(['jump', 'coin', 'win', 'die', 'pop', 'badge', 'bounce', 'checkpoint', 'speed', 'buy', 'land'].includes(e.name) ? e.name : 'pop');
+        else if (e.t === 'board') { if (e.value == null) boardVals.delete(e.label); else if (boardVals.size < 8 || boardVals.has(e.label)) boardVals.set(e.label, e.value); drawBoard(); }
+        else if (e.t === 'print') { scriptLog.push(e.text); if (scriptLog.length > 6) scriptLog.shift(); drawLog(); }
+        else if (e.t === 'part') { const L = S.live.get(e.i); if (L) R.dynMesh(e.i, L.q); }
+      }
+      S.script.length = 0;
+    }
+  }
+  function drawBoard() { hudBoard.replaceChildren(...[...boardVals].map(([l, v]) => h('span', { class: 'w3-pill w3-var' }, `${l}: ${v}`))); }
+  // what scripts print (and their mistakes) show while you test your own world
+  function drawLog() { logBox.hidden = !opts.test || !scriptLog.length; logBox.replaceChildren(...scriptLog.map((t) => h('div', { class: t.startsWith('\u26a0') ? 'bad' : '' }, t))); }
 
   /* ---------------- what's in the world ---------------- */
   const flags = [], goals = [];
@@ -1300,6 +1328,7 @@ export function startWorld(root, opts) {
   }
   function restart() {
     S = newSim();
+    if (isV2 && R.setDyn) syncV2();
     applyGear();
     scatter();
     drawVars();
@@ -1478,6 +1507,7 @@ export function startWorld(root, opts) {
     if (snowballs.length) snowTick(dt, scene);
     if (!fly) tipTick(dt);
     if (G3.auto) { const ch = G3.tick(dt); if (ch) gfxBtn.textContent = `Graphics: Auto (${GFX[ch].name})`; }
+    if (isV2 && R.setDyn) frameV2();
     R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, lines, far: G3.far || 230 });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 

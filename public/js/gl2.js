@@ -131,6 +131,7 @@ const LIGHT = `
 uniform vec3 u_sunDir; uniform vec3 u_sunCol; uniform vec3 u_skyCol; uniform vec3 u_groundCol;
 uniform vec3 u_fog; uniform vec3 u_cam; uniform vec2 u_fogr; uniform float u_exposure;
 uniform sampler2DShadow u_shadow; uniform float u_shadowOn; uniform vec2 u_texel;
+uniform vec4 u_lp[12]; uniform vec4 u_lc[12]; uniform float u_nl;
 float shadowAt(vec4 ls, float ndl) {
   if (u_shadowOn < 0.5) return 1.0;
   vec3 p = ls.xyz / ls.w * 0.5 + 0.5;
@@ -154,7 +155,14 @@ vec4 shade(vec3 albedo, vec3 N, vec3 wp, vec4 ls, float spec, float shin, float 
   vec3 H = normalize(u_sunDir + V);
   float sp = pow(max(dot(N, H), 0.0), shin) * spec * sh * (shin + 8.0) / 40.0;
   float fr = pow(1.0 - max(dot(N, V), 0.0), 5.0) * spec * 0.6;
-  vec3 col = alb * (amb + dif) + u_sunCol * sp + u_skyCol * fr * ao * 1.6;
+  vec3 pl = vec3(0.0);
+  for (int i = 0; i < 12; i++) {
+    if (float(i) >= u_nl) break;
+    vec3 d = u_lp[i].xyz - wp; float dist = length(d);
+    float att = clamp(1.0 - dist / u_lp[i].w, 0.0, 1.0);
+    pl += u_lc[i].rgb * u_lc[i].a * att * att * (0.35 + 0.65 * max(dot(N, d / max(dist, 0.001)), 0.0));
+  }
+  vec3 col = alb * (amb + dif + pl * 2.2) + u_sunCol * sp + u_skyCol * fr * ao * 1.6;
   col = pow(filmic(col), vec3(1.0 / 2.2));
   // glowing things keep their own bright color (the bloom adds the glow around them)
   if (emit > 0.0) col = mix(col, min(albedo * 1.08, 1.0), emit);
@@ -195,12 +203,13 @@ void main() {
 // Engine v2 parts: patterns tile once per stud (uv is in studs), a soft bevel at the part's edges (dim = the face's size)
 const PART_VS = HEAD + `
 in vec3 a_pos; in vec2 a_uv; in vec2 a_dim; in vec4 a_col; in vec4 a_mat; in vec4 a_nao;
-uniform mat4 u_vp; uniform mat4 u_lvp;
+uniform mat4 u_vp; uniform mat4 u_lvp; uniform mat4 u_model;
 out vec3 v_col; out vec3 v_wp; out vec2 v_uv; out vec2 v_dim; out float v_pat; out float v_face; out float v_alpha; out vec3 v_n; out float v_glow; out vec4 v_ls;
 void main() {
-  gl_Position = u_vp * vec4(a_pos, 1.0);
-  v_col = a_col.rgb; v_glow = a_col.a; v_wp = a_pos; v_uv = a_uv; v_dim = a_dim; v_pat = a_mat.x; v_face = a_mat.y; v_alpha = a_mat.z / 255.0;
-  v_n = a_nao.xyz; v_ls = u_lvp * vec4(a_pos + a_nao.xyz * 0.03, 1.0);
+  vec3 wp = (u_model * vec4(a_pos, 1.0)).xyz;
+  gl_Position = u_vp * vec4(wp, 1.0);
+  v_col = a_col.rgb; v_glow = a_col.a; v_wp = wp; v_uv = a_uv; v_dim = a_dim; v_pat = a_mat.x; v_face = a_mat.y; v_alpha = a_mat.z / 255.0;
+  v_n = normalize(mat3(u_model) * a_nao.xyz); v_ls = u_lvp * vec4(wp + v_n * 0.03, 1.0);
 }`;
 const PART_FS = HEAD + `
 in vec3 v_col; in vec3 v_wp; in vec2 v_uv; in vec2 v_dim; in float v_pat; in float v_face; in float v_alpha; in vec3 v_n; in float v_glow; in vec4 v_ls;
@@ -233,6 +242,7 @@ void main() {
   else if (p == 2.0) { m *= 0.88 + 0.2 * n; }
   else if (p == 46.0) { if (v_dim.y - u.y < 0.22 + 0.06 * hash(vec2(floor(u.x * 8.0), seed))) m *= 0.95 + 0.08 * n; else { col = vec3(0.604, 0.416, 0.247); m *= 0.88 + 0.2 * n; } }
   else if (p == 6.0) { m *= 0.94 + 0.1 * n; }
+  else if (p == 47.0) { vec3 q = v_wp * 0.9; float w = sin(q.x * 1.3 + u_time * 1.6) + sin(q.z * 1.1 - u_time * 1.2) + 0.6 * sin((q.x - q.z) * 2.3 + u_time * 2.1); col = mix(col, col * 1.35 + 0.08, 0.35 + 0.12 * w); a = 0.62; spec = 1.0; shin = 90.0; }
   else if (p == 45.0) { float w = step(0.5, fract(u.x * 10.0)) + step(0.5, fract(u.y * 10.0)); m *= 0.9 + 0.05 * w + 0.03 * n; spec = 0.02; }
   else { m *= 0.97 + 0.04 * n; }
   vec4 c = shade(col * m, normalize(v_n), v_wp, v_ls, spec, shin, 1.0, v_glow);
@@ -425,14 +435,46 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     for (const A of partLayers.get(layer) || []) for (const k of ['solid', 'glass']) if (A[k]) freePart(A[k]);
     partLayers.set(layer, meshParts(parts || [], skip).map((A) => ({ min: A.min, max: A.max, solid: A.solid && uploadPart(A.solid), glass: A.glass && uploadPart(A.glass) })));
   }
+  // moving parts (engine v2): i -> { solid, glass, m (model matrix), hide }
+  const dyn = new Map();
+  const freeDyn = (d) => { for (const k of ['solid', 'glass']) if (d[k]) freePart(d[k]); };
+  function setDyn(list) { for (const d of dyn.values()) freeDyn(d); dyn.clear(); for (const { i, q } of list || []) dynMesh(i, q); }
+  function dynMesh(i, q) {
+    const old = dyn.get(i); if (old) freeDyn(old);
+    const A = meshParts([{ ...q, p: [0, 0, 0], r: [0, 0, 0] }])[0] || {};
+    dyn.set(i, { solid: A.solid && uploadPart(A.solid), glass: A.glass && uploadPart(A.glass), m: old ? old.m : new Float32Array(ident), hide: old ? old.hide : false, rad: Math.hypot(...q.z) / 2 + 0.5, c: old ? old.c : [0, 0, 0] });
+  }
+  function dynMove(i, p, R, hide) {
+    const d = dyn.get(i); if (!d) return;
+    const m = d.m; // column-major: the turned axes, then the position
+    m[0] = R[0][0]; m[1] = R[1][0]; m[2] = R[2][0]; m[4] = R[0][1]; m[5] = R[1][1]; m[6] = R[2][1]; m[8] = R[0][2]; m[9] = R[1][2]; m[10] = R[2][2];
+    m[12] = p[0]; m[13] = p[1]; m[14] = p[2]; d.c = p; d.hide = !!hide;
+  }
+  function dynClear() { for (const d of dyn.values()) freeDyn(d); dyn.clear(); }
+  // point lights: [{ p: [x,y,z], range, color: [r,g,b], power }]; the 12 nearest the camera are used
+  let lights = [], lightCount = 0;
+  const lp = new Float32Array(48), lc = new Float32Array(48);
+  function setLights(list) { lights = list || []; }
+  function packLights() {
+    const e = state.eye || [0, 0, 0];
+    const near = lights.filter((l) => !l.hide).map((l) => [l, (l.p[0] - e[0]) ** 2 + (l.p[1] - e[1]) ** 2 + (l.p[2] - e[2]) ** 2 - l.range * l.range]).sort((a, b) => a[1] - b[1]).slice(0, 12);
+    lightCount = near.length; lp.fill(0); lc.fill(0);
+    near.forEach(([l], k) => { lp.set([l.p[0], l.p[1], l.p[2], Math.max(0.5, l.range)], k * 4); lc.set([l.color[0], l.color[1], l.color[2], l.power ?? 1], k * 4); });
+  }
+  const sphereVisible = (Pl, c, r) => { for (const q of Pl) if (q[0] * c[0] + q[1] * c[1] + q[2] * c[2] + q[3] < -r) return false; return true; };
   const areaVisible = (Pl, A) => { const cx = (A.min[0] + A.max[0]) / 2, cy = (A.min[1] + A.max[1]) / 2, cz = (A.min[2] + A.max[2]) / 2, r = Math.hypot(A.max[0] - A.min[0], A.max[1] - A.min[1], A.max[2] - A.min[2]) / 2; for (const q of Pl) if (q[0] * cx + q[1] * cy + q[2] * cz + q[3] < -r) return false; return true; };
   function drawPartMeshes(kind, Pl) {
     const partAreas = allAreas();
-    if (!partAreas.length) return;
+    if (!partAreas.length && !dyn.size) return;
     const prog = P.part;
     gl.useProgram(prog.p); lightUniforms(prog);
     gl.uniform1f(prog.u.u_time, state.time); gl.uniform1f(prog.u.u_glass, kind === 'glass' ? 1 : 0);
+    gl.uniformMatrix4fv(prog.u.u_model, false, ident);
     for (const A of partAreas) { const m = A[kind]; if (!m || !areaVisible(Pl, A)) continue; gl.bindVertexArray(m.vao); gl.drawArrays(gl.TRIANGLES, 0, m.n); state.faces += m.n / 3; state.drawn++; }
+    for (const d of dyn.values()) {
+      const m = d[kind]; if (!m || d.hide || !sphereVisible(Pl, d.c, d.rad)) continue;
+      gl.uniformMatrix4fv(prog.u.u_model, false, d.m); gl.bindVertexArray(m.vao); gl.drawArrays(gl.TRIANGLES, 0, m.n); state.faces += m.n / 3; state.drawn++;
+    }
     gl.bindVertexArray(null);
   }
 
@@ -529,6 +571,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     gl.uniform1f(u.u_shadowOn, shadowOk ? 1 : 0); gl.uniform2f(u.u_texel, 1 / SM, 1 / SM);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, shadowTex); gl.uniform1i(u.u_shadow, 0);
     gl.uniformMatrix4fv(u.u_vp, false, state.vp); gl.uniformMatrix4fv(u.u_lvp, false, state.lvp);
+    if (u['u_lp[0]']) { gl.uniform4fv(u['u_lp[0]'], lp); gl.uniform4fv(u['u_lc[0]'], lc); } gl.uniform1f(u.u_nl, lightCount);
   }
   const ident = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   function drawChunks(kind, Pl) {
@@ -579,6 +622,8 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     const Pl = planes(state.lvp);
     for (const c of chunks.values()) if (c.solid && boxVisible(Pl, c.x * CS, c.y * CS, c.z * CS, CS)) { gl.bindVertexArray(c.solid.dvao); gl.drawArrays(gl.TRIANGLES, 0, c.solid.n); }
     for (const A of allAreas()) if (A.solid && areaVisible(Pl, A)) { gl.bindVertexArray(A.solid.dvao); gl.drawArrays(gl.TRIANGLES, 0, A.solid.n); }
+    for (const d of dyn.values()) if (d.solid && !d.hide) { gl.uniformMatrix4fv(prog.u.u_model, false, d.m); gl.bindVertexArray(d.solid.dvao); gl.drawArrays(gl.TRIANGLES, 0, d.solid.n); }
+    gl.uniformMatrix4fv(prog.u.u_model, false, ident);
     gl.bindVertexArray(null);
     let bound = null;
     for (const p of parts) {
@@ -629,6 +674,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     for (const k of dirtyKeys) { if (budget-- <= 0) break; dirtyKeys.delete(k); if (grid) buildChunk(k % CX, Math.floor(k / (CX * CZ)), Math.floor(k / CX) % CZ); }
     const parts = scene.parts || [];
 
+    packLights();
     // 1) the sun's view: the shadow map, following the camera (snapped to whole texels so edges don't crawl)
     {
       const c = scene.target, d = L.dir, up = Math.abs(d[1]) > 0.98 ? [0, 0, 1] : [0, 1, 0];
@@ -712,7 +758,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
   resize();
   return {
-    gl, hd: true, setGrid, setParts, setSky, markDirty, frame, project, ray, resize,
+    gl, hd: true, setGrid, setParts, setDyn, dynMesh, dynMove, dynClear, setLights, setSky, markDirty, frame, project, ray, resize,
     get lost() { return lost; },
     get stats() { return { faces: state.faces, chunks: chunks.size, drawn: state.drawn, hd: true, shadows: shadowOk, samples }; },
     get size() { return { w: W, h: H }; },
