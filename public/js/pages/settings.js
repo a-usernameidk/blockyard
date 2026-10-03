@@ -6,7 +6,7 @@ import { VERSION } from '../loader.js';
 import { THEMES, themeMode, setTheme, GFX, GFX_ORDER, gfxMode, setGfx, customGfx, setCustomGfx, CUSTOM_DEFAULT } from '../settings.js';
 import { isMuted, setMuted, isMusicOn, setMusicOn, unlockAudio, VOLUMES, getVolume, setVolume, sfx } from '../audio.js';
 import { ACTIONS, keyOf, keyLabel, setKey, resetKeys, RESERVED, SENS, sensitivity, setSensitivity, invertY, setInvertY } from '../controls.js';
-import { NOTIFY, notifyOn, deviceNotes, askDeviceNotes } from '../notify.js';
+import { NOTIFY, notifyOn } from './social.js';
 import { renderMute } from './account.js';
 
 const section = (title, ...kids) => el('section', { class: 'panel settings-box' }, el('h2', {}, title), ...kids);
@@ -92,16 +92,6 @@ function customBox() {
   box.hidden = gfxMode() !== 'custom';
   return box;
 }
-// "notify me even when Blockyard is in another tab": needs a yes from the browser the first time
-function deviceBox() {
-  const state = deviceNotes();
-  const info = el('p', { class: 'small' });
-  const say = (st) => { info.textContent = { on: 'On. Keep a Blockyard tab open (it can be in the background or minimized) and your device shows the notification.', off: 'Off. Turn it on to get a notification from your device when Blockyard is in another tab.', blocked: 'Your browser is blocking notifications for this site. Press the lock icon next to the address, allow notifications, then reload.', none: "This browser can't show notifications. On an iPhone, add Blockyard to your home screen first (Share, then Add to Home Screen)." }[st]; };
-  say(state);
-  const box = check('Notify me on my device when Blockyard is in another tab', state === 'on', async (on) => { const st = await askDeviceNotes(on); say(st); box.querySelector('input').checked = st === 'on'; if (on && st === 'on') toast('Notifications are on.'); });
-  if (state === 'none') box.querySelector('input').disabled = true;
-  return el('div', { class: 'device-notes' }, box, info);
-}
 async function showSettings() {
   show('settings', '');
   const body = $('#settings-body');
@@ -122,7 +112,7 @@ async function showSettings() {
       ...VOLUMES.map(([bus, label]) => slider(label, 0, 100, 5, Math.round(getVolume(bus) * 100), (v) => `${v}%`, (v) => setVolume(bus, v / 100),
         () => { unlockAudio(); sfx(bus === 'ui' ? 'pop' : bus === 'music' ? 'checkpoint' : 'coin'); }))),
     controlsBox(),
-    section('Notifications', el('p', { class: 'small' }, 'Pick which little pop-ups you get. Your mailbox and messages still keep everything.'), ...notes, deviceBox()),
+    section('Pop-up notifications', el('p', { class: 'small' }, 'Pick which little pop-ups you get. Your mailbox and messages still keep everything.'), ...notes),
   );
   if (session.user) {
     const wn = session.user.warnings || 0;

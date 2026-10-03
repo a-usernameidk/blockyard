@@ -4,7 +4,6 @@ import { json, fail, body, needUser, DAY, randomId, isConstraint } from './util.
 import { coinStmts, getWallet, mail, fixLook, cleanKeys, cleanCoins, swapStmts, noteTransfers, transferStmt, checkFarm } from './econ.js';
 import { levelOf } from '../public/js/cosmetics.js';
 import { MOD } from './mod.js';
-import { groupPulse } from './groups.js';
 
 /* ---------------- private messages are locked in the database ---------------- */
 // DMs are saved encrypted (AES-GCM, with a key made from the SALT secret), so nobody can read them by looking in
@@ -86,8 +85,7 @@ async function pulse(ctx) {
   // you're on the site (friends see "Online"); written at most once a minute
   await db.prepare('UPDATE users SET seen = ? WHERE id = ? AND seen < ?').bind(Date.now(), user.id, Date.now() - 60e3).run().catch(() => {});
   const since = Math.max(Date.now() - 10 * 60e3, Number(ctx.url.searchParams.get('since')) || 0);
-  const [gp, mailN, dmN, tradeN, newDms, newMail, invite, open] = await Promise.all([
-    groupPulse(db, user, since).catch(() => ({ unread: 0, events: [] })),
+  const [mailN, dmN, tradeN, newDms, newMail, invite, open] = await Promise.all([
     db.prepare('SELECT COUNT(*) AS n FROM mail WHERE user_id = ? AND read = 0').bind(user.id).first(),
     db.prepare('SELECT COUNT(*) AS n FROM dms WHERE to_id = ? AND read = 0').bind(user.id).first(),
     db.prepare("SELECT COUNT(*) AS n FROM trades WHERE to_id = ? AND status = 'open' AND created_at > ?").bind(user.id, Date.now() - 3 * DAY).first(),
@@ -98,10 +96,9 @@ async function pulse(ctx) {
   ]);
   const events = [
     ...(await Promise.all(newDms.results.map(async (d) => ({ kind: 'dm', from: d.name, text: (await openDm(ctx.env, d.body)).slice(0, 80), at: d.at })))),
-    ...newMail.results.map((x) => ({ kind: 'mail', mail: x.kind, text: x.title, at: x.at, join: x.kind === 'invite' ? (JSON.parse(x.data || '{}').join || undefined) : undefined, group: x.kind === 'group' ? (JSON.parse(x.data || '{}').group || undefined) : undefined })),
-    ...gp.events,
+    ...newMail.results.map((x) => ({ kind: 'mail', mail: x.kind, text: x.title, at: x.at, join: x.kind === 'invite' ? (JSON.parse(x.data || '{}').join || undefined) : undefined })),
   ].sort((a, b) => a.at - b.at);
-  return json({ now: Date.now(), mail: mailN.n, dms: dmN.n, groups: gp.unread, trades: tradeN.n, events, invite: invite ? { id: invite.id, from: invite.name } : null, live: open ? open.id : null });
+  return json({ now: Date.now(), mail: mailN.n, dms: dmN.n, trades: tradeN.n, events, invite: invite ? { id: invite.id, from: invite.name } : null, live: open ? open.id : null });
 }
 
 /* ---------------- DMs (friends only) ---------------- */

@@ -17,7 +17,6 @@ import { dailyCourse, todayUTC } from '../public/js/endless.js';
 import { json, fail, body, sha256, randomId, needUser, isAdmin, DAY, HttpError, signTicket, readTicket, enc, hex, readCookie, withCookie, isConstraint } from './util.js';
 import { findItem, isFree, xpFor } from '../public/js/cosmetics.js';
 import { SOCIAL_SCHEMA, socialRoute, SIGNUP_BONUS } from './social.js';
-import { GROUPS_SCHEMA, groupsRoute } from './groups.js';
 import { MARKET_SCHEMA, marketRoute } from './market.js';
 import { TYCOON_SCHEMA, tycoonRoute, tycoonAdmin } from './tycoon.js';
 import { PEOPLE_SCHEMA, PEOPLE_COLUMNS, peopleRoute, followInfo, tellFollowers, rateGame, titleOk, setTag, isOwner } from './people.js';
@@ -88,7 +87,6 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS friends_b ON friends (b, status)',
   ...ECON_SCHEMA,
   ...SOCIAL_SCHEMA,
-  ...GROUPS_SCHEMA,
   ...COMMUNITY_SCHEMA,
   ...MARKET_SCHEMA,
   ...TYCOON_SCHEMA,
@@ -200,8 +198,6 @@ async function handle(request, env, url) {
   if (e) return e;
   const so = await socialRoute(ctx, path, method);
   if (so) return so;
-  const gr = await groupsRoute(ctx, path, method);
-  if (gr) return gr;
   const pp = await peopleRoute(ctx, path, method);
   if (pp) return pp;
   const mk = await marketRoute(ctx, path, method);

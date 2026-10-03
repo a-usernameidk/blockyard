@@ -63,7 +63,7 @@ function lightFor(sky) {
   const skyC = mixv(lin(s.top), lin(s.bottom), 0.55), fog = lin(s.fog);
   const skyAmb = scl(mixv(skyC, [1, 1, 1], id === 'night' || id === 'space' ? 0.1 : 0.35), s.amb * (id === 'night' ? 0.95 : 0.9));
   const ground = scl(mixv(fog, [0.45, 0.38, 0.3], 0.5), s.amb * 0.55);
-  return { dir, sun, sky: skyAmb, ground, exposure: id === 'night' ? 0.95 : id === 'space' ? 0.85 : id === 'sunset' ? 0.72 : 0.64 };
+  return { dir, sun, sky: skyAmb, ground, hzn: fog, exposure: id === 'night' ? 0.95 : id === 'space' ? 0.85 : id === 'sunset' ? 0.72 : 0.64 };
 }
 
 /* ---------------- shaders ---------------- */
@@ -133,14 +133,21 @@ uniform vec3 u_sunDir; uniform vec3 u_sunCol; uniform vec3 u_skyCol; uniform vec
 uniform vec3 u_fog; uniform vec3 u_cam; uniform vec2 u_fogr; uniform float u_exposure;
 uniform sampler2DShadow u_shadow; uniform float u_shadowOn; uniform vec2 u_texel;
 uniform vec4 u_lp[12]; uniform vec4 u_lc[12]; uniform float u_nl;
+uniform vec2 u_cl; uniform vec3 u_hzn; // clouds: time, on. u_hzn: the color of the sky at the horizon
+// 12 spots in a disc, turned a different way for every pixel: shadow edges come out soft, like real ones
+const vec2 SHADOW_DISC[12] = vec2[12](vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621), vec2(0.962, -0.195), vec2(0.473, -0.480),
+  vec2(0.519, 0.767), vec2(0.185, -0.893), vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
+float lh2(vec2 p) { return fract(sin(dot(p, vec2(41.31, 289.17))) * 43758.5453); }
+float lnz(vec2 p) { vec2 i = floor(p), g = fract(p); g = g * g * (3.0 - 2.0 * g); return mix(mix(lh2(i), lh2(i + vec2(1.0, 0.0)), g.x), mix(lh2(i + vec2(0.0, 1.0)), lh2(i + vec2(1.0, 1.0)), g.x), g.y); }
 float shadowAt(vec4 ls, float ndl) {
   if (u_shadowOn < 0.5) return 1.0;
   vec3 p = ls.xyz / ls.w * 0.5 + 0.5;
   if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;
-  float bias = 0.0004 + 0.0012 * (1.0 - ndl);
+  float bias = 0.0005 + 0.0016 * (1.0 - ndl);
+  float ang = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))), ca = cos(ang), sa = sin(ang);
   float s = 0.0;
-  for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) s += textureLod(u_shadow, vec3(p.xy + vec2(float(x), float(y)) * u_texel * 1.25, p.z - bias), 0.0);
-  s /= 9.0;
+  for (int i = 0; i < 12; i++) { vec2 d = SHADOW_DISC[i]; d = vec2(d.x * ca - d.y * sa, d.x * sa + d.y * ca); s += textureLod(u_shadow, vec3(p.xy + d * u_texel * 2.4, p.z - bias), 0.0); }
+  s /= 12.0;
   vec2 e = min(p.xy, 1.0 - p.xy);
   return mix(1.0, s, smoothstep(0.0, 0.06, min(e.x, e.y)));
 }
@@ -150,6 +157,8 @@ vec4 shade(vec3 albedo, vec3 N, vec3 wp, vec4 ls, float spec, float shin, float 
   vec3 alb = pow(max(albedo, 0.0), vec3(2.2));
   float ndl = dot(N, u_sunDir);
   float sh = ndl > 0.0 ? shadowAt(ls, ndl) : 0.0;
+  // the shadows of the clouds drift slowly over the ground
+  if (u_cl.y > 0.5) { vec2 q = wp.xz * 0.014 + u_cl.x * vec2(0.012, 0.005); sh *= mix(0.55, 1.0, smoothstep(0.36, 0.6, lnz(q) * 0.65 + lnz(q * 2.3 + 5.0) * 0.35)); }
   vec3 V = normalize(u_cam - wp);
   vec3 amb = mix(u_groundCol, u_skyCol, N.y * 0.5 + 0.5) * ao;
   vec3 dif = u_sunCol * max(ndl, 0.0) * sh;
@@ -163,7 +172,10 @@ vec4 shade(vec3 albedo, vec3 N, vec3 wp, vec4 ls, float spec, float shin, float 
     float att = clamp(1.0 - dist / u_lp[i].w, 0.0, 1.0);
     pl += u_lc[i].rgb * u_lc[i].a * att * att * (0.35 + 0.65 * max(dot(N, d / max(dist, 0.001)), 0.0));
   }
-  vec3 col = alb * (amb + dif + pl * 2.2) + u_sunCol * sp + u_skyCol * fr * ao * 1.6;
+  // shiny things mirror what's around them: the sky above, the glow at the horizon, the ground below
+  vec3 Rr = reflect(-V, N);
+  vec3 env = Rr.y > 0.0 ? mix(u_hzn, u_skyCol * 1.5, smoothstep(0.0, 0.55, Rr.y)) : mix(u_hzn, u_groundCol * 1.3, smoothstep(0.0, 0.4, -Rr.y));
+  vec3 col = alb * (amb + dif + pl * 2.2) + u_sunCol * sp + env * (fr * 1.9 + spec * spec * 0.14) * ao;
   col = pow(filmic(col), vec3(1.0 / 2.2));
   // glowing things keep their own bright color (the bloom adds the glow around them)
   if (emit > 0.0) col = mix(col, min(albedo * 1.08, 1.0), emit);
@@ -220,6 +232,7 @@ void main() {
 const PART_FS = HEAD + `
 in vec3 v_col; in vec3 v_wp; in vec2 v_uv; in vec2 v_dim; in float v_pat; in float v_face; in float v_alpha; in vec3 v_n; in float v_glow; in vec4 v_ls; in float v_round;
 uniform float u_time; uniform float u_glass;
+uniform sampler2D u_depth; uniform vec4 u_dinfo; // how far away the things behind the water are (on, near, far)
 out vec4 o;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 // the sea's waves: height at (x, z), used to move the water's surface and to light it
@@ -333,6 +346,16 @@ void main() {
     c.rgb = mix(c.rgb, skyc, 0.12 + 0.72 * fres) + normalize(u_sunCol + 0.001) * glint;
     c.rgb = mix(c.rgb, vec3(0.97), foam * 0.75);
     a = clamp(mix(0.58, 0.95, fres) + foam * 0.35, 0.0, 1.0);
+    if (u_dinfo.x > 0.5 && !below) {
+      // how much water you're looking through: a little = clear and bright with foam lapping at the sand, a lot = deep and dark
+      float nr = u_dinfo.y, fr2 = u_dinfo.z, zs = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;
+      float behind = 2.0 * nr * fr2 / (fr2 + nr - (zs * 2.0 - 1.0) * (fr2 - nr)), here = 2.0 * nr * fr2 / (fr2 + nr - (gl_FragCoord.z * 2.0 - 1.0) * (fr2 - nr));
+      float thick = max(behind - here, 0.0), deep = 1.0 - exp(-thick * 0.3);
+      c.rgb = mix(c.rgb * 1.12 + vec3(0.0, 0.07, 0.055), c.rgb * 0.78, deep);
+      float lap = (1.0 - smoothstep(0.0, 0.6, thick)) * (0.55 + 0.45 * sin(thick * 13.0 - u_time * 2.3 + vnoise(v_wp.xz * 0.7) * 5.0));
+      c.rgb = mix(c.rgb, vec3(0.97), lap * 0.75);
+      a = clamp(mix(0.2, 0.96, deep) + fres * 0.3 + foam * 0.35 + lap * 0.6, 0.0, 1.0);
+    }
     if (below) { c.rgb = mix(v_col * 1.25 + 0.12, skyc * 1.1, 0.35 + 0.4 * fres); a = 0.72; } // a bright, rippling ceiling
   }
   o = vec4(c.rgb, u_glass > 0.5 ? a * v_alpha : c.a);
@@ -442,11 +465,48 @@ void main() {
   c += (texture(u_tex, v_uv + u_dir * 3.2307692).rgb + texture(u_tex, v_uv - u_dir * 3.2307692).rgb) * 0.0702702;
   o = vec4(c, 1.0);
 }`;
-const FINAL_FS = HEAD + `in vec2 v_uv; uniform sampler2D u_scene; uniform sampler2D u_b1; uniform sampler2D u_b2; uniform float u_bloom; out vec4 o;
+// Soft shading where things meet (ambient occlusion): corners, the foot of a wall, under a table are a bit darker,
+// which is what makes objects look like they really sit on the ground. Worked out from how far away every pixel is.
+const AO_FS = HEAD + `in vec2 v_uv; uniform sampler2D u_depth; uniform vec4 u_dinfo; uniform vec2 u_tan; out vec4 o;
+float lin(float z) { return 2.0 * u_dinfo.y * u_dinfo.z / (u_dinfo.z + u_dinfo.y - (z * 2.0 - 1.0) * (u_dinfo.z - u_dinfo.y)); }
+vec3 vpos(vec2 uv) { float z = lin(textureLod(u_depth, uv, 0.0).r); return vec3((uv * 2.0 - 1.0) * u_tan * z, -z); }
+void main() {
+  float d0 = textureLod(u_depth, v_uv, 0.0).r;
+  vec3 P = vpos(v_uv);
+  vec3 n = normalize(cross(dFdx(P), dFdy(P)));
+  float R = 0.75, ang = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))), occ = 0.0;
+  for (int i = 0; i < 10; i++) {
+    float fi = float(i) + 0.5, r = sqrt(fi / 10.0), th = ang + fi * 2.39996;
+    vec2 off = vec2(cos(th), sin(th)) * r * R / max(-P.z, 0.2) * 0.5 / u_tan;
+    vec3 v = vpos(v_uv + off) - P; float dl = length(v);
+    occ += max(dot(n, v) / (dl + 1e-4) - 0.14, 0.0) * (1.0 - smoothstep(R * 0.9, R * 2.4, dl));
+  }
+  float ao = clamp(1.0 - occ / 10.0 * 2.3, 0.0, 1.0);
+  ao = mix(ao, 1.0, smoothstep(40.0, 85.0, -P.z));
+  o = vec4(vec3(d0 >= 0.99999 ? 1.0 : ao), 1.0);
+}`;
+// Sun rays: the bright sun is smeared toward the viewer, and anything in front of it (a palm, a roof) cuts dark streaks in it.
+const RAYS_FS = HEAD + `in vec2 v_uv; uniform sampler2D u_tex; uniform vec2 u_sun; out vec4 o;
+void main() {
+  vec2 d = u_sun - v_uv; vec3 acc = vec3(0.0); float w = 1.0;
+  for (int i = 0; i < 18; i++) {
+    vec2 uv = v_uv + d * (float(i) / 18.0) * 0.94;
+    acc += textureLod(u_tex, uv, 0.0).rgb * w * (1.0 - smoothstep(0.0, 0.5, distance(uv, u_sun)));
+    w *= 0.94;
+  }
+  o = vec4(acc / 18.0, 1.0);
+}`;
+const FINAL_FS = HEAD + `in vec2 v_uv; uniform sampler2D u_scene; uniform sampler2D u_b1; uniform sampler2D u_b2; uniform float u_bloom; uniform sampler2D u_ao; uniform vec3 u_aoInfo; uniform sampler2D u_rays; uniform float u_raysK; out vec4 o;
 void main() {
   vec3 c = texture(u_scene, v_uv).rgb;
+  if (u_aoInfo.z > 0.0) {
+    vec2 t = u_aoInfo.xy * 1.5;
+    float ao = (texture(u_ao, v_uv).r * 2.0 + texture(u_ao, v_uv + t).r + texture(u_ao, v_uv - t).r + texture(u_ao, v_uv + vec2(t.x, -t.y)).r + texture(u_ao, v_uv + vec2(-t.x, t.y)).r) / 6.0;
+    c *= mix(1.0, ao, u_aoInfo.z);
+  }
   vec3 b = texture(u_b1, v_uv).rgb * 0.8 + texture(u_b2, v_uv).rgb * 1.1;
   c += b * u_bloom * 0.75;
+  if (u_raysK > 0.0) c += texture(u_rays, v_uv).rgb * u_raysK;
   // a touch more color, and slightly darker corners
   float l = dot(c, vec3(0.299, 0.587, 0.114));
   c = mix(vec3(l), c, 1.08);
@@ -480,7 +540,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   const P = {
     chunk: compile(CHUNK_VS, CHUNK_FS), part: compile(PART_VS, PART_FS), grass: compile(GRASS_VS, GRASS_FS), model: compile(MODEL_VS, MODEL_FS), depth: compile(DEPTH_VS, DEPTH_FS),
     sky: compile(SKY_VS, SKY_FS), line: compile(LINE_VS, LINE_FS),
-    bright: compile(QUAD_VS, BRIGHT_FS), blur: compile(QUAD_VS, BLUR_FS), final: compile(QUAD_VS, FINAL_FS),
+    bright: compile(QUAD_VS, BRIGHT_FS), blur: compile(QUAD_VS, BLUR_FS), final: compile(QUAD_VS, FINAL_FS), ao: compile(QUAD_VS, AO_FS), rays: compile(QUAD_VS, RAYS_FS),
   };
   const tri = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -662,6 +722,9 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     const prog = P.part;
     gl.useProgram(prog.p); lightUniforms(prog);
     gl.uniform1f(prog.u.u_time, state.time); gl.uniform1f(prog.u.u_glass, kind === 'glass' ? 1 : 0);
+    const see = kind === 'glass' && depthReady;
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, see ? T.depth : null); gl.uniform1i(prog.u.u_depth, 4); gl.activeTexture(gl.TEXTURE0);
+    gl.uniform4f(prog.u.u_dinfo, see ? 1 : 0, state.near, state.far, 0);
     gl.uniformMatrix4fv(prog.u.u_model, false, ident);
     for (const A of partAreas) { const m = A[kind]; if (!m || !areaVisible(Pl, A)) continue; gl.bindVertexArray(m.vao); gl.drawArrays(gl.TRIANGLES, 0, m.n); state.faces += m.n / 3; state.drawn++; }
     for (const d of dyn.values()) {
@@ -723,9 +786,18 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     const scene = colorTex(w, h), sceneFb = fbFor(scene);
     const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1), qw = Math.max(1, w >> 2), qh = Math.max(1, h >> 2);
     const h1 = colorTex(hw, hh), h2 = colorTex(hw, hh), q1 = colorTex(qw, qh), q2 = colorTex(qw, qh);
+    // the depth of every pixel as a picture (for water you can see into, and the soft shading in corners), plus those passes' own pictures
+    const depth = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, depth); gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, w, h);
+    for (const pn of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, pn, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const depthFb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, depthFb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depth, 0); gl.drawBuffers([gl.NONE]); gl.readBuffer(gl.NONE);
+    const depthFbOk = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    const ao = colorTex(hw, hh), rays = colorTex(qw, qh);
     T = { w, h, hw, hh, qw, qh, ms, scene, sceneFb, h1, h2, q1, q2, h1f: fbFor(h1), h2f: fbFor(h2), q1f: fbFor(q1), q2f: fbFor(q2),
-      tex: [scene, h1, h2, q1, q2], rb: [msColor, msDepth] };
-    T.fb = [ms, sceneFb, T.h1f, T.h2f, T.q1f, T.q2f];
+      depth, depthFb, depthFbOk, ao, aoF: fbFor(ao), rays, raysF: fbFor(rays),
+      tex: [scene, h1, h2, q1, q2, depth, ao, rays], rb: [msColor, msDepth] };
+    T.fb = [ms, sceneFb, T.h1f, T.h2f, T.q1f, T.q2f, depthFb, T.aoF, T.raysF];
     gl.bindFramebuffer(gl.FRAMEBUFFER, ms);
     T.ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -733,6 +805,12 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   // check now that this graphics card can draw into the buffers (if not, the simpler setup is tried)
   makeTargets(16, 16);
   if (!T.ok) throw new Error('HD buffers are not supported here (' + samples + 'x anti-aliasing)');
+  // can this graphics card copy the depth out? (if not: no see-into water and no corner shading, everything else works)
+  const copyDepth = () => { gl.bindFramebuffer(gl.READ_FRAMEBUFFER, T.ms); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, T.depthFb); gl.blitFramebuffer(0, 0, T.w, T.h, 0, 0, T.w, T.h, gl.DEPTH_BUFFER_BIT, gl.NEAREST); gl.bindFramebuffer(gl.FRAMEBUFFER, T.ms); };
+  let depthOk = false;
+  if (T.depthFbOk) { for (let i = 0; i < 8 && gl.getError() !== gl.NO_ERROR; i++) { /* clear old errors */ } copyDepth(); depthOk = gl.getError() === gl.NO_ERROR; gl.bindFramebuffer(gl.FRAMEBUFFER, null); }
+  const SSAO = hd.ssao !== false && depthOk, RAYS = hd.rays !== false;
+  let depthReady = false;
 
   /* ---------------- frustum ---------------- */
   function planes(m) {
@@ -765,6 +843,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, shadowTex); gl.uniform1i(u.u_shadow, 0);
     gl.uniformMatrix4fv(u.u_vp, false, state.vp); gl.uniformMatrix4fv(u.u_lvp, false, state.lvp);
     if (u['u_lp[0]']) { gl.uniform4fv(u['u_lp[0]'], lp); gl.uniform4fv(u['u_lc[0]'], lc); } gl.uniform1f(u.u_nl, lightCount);
+    gl.uniform2f(u.u_cl, state.time, state.clouds ? 1 : 0); gl.uniform3fv(u.u_hzn, L.hzn);
   }
   const ident = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   function drawChunks(kind, Pl) {
@@ -859,6 +938,8 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     const far = scene.far || 260;
     state.fog = [far * 0.4, far * 0.95];
     const proj = persp(scene.fov || 1.2, W / H, 0.08, far);
+    state.near = 0.08; state.far = far; state.clouds = !!scene.skyClouds; depthReady = false;
+    state.tan = [Math.tan((scene.fov || 1.2) / 2) * W / H, Math.tan((scene.fov || 1.2) / 2)];
     state.view = lookAt(scene.eye, scene.target);
     state.proj = proj;
     state.vp = mul(proj, state.view);
@@ -902,6 +983,8 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     gl.disable(gl.CULL_FACE);
     drawGrass(Pl, scene.player || scene.target);
     drawParts(parts, false);
+    // everything solid is drawn: keep how far away each pixel is (for the water, and the corner shading)
+    if (depthOk) { copyDepth(); depthReady = true; }
     gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     for (const l of scene.lines || []) drawLines(l.pts, l.color);
     gl.depthMask(false);
@@ -915,21 +998,45 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
     gl.blitFramebuffer(0, 0, T.w, T.h, 0, 0, T.w, T.h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 
+    // 3b) soft shading in corners (at half size)
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+    if (SSAO && depthReady) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, T.aoF); gl.viewport(0, 0, T.hw, T.hh);
+      gl.useProgram(P.ao.p); tex(0, T.depth, P.ao.u.u_depth);
+      gl.uniform4f(P.ao.u.u_dinfo, 1, state.near, state.far, 0); gl.uniform2f(P.ao.u.u_tan, state.tan[0], state.tan[1]);
+      quad(P.ao);
+    }
     // 4) bloom: what glows, blurred at half and quarter size
-    if (BLOOM > 0) {
+    let raysK = 0;
+    if (BLOOM > 0 || RAYS) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, T.h1f); gl.viewport(0, 0, T.hw, T.hh);
       gl.useProgram(P.bright.p); tex(0, T.scene, P.bright.u.u_tex); quad(P.bright);
       const blur = (src, dst, w, h, dx, dy) => { gl.bindFramebuffer(gl.FRAMEBUFFER, dst); gl.viewport(0, 0, w, h); gl.useProgram(P.blur.p); tex(0, src, P.blur.u.u_tex); gl.uniform2f(P.blur.u.u_dir, dx / w, dy / h); quad(P.blur); };
       blur(T.h1, T.h2f, T.hw, T.hh, 1, 0); blur(T.h2, T.h1f, T.hw, T.hh, 0, 1);
       blur(T.h1, T.q1f, T.qw, T.qh, 1, 0); blur(T.q1, T.q2f, T.qw, T.qh, 0, 1);
       blur(T.q2, T.q1f, T.qw, T.qh, 2, 0); blur(T.q1, T.q2f, T.qw, T.qh, 0, 2);
+      // sun rays: where is the sun on the screen? (none when it's behind you or far off to the side)
+      if (RAYS) {
+        const m = state.vp, e = state.eye, sx = e[0] + L.dir[0] * 500, sy = e[1] + L.dir[1] * 500, sz = e[2] + L.dir[2] * 500;
+        const cw = m[3] * sx + m[7] * sy + m[11] * sz + m[15];
+        if (cw > 0.01) {
+          const u = (m[0] * sx + m[4] * sy + m[8] * sz + m[12]) / cw * 0.5 + 0.5, v = (m[1] * sx + m[5] * sy + m[9] * sz + m[13]) / cw * 0.5 + 0.5;
+          const off = Math.max(Math.abs(u - 0.5), Math.abs(v - 0.5));
+          raysK = Math.max(0, Math.min(1, (1.15 - off) / 0.6)) * (skyId === 'night' || skyId === 'space' ? 0.5 : 1.15);
+          if (raysK > 0) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, T.raysF); gl.viewport(0, 0, T.qw, T.qh);
+            gl.useProgram(P.rays.p); tex(0, T.h1, P.rays.u.u_tex); gl.uniform2f(P.rays.u.u_sun, u, v); quad(P.rays);
+          }
+        }
+      }
     }
     // 5) put it all on the screen
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, T.w, T.h);
     gl.useProgram(P.final.p);
-    tex(0, T.scene, P.final.u.u_scene); tex(1, T.h1, P.final.u.u_b1); tex(2, T.q2, P.final.u.u_b2);
+    tex(0, T.scene, P.final.u.u_scene); tex(1, T.h1, P.final.u.u_b1); tex(2, T.q2, P.final.u.u_b2); tex(3, T.ao, P.final.u.u_ao); tex(4, T.rays, P.final.u.u_rays);
     gl.uniform1f(P.final.u.u_bloom, BLOOM);
+    gl.uniform3f(P.final.u.u_aoInfo, 1 / T.hw, 1 / T.hh, SSAO && depthReady ? 0.85 : 0); gl.uniform1f(P.final.u.u_raysK, raysK);
     quad(P.final);
     gl.activeTexture(gl.TEXTURE0);
   }
@@ -955,7 +1062,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   return {
     gl, hd: true, setGrid, setParts, setDyn, dynMesh, dynMove, dynClear, setLights, setSky, markDirty, frame, project, ray, resize,
     get lost() { return lost; },
-    get stats() { return { faces: state.faces, chunks: chunks.size, drawn: state.drawn, hd: true, shadows: shadowOk, samples, grass: grassCount }; },
+    get stats() { return { faces: state.faces, chunks: chunks.size, drawn: state.drawn, hd: true, shadows: shadowOk, samples, grass: grassCount, ssao: SSAO, rays: RAYS, depth: depthOk }; },
     get size() { return { w: W, h: H }; },
     destroy() {
       for (const ch of chunks.values()) for (const k of ['solid', 'glass']) if (ch[k]) freeMesh(ch[k]);
