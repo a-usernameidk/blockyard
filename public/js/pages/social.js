@@ -1,47 +1,50 @@
 // Messages with friends, live trades, sending coins, and the little pop-ups when something new happens.
 // The page asks the server "anything new?" every few seconds while it's open.
-import { $, el, session, toast, openModal, closeModal, go, timeAgo, needLogin } from '../app.js';
+import { $, el, session, toast, openModal, closeModal, go, timeAgo, needLogin, currentView, addRoute, replaceRoute, route } from '../app.js';
 import { api, store } from '../api.js';
 import { progress } from '../progress.js';
 import { findItem, canTrade } from '../cosmetics.js';
 import { itemPreview } from './closet.js';
 import { emojiNodes, emojiButton } from '../emoji.js';
 import { sfx } from '../audio.js';
+import { groupsState } from './groups.js';
+import { NOTIFY, notifyOn, deviceNotes, askDeviceNotes, deviceNote } from '../notify.js';
 import { setWallet, refreshWallet, onSession, setMailCount, friendsNow, checkFriends } from './account.js';
 
-/* ---------------- notification settings ---------------- */
-export const NOTIFY = [
-  ['dm', 'New messages from friends'],
-  ['trade', 'Trade offers and live trade invites'],
-  ['coins', 'Coins people send you'],
-  ['mail', 'Other mail (gifts, what your levels earn, roles)'],
-  ['sound', 'Play a sound with pop-ups'],
-];
-export const notifyOn = (k) => store.get('notify', {})[k] !== false;
+export { NOTIFY, notifyOn, deviceNotes, askDeviceNotes };
+
 /* ---------------- pop-ups ---------------- */
-function note(title, text, actions = [], secs = 8) {
+// hash: where "pressing the notification" should take you (used for the device notification)
+function note(title, text, actions = [], secs = 8, hash = '') {
+  if (document.hidden) { deviceNote(title, text, hash); secs = Math.max(secs, 60); }
   const card = el('div', { class: 'note', role: 'status' },
     el('b', {}, title), text ? el('p', {}, ...emojiNodes(text, 18)) : null,
     el('div', { class: 'row' }, ...actions.map(([label, fn, cls]) => el('button', { class: 'btn ' + (cls || ''), type: 'button', onclick: () => { card.remove(); fn(); } }, label)),
       el('button', { class: 'btn btn-ghost', type: 'button', 'aria-label': 'Dismiss', onclick: () => card.remove() }, '✕')));
   $('#notes').append(card);
   while ($('#notes').children.length > 3) $('#notes').firstChild.remove();
-  setTimeout(() => card.remove(), secs * 1000);
+  // a pop-up that arrived while you were on another tab waits for you to come back before it starts counting down
+  const arm = () => setTimeout(() => card.remove(), Math.min(secs, 12) * 1000);
+  if (document.hidden) document.addEventListener('visibilitychange', arm, { once: true }); else setTimeout(() => card.remove(), secs * 1000);
   if (notifyOn('sound')) sfx('notify');
 }
 
 /* ---------------- checking for new stuff ---------------- */
 let since = 0, timer = 0, seenInvite = '';
-const setCount = (sel, n) => { const c = $(sel); c.hidden = !n; c.textContent = String(n); };
-function schedule(ms = 12000) { clearTimeout(timer); timer = setTimeout(pulse, ms); }
+const setCount = (sel, n) => { const c = $(sel); if (!c) return; c.hidden = !n; c.textContent = n > 99 ? '99+' : String(n); };
+// every 12 seconds while you're looking, every 30 while Blockyard is in another tab (browsers slow that to about a minute)
+function schedule(ms) { clearTimeout(timer); timer = setTimeout(pulse, ms || (document.hidden ? 30000 : 12000)); }
+// "(3) Blockyard" in the tab's name
+const TITLE = document.title;
+function setTitle(n) { document.title = n ? `(${n > 99 ? '99+' : n}) ${TITLE}` : TITLE; }
 async function pulse() {
   if (!session.user || !session.online) return;
-  if (document.hidden) { schedule(); return; }
   try {
     const r = await api.pulse(since);
     const first = !since;
     since = r.now;
-    setCount('#dm-count', r.dms); setMailCount(r.mail);
+    setCount('#dm-count', r.dms); setMailCount(r.mail); setCount('#groups-count', r.groups || 0);
+    setTitle(r.dms + r.mail + (r.groups || 0));
     if (!first) for (const e of r.events) showEvent(e);
     if (r.invite && r.invite.id !== seenInvite) {
       seenInvite = r.invite.id;
@@ -51,22 +54,32 @@ async function pulse() {
   } catch (e) { /* try again later */ }
   schedule();
 }
+export const pulseNow = () => schedule(200);
 function showEvent(e) {
   if (e.kind === 'dm') {
-    if (!$('#dm-modal').hidden && dm.current && dm.current.toLowerCase() === e.from.toLowerCase()) { openThread(dm.current, true); return; }
-    if (notifyOn('dm')) note(`💬 ${e.from}`, e.text, [['Reply', () => openDMs(e.from), 'btn-sun']]);
+    if (!document.hidden && !$('#dm-modal').hidden && dm.current && dm.current.toLowerCase() === e.from.toLowerCase()) { openThread(dm.current, true); return; }
+    if (notifyOn('dm')) note(`💬 ${e.from}`, e.text, [['Reply', () => openDMs(e.from), 'btn-sun']], 8, '#/dm/' + e.from);
     return;
   }
-  if (e.mail === 'invite' && e.join) { note('🎮 ' + e.text, 'Go play with them right now.', [['Join', () => go('#/join/' + e.join), 'btn-grass']], 25); return; }
+  if (e.kind === 'group') {
+    // already looking at that channel: the chat itself shows it
+    if (!document.hidden && currentView() === 'groups' && groupsState.gid === e.gid && groupsState.cid === e.cid) return;
+    const hash = `#/groups/${e.gid}/${e.cid}`;
+    if (notifyOn('group')) note(e.mention ? `🔔 ${e.from} mentioned you in ${e.group}` : `👥 ${e.from} in ${e.group} #${e.channel}`, e.text, [['Open', () => go(hash), 'btn-sun']], e.mention ? 14 : 8, hash);
+    if (currentView() === 'groups') dispatchEvent(new CustomEvent('by:groups-new', { detail: e }));
+    return;
+  }
+  if (e.mail === 'group' && e.group) { note('👥 ' + e.text, 'Press Join to hop in.', [['Join', () => go('#/groups/join/' + e.group), 'btn-grass']], 25, '#/groups/join/' + e.group); return; }
+  if (e.mail === 'invite' && e.join) { note('🎮 ' + e.text, 'Go play with them right now.', [['Join', () => go('#/join/' + e.join), 'btn-grass']], 25, '#/join/' + e.join); return; }
   if (e.mail === 'coins') { refreshWallet(); if (notifyOn('coins')) note('🪙 ' + e.text, '', [['Mailbox', () => $('#mail-btn').click()]]); return; }
-  if (e.mail === 'trade') { if (notifyOn('trade')) note('🔁 ' + e.text, '', [['See trades', () => go('#/closet/trades'), 'btn-sun']]); return; }
+  if (e.mail === 'trade') { if (notifyOn('trade')) note('🔁 ' + e.text, '', [['See trades', () => go('#/closet/trades'), 'btn-sun']], 8, '#/closet/trades'); return; }
   if (e.mail === 'warning') { note('⚠️ ' + e.text, 'Open your mailbox to read it.', [['Mailbox', () => $('#mail-btn').click()]], 15); refreshWallet(); return; }
   if (notifyOn('mail')) note('✉️ ' + e.text, '', [['Mailbox', () => $('#mail-btn').click()]]);
 }
 onSession((user) => {
   since = 0; clearTimeout(timer);
   $('#dm-btn').hidden = !user;
-  if (user) pulse(); else setCount('#dm-count', 0);
+  if (user) pulse(); else { setCount('#dm-count', 0); setCount('#groups-count', 0); setTitle(0); }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && session.user) schedule(300); });
 
@@ -128,6 +141,9 @@ $('#dm-form').addEventListener('submit', async (e) => {
 $('#dm-btn').addEventListener('click', () => { sfx('open'); openDMs(); });
 $('#dm-form').insertBefore(emojiButton((code) => { const i = $('#dm-input'); i.value = (i.value + ' ' + code).trim().slice(0, 300); i.focus(); }), $('#dm-form button[type=submit]'));
 addEventListener('by:dm', (e) => openDMs(e.detail));
+// pressing a "new message" notification lands here
+addRoute(/^#\/dm\/([A-Za-z0-9_]{3,20})$/, (m) => { replaceRoute('#/'); route('#/'); openDMs(m[1]); });
+addEventListener('by:pulse', () => pulseNow());
 
 /* ---------------- sending coins ---------------- */
 let giftTo = '';
