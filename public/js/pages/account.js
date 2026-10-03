@@ -288,7 +288,7 @@ function rateButtons(m) {
   pick.value = String(r.stars);
   return el('span', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => set(r.stars) }, `Accept ${r.stars}★ ${diffName(r.stars)}`), pick, el('button', { class: 'btn', type: 'button', onclick: () => set(Number(pick.value)) }, 'Use this'), el('button', { class: 'btn', type: 'button', 'data-go': '#/p/' + r.game }, 'Play it'), msg);
 }
-const MAIL_ICON = { admin: '🛡️', gift: '🎁', role: '⭐', trade: '🔁', earn: '🪙', coins: '🪙', welcome: '🎉', warning: '⚠️' };
+const MAIL_ICON = { admin: '🛡️', gift: '🎁', role: '⭐', trade: '🔁', earn: '🪙', coins: '🪙', welcome: '🎉', warning: '⚠️', group: '👥' };
 async function openMail() {
   const list = $('#mail-list');
   list.replaceChildren(el('p', { class: 'small' }, 'Loading…'));
@@ -303,6 +303,7 @@ async function openMail() {
       m.data && m.data.go ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#mail-modal')); go(m.data.go); } }, 'Play it') : null,
       m.data && m.data.profile ? el('button', { class: 'btn', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/u/' + m.data.profile); } }, 'See profile') : null,
       m.data && m.data.join ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/join/' + m.data.join); } }, 'Join') : null,
+      m.data && m.data.group ? el('button', { class: 'btn btn-grass', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/groups/join/' + m.data.group); } }, 'Join group') : null,
       m.data && m.data.manage ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/u/' + m.data.manage); } }, `Manage ${m.data.manage}`) : null,
       m.data && m.data.claim ? el('button', { class: 'btn btn-sun', type: 'button', onclick: async (e) => { const b = e.currentTarget; try { const r = await api.mailAction(m.id, 'claim'); setWallet(r.wallet); toast(`+${r.coins} coins!`); b.textContent = 'Claimed'; } catch (err) { b.textContent = err.status === 409 ? 'Claimed' : err.message; } b.disabled = true; } }, `Claim ${m.data.claim} coins`) : null,
       m.kind === 'trade' ? el('button', { class: 'btn btn-sun', type: 'button', onclick: () => { closeModal($('#mail-modal')); go('#/closet/trades'); } }, 'See trades') : null,

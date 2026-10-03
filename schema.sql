@@ -173,3 +173,23 @@ CREATE INDEX IF NOT EXISTS listings_item ON listings (item, status, price);
 CREATE INDEX IF NOT EXISTS listings_seller ON listings (seller, status);
 -- creator shops: what players bought in someone's 3D world (only works in that world)
 CREATE TABLE IF NOT EXISTS world_items (user_id TEXT NOT NULL, game_id TEXT NOT NULL, item TEXT NOT NULL, price INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user_id, game_id, item));
+
+-- groups (update 19): groups, members, bans, channels, messages, polls, votes, reactions, what you have read
+CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, name TEXT NOT NULL, name_lower TEXT NOT NULL UNIQUE, descr TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '#3a86ff',
+    owner_id TEXT NOT NULL, open INTEGER NOT NULL DEFAULT 1, code TEXT NOT NULL, members INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_at INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS groups_open ON groups (open, members);
+CREATE UNIQUE INDEX IF NOT EXISTS groups_code ON groups (code);
+CREATE TABLE IF NOT EXISTS group_members (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member', notify INTEGER NOT NULL DEFAULT 2,
+    joined_at INTEGER NOT NULL, PRIMARY KEY (group_id, user_id));
+CREATE INDEX IF NOT EXISTS group_members_user ON group_members (user_id);
+CREATE TABLE IF NOT EXISTS group_bans (group_id TEXT NOT NULL, user_id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (group_id, user_id));
+CREATE TABLE IF NOT EXISTS group_channels (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', pos INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS group_channels_g ON group_channels (group_id, pos);
+CREATE TABLE IF NOT EXISTS group_msgs (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL, channel_id INTEGER NOT NULL, user_id TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+    reply_to INTEGER NOT NULL DEFAULT 0, poll_id INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS group_msgs_c ON group_msgs (channel_id, id);
+CREATE INDEX IF NOT EXISTS group_msgs_g ON group_msgs (group_id, at);
+CREATE TABLE IF NOT EXISTS group_polls (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL, question TEXT NOT NULL, options TEXT NOT NULL, multi INTEGER NOT NULL DEFAULT 0, ends_at INTEGER NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS group_votes (poll_id INTEGER NOT NULL, user_id TEXT NOT NULL, opt INTEGER NOT NULL, PRIMARY KEY (poll_id, user_id, opt));
+CREATE TABLE IF NOT EXISTS group_reacts (msg_id INTEGER NOT NULL, user_id TEXT NOT NULL, e TEXT NOT NULL, PRIMARY KEY (msg_id, user_id, e));
+CREATE TABLE IF NOT EXISTS group_reads (user_id TEXT NOT NULL, channel_id INTEGER NOT NULL, last_id INTEGER NOT NULL, PRIMARY KEY (user_id, channel_id));
