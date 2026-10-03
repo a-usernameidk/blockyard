@@ -69,17 +69,32 @@ export function startBuilder2(root, opts) {
     btn('Duplicate', 'Duplicate (Ctrl+D)', () => duplicate()), btn('Delete', 'Delete (Del)', () => del(), 'btn-danger'),
     btn('Undo', 'Undo (Ctrl+Z)', () => doUndo()), btn('Redo', 'Redo (Ctrl+Y)', () => doRedo()));
   const shapeBtns = h('div', { class: 'b3-grid' }, ...SHAPES2.map((s) => h('button', { class: 'b3-block', type: 'button', title: 'Add a ' + s.name.toLowerCase(), onclick: () => insert(s.id) }, h('span', { class: 'b3-chip', style: '--c:#a3abc2' }), s.name)));
+  // arrange row: things for lining parts up, repeating them and dropping them onto the ground
+  const repN = h('input', { type: 'number', min: '1', max: '50', value: '4', 'aria-label': 'How many copies' });
+  const repAxis = h('select', { 'aria-label': 'Direction' }, h('option', { value: '0' }, 'X'), h('option', { value: '1' }, 'Up'), h('option', { value: '2' }, 'Z'));
+  const repStep = h('input', { type: 'number', step: '0.25', placeholder: 'auto', 'aria-label': 'Gap between copies (blank = exactly one part wide)' });
+  const alignAxis = h('select', { 'aria-label': 'Align on' }, h('option', { value: '0' }, 'X'), h('option', { value: '1' }, 'Up'), h('option', { value: '2' }, 'Z'));
+  const alignHow = h('select', { 'aria-label': 'Align to' }, h('option', { value: 'min' }, 'low side'), h('option', { value: 'mid' }, 'middle'), h('option', { value: 'max' }, 'high side'));
+  const arrange = h('div', { class: 'b3-tools b2-arrange' },
+    btn('Select all', 'Select every part (Ctrl+A)', () => selectOnly(parts.map((_, i) => i))),
+    btn('Select similar', 'Select every part with the same shape, color and material', () => selectSimilar()),
+    btn('Drop', 'Drop the selection down until it rests on the ground or a part below (G)', () => drop()),
+    h('span', { class: 'small b2-lbl' }, 'Turn 90°'), btn('X', 'Turn around the X axis', () => turnAxis(0)), btn('Y', 'Turn around the up axis (R)', () => turnAxis(1)), btn('Z', 'Turn around the Z axis', () => turnAxis(2)),
+    h('span', { class: 'small b2-lbl' }, 'Align'), alignAxis, alignHow, btn('Go', 'Line the selected parts up', () => align()),
+    h('span', { class: 'small b2-lbl' }, 'Repeat'), repN, repAxis, h('span', { class: 'small b2-lbl' }, 'gap'), repStep, btn('Repeat', 'Make copies in a row: stairs, fences, bridges', () => repeat()));
+  const search = h('input', { class: 'b2-search', type: 'search', placeholder: 'Search parts', 'aria-label': 'Search parts' });
+  search.addEventListener('input', () => drawExplorer());
   const props = h('div', { class: 'b2-props' });
   const explorer = h('div', { class: 'b2-explorer' });
   const worldPane = h('div', { class: 'b3-pane', hidden: true });
   const panes = {
-    build: h('div', { class: 'b3-pane' }, tools, h('div', { class: 'b3-dock-row b2-row' }, h('div', {}, h('h3', {}, 'Add a part'), shapeBtns, h('h3', {}, 'Properties'), props), h('div', {}, h('h3', {}, 'Parts'), explorer))),
+    build: h('div', { class: 'b3-pane' }, tools, arrange, h('div', { class: 'b3-dock-row b2-row' }, h('div', {}, h('h3', {}, 'Add a part'), shapeBtns, h('h3', {}, 'Properties'), props), h('div', {}, h('h3', {}, 'Parts'), explorer))),
     world: worldPane,
   };
   const tabBtns = Object.keys(panes).map((k) => h('button', { class: 'tab', role: 'tab', type: 'button', 'data-dock': k, 'aria-selected': String(k === 'build'), onclick: () => setDock(k) }, { build: 'Build', world: 'World' }[k]));
   function setDock(k) { for (const b of tabBtns) b.setAttribute('aria-selected', String(b.dataset.dock === k)); for (const [n, p] of Object.entries(panes)) p.hidden = n !== k; }
   const dock = h('div', { class: 'b3-dock' }, h('div', { class: 'tabs b3-dock-tabs', role: 'tablist', 'aria-label': 'Editor tools' }, ...tabBtns), ...Object.values(panes));
-  const hint = h('p', { class: 'hint' }, `Click a part to select it (Shift-click for more). Drag the arrows (Move), face dots (Resize) or axis dots (Rotate). Drag empty space to look around; ${['fwd', 'left', 'back', 'right'].map(keyName).join(' ')} fly, ${keyName('jump')} up, ${keyName('shift')} down, scroll to zoom. Arrow keys and Page Up/Down nudge, R turns 90°, F looks at the selection. Keys: 1-4 tools, Ctrl+D duplicate, Ctrl+C / Ctrl+V, Del, Ctrl+Z, T test.`);
+  const hint = h('p', { class: 'hint' }, `Click a part to select it (Shift-click for more). Drag the arrows (Move), face dots (Resize) or axis dots (Rotate). Drag empty space to look around; ${['fwd', 'left', 'back', 'right'].map(keyName).join(' ')} fly, ${keyName('jump')} up, ${keyName('shift')} down, scroll to zoom. Arrow keys and Page Up/Down nudge, R turns 90°, F looks at the selection. Keys: 1-4 tools, Ctrl+D duplicate, Ctrl+C / Ctrl+V, Ctrl+A select all, G drop, Del, Ctrl+Z, T test.`);
   const layout = h('div', { class: 'b3 b3-docked' }, stage, dock);
   root.replaceChildren(bar, layout, hint);
 
@@ -164,10 +179,54 @@ export function startBuilder2(root, opts) {
     parts[i] = place({ ...q, r: eulerOf(R), p: [r3(c[0] + np[0]), r3(c[1] + np[1]), r3(c[2] + np[2])] });
   }
 
+  /* ---------------- arrange: select, align, drop, repeat ---------------- */
+  function bounds(list) { const s = list.map(solidOf); return { min: [0, 1, 2].map((k) => Math.min(...s.map((x) => x.min[k]))), max: [0, 1, 2].map((k) => Math.max(...s.map((x) => x.max[k]))) }; }
+  function selectSimilar() {
+    const q = selParts()[0];
+    if (!q) return say('Select a part first.');
+    selectOnly(parts.map((x, i) => (x.s === q.s && x.c === q.c && x.m === q.m ? i : -1)).filter((i) => i >= 0));
+    say(`Selected ${sel.size} similar part${sel.size === 1 ? '' : 's'}.`);
+  }
+  function turnAxis(k) { if (!sel.size) return say('Select a part first.'); snapshot(); const c = center(selParts()); for (const i of sel) turnPart(i, k, 90, c); changed(); }
+  function align() {
+    if (sel.size < 2) return say('Select two or more parts to line them up.');
+    const k = Number(alignAxis.value), how = alignHow.value, b = bounds(selParts());
+    const target = how === 'min' ? b.min[k] : how === 'max' ? b.max[k] : (b.min[k] + b.max[k]) / 2;
+    snapshot();
+    for (const i of sel) {
+      const s = solidOf(parts[i]), at = how === 'min' ? s.min[k] : how === 'max' ? s.max[k] : (s.min[k] + s.max[k]) / 2, p = [...parts[i].p];
+      p[k] = r3(p[k] + target - at); parts[i] = place({ ...parts[i], p });
+    }
+    changed();
+  }
+  function drop() {
+    if (!sel.size) return say('Select a part first.');
+    const b = bounds(selParts()); let floor = 0;
+    solids.forEach((s, i) => {
+      if (sel.has(i) || s.max[1] > b.min[1] + 0.001) return;
+      if (s.max[0] > b.min[0] + 0.001 && s.min[0] < b.max[0] - 0.001 && s.max[2] > b.min[2] + 0.001 && s.min[2] < b.max[2] - 0.001 && s.max[1] > floor) floor = s.max[1];
+    });
+    const d = b.min[1] - floor;
+    if (d < 0.001) return say('It is already resting on something.');
+    snapshot(); for (const i of sel) parts[i] = place({ ...parts[i], p: [parts[i].p[0], r3(parts[i].p[1] - d), parts[i].p[2]] }); changed();
+  }
+  function repeat() {
+    if (!sel.size) return say('Select a part first.');
+    const n = Math.max(1, Math.min(50, Math.floor(Number(repN.value) || 1))), k = Number(repAxis.value), b = bounds(selParts());
+    const gap = repStep.value === '' ? 0 : Number(repStep.value) || 0, step = (b.max[k] - b.min[k]) + gap;
+    if (step <= 0.001) return say('Those parts have no size to repeat by. Give a gap.');
+    if (parts.length + sel.size * n > MAX_PARTS) return say(`That would be too many parts (the most is ${MAX_PARTS}).`);
+    snapshot();
+    const base = selParts(), start = parts.length;
+    for (let c = 1; c <= n; c++) for (const q of base) { const p = [...q.p]; p[k] = r3(p[k] + step * c); parts.push(place({ ...q, p })); }
+    sel = new Set(parts.map((_, i) => i).slice(start)); changed(); say(`Made ${sel.size} new part${sel.size === 1 ? '' : 's'}.`);
+  }
+
   /* ---------------- Properties ---------------- */
   function drawProps() {
     const list = selParts();
-    info.textContent = `${parts.length} / ${MAX_PARTS} parts` + (sel.size ? ` · ${sel.size} selected` : '');
+    const need = !parts.some((q) => q.k === 'spawn') ? ' · needs a Spawn' : meta.mode === 'obby' && !parts.some((q) => q.k === 'goal') ? ' · needs a Goal' : '';
+    info.textContent = `${parts.length} / ${MAX_PARTS} parts` + (sel.size ? ` · ${sel.size} selected` : '') + need;
     if (!list.length) { props.replaceChildren(h('p', { class: 'small' }, 'Click a part to see and change it. Add parts with the buttons above.')); return; }
     const q = list[0], many = list.length > 1;
     // change every selected part (one undo step per change)
@@ -198,11 +257,14 @@ export function startBuilder2(root, opts) {
       many ? h('p', { class: 'small' }, `Changes go to all ${list.length} selected parts (position: use Move).`) : null);
   }
   function drawExplorer() {
-    const show = parts.slice(0, 300);
-    explorer.replaceChildren(h('p', { class: 'small' }, `${parts.length} part${parts.length === 1 ? '' : 's'}`),
-      h('ol', { class: 'b2-list' }, ...show.map((q, i) => h('li', {}, h('button', { class: 'linkish' + (sel.has(i) ? ' on' : ''), type: 'button', onclick: (e) => { if (e.shiftKey) { if (sel.has(i)) sel.delete(i); else sel.add(i); selectOnly([...sel]); } else selectOnly([i]); } },
-        h('span', { class: 'b3-chip', style: `--c:${q.c}` }), `${q.n || (SHAPES2.find((s) => s.id === q.s) || {}).name}${q.k ? ' · ' + q.k : ''}`)))),
-      parts.length > show.length ? h('p', { class: 'small' }, `…and ${parts.length - show.length} more (click them in the world).`) : null);
+    const term = search.value.trim().toLowerCase();
+    const label = (q) => `${q.n || (SHAPES2.find((s) => s.id === q.s) || {}).name}${q.k ? ' · ' + q.k : ''}`;
+    const all = parts.map((q, i) => i).filter((i) => !term || (label(parts[i]) + ' ' + parts[i].m + ' ' + parts[i].c).toLowerCase().includes(term));
+    const show = all.slice(0, 300);
+    explorer.replaceChildren(search, h('p', { class: 'small' }, term ? `${all.length} of ${parts.length} parts` : `${parts.length} part${parts.length === 1 ? '' : 's'}`),
+      h('ol', { class: 'b2-list' }, ...show.map((i) => { const q = parts[i]; return h('li', {}, h('button', { class: 'linkish' + (sel.has(i) ? ' on' : ''), type: 'button', onclick: (e) => { if (e.shiftKey) { if (sel.has(i)) sel.delete(i); else sel.add(i); selectOnly([...sel]); } else selectOnly([i]); } },
+        h('span', { class: 'b3-chip', style: `--c:${q.c}` }), label(q))); })),
+      all.length > show.length ? h('p', { class: 'small' }, `…and ${all.length - show.length} more (search to find them).`) : null);
   }
   function drawWorldPane() {
     const mode = h('select', { 'aria-label': 'Type' }, h('option', { value: 'obby' }, 'Obby (reach the goal)'), h('option', { value: 'hangout' }, 'Hangout (just chill)'));
@@ -330,6 +392,7 @@ export function startBuilder2(root, opts) {
       else if (k === 'KeyD') { e.preventDefault(); duplicate(); }
       else if (k === 'KeyC') { e.preventDefault(); copy(); }
       else if (k === 'KeyV') { e.preventDefault(); paste(); }
+      else if (k === 'KeyA') { e.preventDefault(); selectOnly(parts.map((_, i) => i)); }
       return;
     }
     const mk = { fwd: 'f', back: 'b', left: 'l', right: 'r', jump: 'up', shift: 'down' }[actionOf(e.code)];
@@ -341,6 +404,7 @@ export function startBuilder2(root, opts) {
     if (e.code === 'Escape') { selectOnly([]); return; }
     if (e.code === 'KeyT') { test(); return; }
     if (e.code === 'KeyR') { turn90(); return; }
+    if (e.code === 'KeyG') { drop(); return; }
     if (e.code === 'KeyF' && sel.size) { const c = center(selParts()), f = look(); cam.x = c[0] - f[0] * 14; cam.y = c[1] - f[1] * 14; cam.z = c[2] - f[2] * 14; return; }
     // arrows nudge the way the camera faces
     const fwd = Math.abs(Math.sin(cam.yaw)) > Math.abs(Math.cos(cam.yaw)) ? [Math.sign(Math.sin(cam.yaw)), 0] : [0, -Math.sign(Math.cos(cam.yaw))];

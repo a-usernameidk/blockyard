@@ -1247,3 +1247,7 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .err-fix p { margin: 4px 0 0; }
 .err-btns { gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .err-details { margin: 10px 0 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px ui-monospace, Consolas, monospace; background: var(--field); color: var(--ink); border: 2px solid var(--line); border-radius: 10px; padding: 8px; user-select: all; }
+.b2-arrange { align-items: center; margin-top: 6px; }
+.b2-arrange input[type="number"] { width: 64px; font-size: 14px; padding: 4px 6px; }
+.b2-arrange select { font-size: 14px; padding: 4px 6px; }
+.b2-search { width: 100%; font-size: 14px; padding: 4px 8px; margin-bottom: 4px; }
