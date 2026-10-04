@@ -7,6 +7,7 @@ import { store, mine, myWorlds, newId, api, isOnline } from '../api.js';
 import { progress } from '../progress.js';
 import { emptyWorld, normalizeWorld } from '../world.js';
 import { emptyParts, normalizeParts } from '../parts.js';
+import { WORLDS3D } from '../worlds3d.js';
 import { TEMPLATES_2D, TEMPLATES_3D } from '../templates.js';
 import { drawThumb, thumbWindow, drawBackground, drawTile } from '../render2d.js';
 import { drawPip } from '../art.js';
@@ -161,7 +162,14 @@ $('#new-3d').addEventListener('click', async () => {
     [{ label: 'Engine v1 (blocks)', value: 'v1', cls: 'btn-grass' }, { label: 'Engine v2 (parts) beta', value: 'v2', cls: 'btn-sun' }]);
   if (!engine) return;
   if (engine === 'v2') {
-    const mode = await ask('New Engine v2 world', 'An obby (reach the goal) or a hangout (just chill)?', [{ label: 'Obby', value: 'obby', cls: 'btn-grass' }, { label: 'Hangout', value: 'hangout', cls: 'btn-sun' }]);
+    const mode = await ask('New Engine v2 world', 'An obby (reach the goal), a hangout (just chill), or your own copy of one of Blockyard\'s games to take apart and change?', [{ label: 'Obby', value: 'obby', cls: 'btn-grass' }, { label: 'Hangout', value: 'hangout', cls: 'btn-sun' }, { label: 'Start from a game', value: 'game' }]);
+    if (mode === 'game') {
+      const games = WORLDS3D.filter((w) => w.premade);
+      const id = await ask('Start from a game', 'You get your own copy: every part and the whole script are yours to change.', games.map((w) => ({ label: w.name, value: w.id })));
+      const w = games.find((x) => x.id === id);
+      if (w) newProject('3d', { ...JSON.parse(JSON.stringify(w.get().world)), n: 'My ' + w.name });
+      return;
+    }
     if (mode) newProject('3d', emptyParts(mode));
     return;
   }
@@ -171,6 +179,7 @@ $('#new-3d').addEventListener('click', async () => {
 });
 $('#create-login').addEventListener('click', () => openAccount('signup'));
 onRemix((lv) => newProject('2d', lv));
+addEventListener('by:remix3d', (e) => newProject('3d', e.detail));
 
 /* ---------------- building together ---------------- */
 function teamLine(who, text, sys) {

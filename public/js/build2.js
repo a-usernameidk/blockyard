@@ -46,7 +46,7 @@ const mv3 = (R, v) => [R[0][0] * v[0] + R[0][1] * v[1] + R[0][2] * v[2], R[1][0]
 // opts: { world, proof, look, me, hd, onChange(world), onPublish(world, proof, {test}), onProof(proof), onExit() }
 export function startBuilder2(root, opts) {
   const src = opts.world || {};
-  const meta = { n: src.n || 'My world', mode: src.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[src.sky] ? src.sky : 'day', compass: src.compass === true, music: isSong(src.music) ? src.music : '' };
+  const meta = { n: src.n || 'My world', mode: src.mode === 'hangout' ? 'hangout' : 'obby', sky: SKIES[src.sky] ? src.sky : 'day', compass: src.compass === true, music: isSong(src.music) ? src.music : '', crown: Number(src.crown) > 0 ? Math.max(15, Math.min(600, Math.round(Number(src.crown)))) : 0 };
   let parts = (src.parts || []).map((q, i) => { try { return cleanPart(q, i); } catch (e) { return null; } }).filter(Boolean);
   let scripts = (Array.isArray(src.scripts) ? src.scripts : []).slice(0, LIMITS_BS.scripts).map((x, i) => ({ n: String((x && x.n) || 'Script ' + (i + 1)).slice(0, 30), src: String((x && x.src) || '').slice(0, LIMITS_BS.chars) }));
   let curScript = 0;
@@ -108,6 +108,7 @@ export function startBuilder2(root, opts) {
     const w = { v: 2, engine: 2, n: meta.n, mode: meta.mode, sky: meta.sky, parts: parts.map((q) => ({ ...q })) };
     if (meta.compass) w.compass = true;
     if (meta.music) w.music = meta.music;
+    if (meta.crown) w.crown = meta.crown;
     const used = scripts.filter((x) => x.src.trim());
     if (used.length) w.scripts = used.map((x) => ({ n: x.n, src: x.src }));
     return w;
@@ -343,8 +344,12 @@ export function startBuilder2(root, opts) {
     const comp = h('input', { type: 'checkbox' }); comp.checked = meta.compass; comp.addEventListener('change', () => { meta.compass = comp.checked; save(); });
     const song = h('select', { 'aria-label': 'Song' }, h('option', { value: '' }, 'Normal music'), ...MUSIC.filter((m) => m.id !== 'none' && (progress.owns('music', m.id) || m.id === meta.music)).map((m) => h('option', { value: m.id }, m.name)));
     song.value = meta.music; song.addEventListener('change', () => { meta.music = song.value; save(); });
+    const crown = h('select', { 'aria-label': 'Crown' }, ...[[0, 'No crown'], [30, 'Every 30 seconds'], [45, 'Every 45 seconds'], [60, 'Every minute'], [120, 'Every 2 minutes']].map(([v, n]) => h('option', { value: String(v) }, n)));
+    if (meta.crown && ![30, 45, 60, 120].includes(meta.crown)) crown.append(h('option', { value: String(meta.crown) }, `Every ${meta.crown} seconds`));
+    crown.value = String(meta.crown); crown.addEventListener('change', () => { meta.crown = Number(crown.value); save(); });
     worldPane.replaceChildren(h('div', { class: 'b3-world' }, h('label', {}, 'Type ', mode), h('label', {}, 'Sky ', sky), h('label', {}, 'Song ', song)),
       h('label', { class: 'check b3-hotbar' }, comp, ' Compass: shows N, E, S, W at the top of the screen'),
+      h('label', { class: 'b3-hotbar' }, 'Crown: the server gives one random player the crown ', crown, ' (scripts: on crown, on uncrown, player.crowned, send)'),
       h('p', { class: 'small' }, 'Every world needs one part set to Spawn (Properties > Special). Obbies need a Goal part too. Coins, checkpoints, kill parts, bounce and speed pads are Specials as well, and any shape can be one.'),
       h('p', { class: 'small' }, 'Engine v2 is in beta: moving parts, water, lights, your own shapes and scripting come in the next updates. Building together and minigames still need Engine v1 for now.'));
   }

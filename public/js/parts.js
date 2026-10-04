@@ -84,11 +84,15 @@ export function normalizeParts(w, { needGoal } = {}) {
   const count = (k) => parts.filter((q) => q.k === k).length;
   if (count('spawn') !== 1) throw new Error(count('spawn') ? 'A world can only have one Spawn part.' : 'Make one part a Spawn (Properties > Special) so players know where to start.');
   const mode = w.mode === 'hangout' ? 'hangout' : 'obby';
-  if ((needGoal ?? mode === 'obby') && !count('goal')) throw new Error('Obby worlds need at least one Goal part.');
+  // (an obby can also be won by its script: win())
+  const scriptWin = Array.isArray(w.scripts) && w.scripts.some((x) => /\bwin\s*\(/.test(String((x && x.src) || '')));
+  if ((needGoal ?? mode === 'obby') && !count('goal') && !scriptWin) throw new Error('Obby worlds need at least one Goal part (or a script that calls win()).');
   if (count('coin') > 200) throw new Error('Worlds can have up to 200 coins.');
   const world = { v: 2, engine: ENGINE2, n: cleanText(w.n, 40) || 'My world', mode, sky: SKIES[w.sky] ? w.sky : 'day', parts };
   if (w.compass === true) world.compass = true;
   if (isSong(w.music)) world.music = w.music;
+  // crown: every this-many seconds the server crowns a random player (scripts: on crown, player.crowned, send)
+  if (Number(w.crown) > 0) world.crown = Math.max(15, Math.min(600, Math.round(Number(w.crown))));
   if (Array.isArray(w.scripts) && w.scripts.length) {
     if (w.scripts.length > LIMITS_BS.scripts) throw new Error(`A world can have up to ${LIMITS_BS.scripts} scripts.`);
     world.scripts = w.scripts.map((x, i) => ({ n: cleanText(x && x.n, 30) || 'Script ' + (i + 1), src: String((x && x.src) || '').slice(0, LIMITS_BS.chars) }));

@@ -7,6 +7,7 @@
 //   on start { say("Hi!") }
 //   on touch "Button" { door = part("Door")  door.hide()  wait(3)  door.show() }
 //   every 1 { score += 1  board("Score", score) }
+//   on use { c = near("Can", 4)  if c { c.hide()  fuel += 50 } }
 //   fn add(a, b) { return a + b }
 //
 // Values: numbers, text, true/false, nil, lists [1, 2], parts (part("Name")), functions.
@@ -14,6 +15,9 @@
 export const LIMITS_BS = { scripts: 20, chars: 20000, opsPerStep: 60000, opsNoWait: 100000, depth: 60, list: 10000, text: 5000, threads: 200 };
 
 /* ---------------- words ---------------- */
+// events: the ones in ARG_EVENTS take a name in quotes
+const EVENTS = ['start', 'touch', 'leave', 'die', 'coin', 'checkpoint', 'land', 'jump', 'use', 'press', 'message', 'crown', 'uncrown'];
+const ARG_EVENTS = ['touch', 'leave', 'press', 'message'];
 const KEYWORDS = new Set(['let', 'if', 'else', 'while', 'repeat', 'for', 'in', 'fn', 'return', 'break', 'continue', 'on', 'every', 'and', 'or', 'not', 'true', 'false', 'nil']);
 export class BSError extends Error { constructor(msg, line) { super(line ? `Line ${line}: ${msg}` : msg); this.line = line || 0; this.bs = true; } }
 
@@ -141,17 +145,17 @@ export function parse(src) {
   while (!is('eof')) {
     const line = peek().line;
     if (is('on')) {
-      next(); const ev = eat('name', 'what to listen for (start, touch, leave, die, coin, checkpoint)').v;
-      if (!['start', 'touch', 'leave', 'die', 'coin', 'checkpoint', 'land', 'jump'].includes(ev)) throw new BSError(`"on ${ev}" isn't a thing. Try: on start, on touch "Name", on leave "Name", on die, on coin, on checkpoint, on land, on jump.`, line);
+      next(); const ev = eat('name', 'what to listen for (start, touch, leave, use, die, coin, checkpoint)').v;
+      if (!EVENTS.includes(ev)) throw new BSError(`"on ${ev}" isn't a thing. Try: on start, on touch "Name", on leave "Name", on use, on press "Button", on message "name", on crown, on uncrown, on die, on coin, on checkpoint, on land, on jump.`, line);
       let arg = null;
-      if (ev === 'touch' || ev === 'leave') arg = eat('str', `the part's name in quotes, like on ${ev} "Button"`).v;
+      if (ARG_EVENTS.includes(ev)) arg = eat('str', ev === 'press' ? 'the button\'s label in quotes, like on press "Boost"' : ev === 'message' ? 'the message\'s name in quotes, like on message "blast"' : `the part's name in quotes, like on ${ev} "Button"`).v;
       handlers.push({ ev, arg, body: block(), line });
     } else if (is('every')) {
       next(); const e = expr(); handlers.push({ ev: 'every', e, body: block(), line });
     } else if (is('fn')) fns.push(stmt());
     else start.push(stmt());
   }
-  return { handlers, start, fns, names: [...src.matchAll(/(?:part|parts)\s*\(\s*["']([^"']{1,30})["']/g)].map((m) => m[1]) };
+  return { handlers, start, fns, names: [...src.matchAll(/(?:part|parts|near)\s*\(\s*["']([^"']{1,30})["']/g)].map((m) => m[1]) };
 }
 
 /* ---------------- running ---------------- */
@@ -183,7 +187,7 @@ export function createRunner(scripts, host) {
   }
   const globals = new Map(), threads = [];
   let ops = 0, seed = 12345, tick = 0;
-  const R = { errors, globals, threads, progs, host, every: [], touch: new Map(), leave: new Map(), ev: {} };
+  const R = { errors, globals, threads, progs, host, every: [], touch: new Map(), leave: new Map(), press: new Map(), message: new Map(), ev: {} };
   const err = (p, msg, line) => { const e = { script: p.name, line: line || 0, msg: (line ? `Line ${line}: ` : '') + msg }; if (errors.length < 50) errors.push(e); host.print && host.print('⚠ ' + p.name + ': ' + e.msg); };
 
   /* built-in functions */
@@ -223,9 +227,37 @@ export function createRunner(scripts, host) {
     gravity: (a, l) => { host.playerDo('gravity', [num(a[0], 'gravity', l)]); return null; },
     launch: (a, l) => { host.playerDo('launch', [num(a[0], 'launch', l), num(a[1] ?? 0, 'launch', l), num(a[2] ?? 0, 'launch', l)]); return null; },
     checkpoint: (a, l) => { host.playerDo('checkpoint', a.length ? [num(a[0], 'checkpoint', l), num(a[1], 'checkpoint', l), num(a[2], 'checkpoint', l)] : []); return null; },
+    atan2: (a, l) => r7(Math.atan2(num(a[0], 'atan2', l), num(a[1], 'atan2', l)) * 180 / Math.PI),
+    // what's close: near("Can", 4) = the closest part named Can within 4 studs (or nil); near(part, 4) = true/false; dist(part) = how far
+    near: (a, l) => {
+      const d = a.length > 1 ? num(a[1], 'near', l) : 4;
+      if (a[0] && a[0].__part != null) return host.dist(a[0].__part) <= d;
+      const i = host.near(text(a[0]), d); return i < 0 ? null : partH(i);
+    },
+    dist: (a, l) => { if (!a[0] || a[0].__part == null) throw new BSError('dist needs a part: dist(part("Door")).', l); return host.dist(a[0].__part); },
+    prompt: (a) => { host.prompt(a.length && a[0] != null ? text(a[0]).slice(0, 60) : ''); return null; },
+    // vehicles: drive(top speed, turning) turns walking into driving; sail is the same but floats on water; walk() goes back
+    // (the third number is how high the seat is, so Pip is drawn sitting in it)
+    drive: (a, l) => { host.playerDo('drive', [num(a[0] ?? 30, 'drive', l), num(a[1] ?? 110, 'drive', l), 0, num(a[2] ?? 0, 'drive', l)]); return null; },
+    sail: (a, l) => { host.playerDo('drive', [num(a[0] ?? 20, 'sail', l), num(a[1] ?? 80, 'sail', l), 1, num(a[2] ?? 0, 'sail', l)]); return null; },
+    walk: () => { host.playerDo('walk', []); return null; },
+    // face(90): turn to look east (0 = north, 90 = east, 180 = south, 270 = west). A car drives the way you face.
+    face: (a, l) => { host.playerDo('face', [num(a[0], 'face', l)]); return null; },
+    // buttons on the screen (and keys 1-9): button("Boost") shows one, button("Boost", false) takes it away
+    button: (a) => { host.button(text(a[0]).slice(0, 16), a.length < 2 || truthy(a[1])); return null; },
+    // talking to the other players' scripts in the same server: send("blast") runs their on message "blast" { }
+    send: (a, l) => { host.send(text(a[0]).slice(0, 20), a.length > 1 && a[1] != null ? num(a[1], 'send', l) : 0); return null; },
+    crowned: () => host.crown('name'),
+    crownTime: () => host.crown('time'),
+    // the look: dark(0.8) dims the sun and sky (lights still shine), mono(true) takes the color away
+    dark: (a, l) => { host.fx('dark', Math.max(0, Math.min(1, num(a[0] ?? 0, 'dark', l)))); return null; },
+    mono: (a) => { host.fx('mono', a.length ? (truthy(a[0]) ? 1 : 0) : 1); return null; },
+    // remembering between visits (hangout worlds only; saved on this device)
+    save: (a, l) => { const v = a[1]; if (typeof v !== 'number' && typeof v !== 'string' && typeof v !== 'boolean') throw new BSError('save keeps a number, text or true/false: save("money", 12).', l); host.save(text(a[0]).slice(0, 20), typeof v === 'string' ? v.slice(0, 200) : v); return null; },
+    load: (a) => { const v = host.load(text(a[0]).slice(0, 20)); return v === undefined ? (a.length > 1 ? a[1] : null) : v; },
   });
   const PLAYER = { __obj: 'player' };
-  const PART_METHODS = ['move', 'moveTo', 'turn', 'turnTo', 'color', 'hide', 'show', 'solid', 'glow', 'see', 'size', 'spin', 'stop'];
+  const PART_METHODS = ['move', 'moveTo', 'turn', 'turnTo', 'color', 'hide', 'show', 'solid', 'glow', 'see', 'size', 'spin', 'stop', 'follow', 'unfollow'];
 
   function* call(p, f, args, line, depth) {
     if (f && f.__fn) {
@@ -301,9 +333,9 @@ export function createRunner(scripts, host) {
       case 'get': {
         const a = yield* ev(p, e.a, scopes, depth);
         if (a === PLAYER) {
-          if (['x', 'y', 'z', 'coins', 'deaths', 'time'].includes(e.name)) return host.playerGet(e.name);
+          if (['x', 'y', 'z', 'coins', 'deaths', 'time', 'vel', 'facing', 'driving', 'swimming', 'grounded', 'crowned'].includes(e.name)) return host.playerGet(e.name);
           if (['teleport', 'kill', 'win', 'speed', 'jump', 'gravity', 'launch', 'checkpoint'].includes(e.name)) return { __method: true, of: PLAYER, name: e.name };
-          throw new BSError(`player has no "${e.name}". Try player.x, .y, .z, .coins, .deaths.`, e.line);
+          throw new BSError(`player has no "${e.name}". Try player.x, .y, .z, .vel (how fast), .facing, .driving, .swimming, .grounded, .crowned, .coins, .deaths.`, e.line);
         }
         if (a && a.__part != null) {
           if (['x', 'y', 'z', 'sx', 'sy', 'sz', 'rx', 'ry', 'rz', 'hidden'].includes(e.name)) return host.partGet(a.__part, e.name);
@@ -386,17 +418,22 @@ export function createRunner(scripts, host) {
     if (p.ast.start.length) R.ev.start.push({ p, body: p.ast.start, top });
     for (const h of p.ast.handlers) {
       if (h.ev === 'every') R.every.push({ p, h, next: 0, top });
-      else if (h.ev === 'touch' || h.ev === 'leave') { const m = h.ev === 'touch' ? R.touch : R.leave; if (!m.has(h.arg)) m.set(h.arg, []); m.get(h.arg).push({ p, body: h.body, top }); }
+      else if (ARG_EVENTS.includes(h.ev)) { const m = R[h.ev]; if (!m.has(h.arg)) m.set(h.arg, []); m.get(h.arg).push({ p, body: h.body, top }); }
       else { (R.ev[h.ev] = R.ev[h.ev] || []).push({ p, body: h.body, top }); }
     }
   }
 
   // events from the game: 'start', 'die', 'coin', 'checkpoint', 'land', 'jump', touch/leave with a part name
-  R.fire = (name, arg) => {
-    const list = name === 'touch' ? R.touch.get(arg) : name === 'leave' ? R.leave.get(arg) : R.ev[name];
-    if (list) for (const x of list) spawn(x.p, x.body, [new Map(), x.top], name);
+  // vars: names the event hands to its { } (a message gives "from" = [name, x, y, z] and "value")
+  // (anything that happens before "start" waits for it: the top lines of a script set up names the events use)
+  let started = false; const early = [];
+  R.fire = (name, arg, vars) => {
+    if (!started && name !== 'start') { if (early.length < 50) early.push([name, arg, vars]); return; }
+    const list = ARG_EVENTS.includes(name) ? R[name].get(arg) : R.ev[name];
+    if (list) for (const x of list) spawn(x.p, x.body, [new Map(vars ? Object.entries(vars) : []), x.top], name);
+    if (name === 'start' && !started) { started = true; for (const e of early.splice(0)) R.fire(...e); }
   };
-  R.listensTo = (name) => (name === 'touch' ? R.touch.size > 0 : name === 'leave' ? R.leave.size > 0 : !!(R.ev[name] && R.ev[name].length));
+  R.listensTo = (name) => (ARG_EVENTS.includes(name) ? R[name].size > 0 : !!(R.ev[name] && R.ev[name].length));
   // one game step: start 'every' timers, then run every script that's awake (in the same order everywhere)
   R.step = (t) => {
     tick = t; ops = 0;

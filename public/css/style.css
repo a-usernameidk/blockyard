@@ -1287,6 +1287,26 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .gfx-row .seg-btn { padding: 5px 11px; font-size: 13px; }
 .w3-fps { font-variant-numeric: tabular-nums; }
 
+/* ---------- engine v2 games: the Use hint, the Use button for touch, and a script's own buttons ---------- */
+.w3-prompt { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); background: rgba(29, 35, 64, .88); color: #fff; border: 3px solid #fff; border-radius: 14px; padding: 6px 14px; font: 800 17px Nunito, system-ui, sans-serif; pointer-events: none; white-space: nowrap; max-width: 90%; overflow: hidden; text-overflow: ellipsis; z-index: 3; }
+.w3-prompt kbd, .w3-sbtns kbd { display: inline-block; min-width: 24px; text-align: center; background: var(--sun); color: var(--ink); border: 2px solid var(--ink); border-radius: 7px; padding: 0 6px; font: 800 14px Nunito, system-ui, sans-serif; }
+.w3-use { position: absolute; right: 124px; bottom: 64px; width: 96px; height: 76px; display: none; background: var(--grass); font-size: 15px; line-height: 1.1; padding: 4px; overflow: hidden; }
+.w3-use.on { background: var(--sun); outline: 3px solid #fff; }
+.w3-sbtns { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 72%; z-index: 3; }
+.w3-sbtns .btn { padding: 5px 10px; font-size: 14px; box-shadow: 0 3px 0 var(--line); }
+.has-sbtns .w3-emotes { display: none; }
+@media (pointer: coarse) {
+  .w3-use:not([hidden]) { display: grid; place-items: center; right: 148px; bottom: 74px; width: 104px; height: 96px; }
+  .w3-use.on { background: var(--grass); }
+  /* the Use button shows the hint itself, so the bubble isn't needed on a touch screen */
+  .w3-prompt { display: none; }
+  /* a script's buttons: one row you can swipe, under the numbers at the top */
+  .w3-sbtns { bottom: auto; top: 44px; left: 8px; right: 58px; transform: none; max-width: none; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; padding: 2px 2px 6px; }
+  .w3-sbtns::-webkit-scrollbar { display: none; }
+  .w3-sbtns .btn { flex: none; min-height: 40px; }
+  .w3-sbtns kbd { display: none; }
+}
+
 /* ============================================================
    GROUPS: your groups | channels | chat   (update 19)
    ============================================================ */

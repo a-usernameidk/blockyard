@@ -115,7 +115,8 @@ export class Room {
     const host = me.kind === 'play' && this.game && this.bots.owner && me.uid === this.bots.owner && !this.bots.host;
     if (host) this.bots.host = id;
     const players = [...live.map((ws) => pub(att(ws), this.pos)), ...this.botList().map((b) => pub(b, this.pos))];
-    send(server, { t: 'hello', you: id, players, chat: this.log.slice(-30), perm: me.perm || undefined, edits: me.kind === 'play' && this.edits.size ? [...this.edits].map(([i, [t, c]]) => [i, t, c]) : undefined, doc: me.kind === 'edit' ? this.docOut() : undefined, code: me.code, world: me.world, round: this.game ? this.roundOut() : undefined,
+    if (me.kind === 'play' && this.crownSecs) this.crownTick(id);
+    send(server, { t: 'hello', you: id, crown: this.crown && this.crownSecs ? { id: this.crown.id, left: Math.max(0, Math.round((this.crown.until - Date.now()) / 1000)) } : undefined, players, chat: this.log.slice(-30), perm: me.perm || undefined, edits: me.kind === 'play' && this.edits.size ? [...this.edits].map(([i, [t, c]]) => [i, t, c]) : undefined, doc: me.kind === 'edit' ? this.docOut() : undefined, code: me.code, world: me.world, round: this.game ? this.roundOut() : undefined,
       bots: this.game && this.bots.owner ? { n: this.bots.n, skill: this.bots.skill, owner: me.uid === this.bots.owner, host: host || this.bots.host === id } : undefined });
     this.broadcast({ t: 'join', player: pub(me, this.pos) }, server);
     if (host) for (const b of this.botList()) this.broadcast({ t: 'join', player: pub(b, this.pos) }, server);
@@ -147,6 +148,7 @@ export class Room {
         if (!lim.saved || Date.now() - lim.saved > 1500) { lim.saved = Date.now(); ws.serializeAttachment({ ...me, ...st }); }
         this.broadcast({ t: 'st', id: me.id, ...st }, ws);
         if (this.round) this.watch(me, st);
+        if (this.crownSecs) this.crownTick();
         // keep the server list fresh while people play
         // (each player's own row, so friends see everyone who's here, not just whoever moved last)
         if (me.code && (!lim.pres || Date.now() - lim.pres > 120e3)) { lim.pres = Date.now(); this.presence(me, true); }
@@ -290,6 +292,20 @@ export class Room {
         if (me.kind === 'edit') { await this.flush(); send(ws, { t: 'saved' }); }
         break;
       }
+      case 'smsg': { // an Engine v2 script talking to the other players' scripts (send("blast")): passed on, never run here
+        if (me.kind !== 'play') return;
+        const n = typeof msg.n === 'string' ? msg.n.slice(0, 20) : '';
+        if (!n || !/^[\w .!?-]+$/.test(n)) return;
+        // in a crown world only the player with the crown may send
+        if (this.crownSecs && !(this.crown && this.crown.id === me.id)) return;
+        const now = Date.now();
+        lim.sm = (lim.sm || []).filter((t) => now - t < 10000);
+        if (lim.sm.length >= 20) return;
+        lim.sm.push(now);
+        const at = this.pos.get(me.id);
+        this.broadcast({ t: 'smsg', id: me.id, n, v: Math.round((Number(msg.v) || 0) * 1000) / 1000, p: at ? at.p : undefined }, ws);
+        break;
+      }
       case 'ping': send(ws, { t: 'pong', at: msg.at }); break;
       case 'fin': case 'tag': case 'out': case 'hit': this.gameMsg(me, msg); break;
       case 'bots': { // the owner's computer tells us where its bots are
@@ -325,6 +341,7 @@ export class Room {
       }
       case 'hb': {
         this.tick();
+        if (this.crownSecs) this.crownTick();
         if (me.kind === 'play' && me.code && (!lim.pres || Date.now() - lim.pres > 120e3)) { lim.pres = Date.now(); this.presence(me, true); }
         break;
       }
@@ -354,6 +371,7 @@ export class Room {
     this.pos.delete(me.id);
     this.rate.delete(me.id);
     this.broadcast({ t: 'leave', id: me.id }, ws);
+    if (this.crownSecs && this.crown && this.crown.id === me.id) this.crownTick(null, ws);
     if (this.bots && this.bots.host === me.id) this.removeBots();
     if (me.kind === 'play') {
       await this.presence(me, false, ws); this.tick();
@@ -366,6 +384,7 @@ export class Room {
     this.saveAt = 0;
     if (this.editsDirty) { this.editsDirty = false; try { await this.state.storage.put('edits', [...this.edits].map(([i, v]) => [i, ...v])); } catch (e) { /* try later */ } }
     if (this.round) this.tick();
+    if (this.crownSecs) this.crownTick();
     await this.flush();
   }
 
@@ -384,6 +403,22 @@ export class Room {
     this.rate.delete(a.id);
     this.broadcast({ t: 'leave', id: a.id }, ws);
     if (a.kind === 'play') this.presence(a, false, ws);
+  }
+  /* ---------- the crown (Engine v2 worlds with "crown" on): one player at a time gets it, picked at random ---------- */
+  // quiet: the id of someone who is joining right now (they hear about the crown in their hello instead)
+  crownTick(quiet, except) {
+    const here = this.alive(except).map(att).filter((a) => a.kind === 'play'), now = Date.now();
+    if (!here.length) { this.crown = null; return; }
+    const C = this.crown;
+    if (C && now < C.until && here.some((a) => a.id === C.id)) return;
+    // someone new when there is anyone else to pick
+    const pool = here.filter((a) => !C || a.id !== C.id), pick = (pool.length ? pool : here)[Math.floor(Math.random() * (pool.length || here.length))];
+    this.crown = { id: pick.id, until: now + this.crownSecs * 1000 };
+    const text = JSON.stringify({ t: 'crown', id: pick.id, left: this.crownSecs });
+    for (const ws of this.alive(except)) { const a = att(ws); if (a && a.kind === 'play' && a.id !== quiet) { try { ws.send(text); } catch (e) { /* closed */ } } }
+    // wake up when the time is over even if nobody moves (keep an earlier alarm that is waiting to save)
+    const at = this.saveAt && this.saveAt > now ? Math.min(this.saveAt, this.crown.until + 50) : this.crown.until + 50;
+    this.state.storage.setAlarm(at).catch(() => {});
   }
   alive(except) { return this.state.getWebSockets().filter((ws) => ws !== except && att(ws) && !att(ws).left); }
   broadcast(msg, except) {
@@ -454,11 +489,13 @@ export class Room {
     this.game = null;
     try {
       const b = builtinWorld(worldId);
-      if (b) this.game = b.game ? gameConfig(null, b) : null;
+      this.crownSecs = 0;
+      if (b) { this.game = b.game ? gameConfig(null, b) : null; if (b.v2) this.crownSecs = Number(b.get().world.crown) || 0; }
       else if (worldId && this.env.DB) {
         const row = await this.env.DB.prepare("SELECT data, user_id FROM games WHERE id = ? AND kind = '3d'").bind(worldId).first();
         if (row) {
           const data = JSON.parse(row.data);
+          if (data && data.engine === 2) this.crownSecs = Math.max(0, Math.min(600, Number(data.crown) || 0));
           this.game = gameConfig(data);
           // blasters this world sells are locked until you buy them
           this.shopLock = shopBlasters(data); this.creator = row.user_id; this.worldId = worldId;

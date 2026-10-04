@@ -75,6 +75,8 @@ export const SNIPPETS = [
   ['repeat', 'repeat 5 {\n  \n}\n'], ['for', 'for i in 1..10 {\n  \n}\n'], ['function', 'fn name(a, b) {\n  return a + b\n}\n'], ['get a part', 'p = part("Name")\n'],
   ['move part', 'part("Name").move(0, 5, 0, 1)\n'], ['hide / show', 'part("Name").hide()\nwait(2)\npart("Name").show()\n'], ['color', 'part("Name").color("red")\n'], ['score board', 'board("Score", score)\n'],
   ['teleport', 'teleport(500, 5, 500)\n'], ['random', 'n = random(1, 6)\n'],
+  ['on use', 'on use {\n  c = near("Name", 4)\n  if c { c.hide() }\n}\n'], ['prompt', 'every 0.2 {\n  if near("Name", 4) { prompt("Pick up") } else { prompt("") }\n}\n'], ['button', 'button("Boost")\non press "Boost" {\n  speed(2)\n  wait(5)\n  speed(1)\n}\n'],
+  ['get in a car', 'for p in parts("Car") { p.solid(false) }\nteleport(part("Seat").x, part("Seat").y - 1, part("Seat").z)\nface(90)\nfor p in parts("Car") { p.follow() }\ndrive(30, 100, 1)\n'], ['save / load', 'money = load("money", 0)\nsave("money", money)\n'],
 ];
 
 // the cheat sheet: [heading, [[code, what it does], ...]]
@@ -85,5 +87,15 @@ export const REFERENCE = [
   ['Parts', [['part("Name")', 'the part with that name'], ['parts("Name")', 'a list of all parts with that name'], ['p.move(x, y, z, secs)   p.moveTo(x, y, z, secs)', 'slide it'], ['p.turn(x, y, z, secs)   p.turnTo(x, y, z, secs)', 'turn it (degrees)'], ['p.spin(x, y, z)   p.stop()', 'keep spinning (degrees a second) / stop'], ['p.hide()   p.show()   p.solid(false)', 'gone and walk-through / back / only walk-through'], ['p.color("red")   p.color("#ff8800")', 'red orange yellow green blue purple pink white black gray brown cyan lime gold'], ['p.glow(1)   p.see(0.5)   p.size(x, y, z)', 'glow, see-through (0 to 1), new size'], ['p.x  p.y  p.z  p.sx  p.sy  p.sz  p.rx  p.ry  p.rz  p.hidden  p.name  p.color()', 'read things about it']]],
   ['The player', [['player.x  player.y  player.z', 'where they are'], ['player.coins  player.deaths  player.time', 'their numbers'], ['teleport(x, y, z)', 'move them'], ['launch(x, y, z)', 'throw them (y is up)'], ['speed(2)   jump(1.5)   gravity(0.5)', '1 is normal'], ['kill()   win()   checkpoint()', 'back to the checkpoint / finish the obby / save here']]],
   ['Screen, sound, math', [['say("Hi")', 'a message on screen'], ['board("Score", 5)', 'a number at the top (board("Score") removes it)'], ['print(a, b)', 'write to the test log'], ['sound("coin")', 'coin jump win die pop badge bounce checkpoint speed'], ['random(1, 6)   random()', 'a whole number 1 to 6 / a number 0 to 1'], ['time()', 'seconds since the world started'], ['abs floor ceil round min max sqrt sin cos', 'math (sin and cos use degrees)'], ['str(5)   num("5")   type(x)', 'turn into text / a number / what kind it is']]],
+  ['Use key, cars, held things (update 20)', [['on use { }', 'the player pressed Use (F, or the Use button on a phone)'], ['near("Can", 4)', 'the closest part named Can within 4 studs, or nil'], ['near(p, 4)   dist(p)', 'is part p that close? / how far is it?'], ['prompt("Pick up")', 'the hint next to the Use key (prompt("") hides it)'],
+    ['p.follow()', 'glue a part to the player where it is now (a car you sat in)'], ['p.follow(right, up, forward)', 'glue it at that spot (a tool in the hand, a lamp)'], ['p.unfollow()', 'let it go'],
+    ['drive(34, 95, 1)', 'walking becomes driving: top speed, how fast it turns, seat height'], ['sail(18, 85)', 'the same, but it floats on water'], ['walk()', 'back on foot'], ['face(90)', 'look east (0 north, 180 south). A car drives the way you face'],
+    ['player.vel  .facing  .driving  .swimming  .grounded', 'speed, direction and what the player is doing']]],
+  ['Buttons, other players, the look, saving (update 20)', [['button("Boost")   on press "Boost" { }', 'a button on the screen (keys 1 to 9). button("Boost", false) removes it'],
+    ['send("blast", 5)   on message "blast" { }', 'tell every player\'s script in this server. Inside: from = [name, x, y, z], value, mine'],
+    ['on crown { }   on uncrown { }', 'you got / lost the crown (World tab: Crown)'], ['player.crowned   crowned()   crownTime()', 'do I have it / who has it / seconds left'],
+    ['dark(0.8)   mono(true)', 'dim the sun and sky (lamps still shine) / take the color away'],
+    ['save("money", 12)   load("money", 0)', 'remember a value on this device (hangouts only; obbies always start fresh)'],
+    ['let x = 5 inside fn', 'names without let are shared by the whole world: use let inside functions so they can\'t clash']]],
   ['Limits (they keep worlds safe and fast)', [['20 scripts, 20,000 letters each', ''], ['Loops that never wait are stopped', 'put wait() in long loops'], ['Scripts can only change the world', 'no internet, no files, nothing outside the game']]],
 ];

@@ -3,7 +3,7 @@ import { createRenderer, M4, hexRGB, raycast } from './gl.js';
 import { showError, ERRORS } from './loader.js';
 import { decodeBlocks, Grid, BLOCKS, B, SX, SY, SZ, PALETTE, COLOR_NAMES, idx, cleanShop, shopBlasters, WORLD_ITEMS } from './world.js';
 import { createSim, step3, STEP3, packInput, yawIndex, KEY, P3, moverOffset } from './physics3d.js';
-import { createSim2, step2 } from './phys2.js';
+import { createSim2, step2 , followAt, camClear, KEY2 } from './phys2.js';
 import { encodeReplay } from './replay.js';
 import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
 import { openRoom } from './net.js';
@@ -112,7 +112,12 @@ export function startWorld(root, opts) {
   const hudBoard = h('span', { class: 'w3-vars' }), logBox = h('div', { class: 'w3-log', hidden: true }), water = h('div', { class: 'w3-water', hidden: true });
   const boardVals = new Map(), scriptLog = []; let v2Lights = [];
   const sayBox = h('div', { class: 'w3-say', 'aria-live': 'polite', hidden: true });
-  const stage = h('div', { class: 'w3-stage' }, canvas, tags, h('div', { class: 'w3-hud' }, hudTime, hudCoins, hudDeaths, hudVars, hudBoard, hudNet, hudFps), water, toastEl, sayBox, logBox, fade, players, chat, emoteBar, joy, jumpBtn, menu, winBox, msgBox);
+  // engine v2 scripts: a hint by the Use key, a Use button for touch screens, and the script's own buttons
+  const promptBox = h('div', { class: 'w3-prompt', hidden: true });
+  const useBtn = h('button', { class: 'tbtn w3-use', type: 'button', 'aria-label': 'Use', hidden: true }, 'Use');
+  const sBtnBar = h('div', { class: 'w3-sbtns', role: 'group', 'aria-label': 'Game buttons', hidden: true });
+  const sButtons = []; let useTouch = false, promptText = '', crownId = null, crownUntil = 0, monoOn = false;
+  const stage = h('div', { class: 'w3-stage' }, canvas, tags, h('div', { class: 'w3-hud' }, hudTime, hudCoins, hudDeaths, hudVars, hudBoard, hudNet, hudFps), water, toastEl, sayBox, promptBox, logBox, fade, players, chat, emoteBar, sBtnBar, joy, jumpBtn, useBtn, menu, winBox, msgBox);
   const restartBtn = h('button', { class: 'btn', type: 'button', title: 'Start over from the beginning' }, 'Restart');
   const resetBtn = h('button', { class: 'btn', type: 'button', title: 'Go back to your last checkpoint (R)' }, 'Respawn');
   const inviteBtn = h('button', { class: 'btn', type: 'button', hidden: true }, 'Invite');
@@ -173,6 +178,13 @@ export function startWorld(root, opts) {
   // v2 worlds always use the HD renderer (Potato just draws fewer pixels)
   try { R = createRenderer(canvas, { low: isV2 ? false : !!G3.low, dpr: G3.dpr, hd: G3.hd || (isV2 ? GFX.pretty.hd : null) }); }
   catch (e) { const box = h('div'); msgBox.replaceChildren(box); showError(box, { code: 'BY-303', title: '3D graphics can\u2019t start here', list: ['BY-303: ' + e.message], fix: [ERRORS['BY-303']] }); msgBox.hidden = false; return { stop() {} }; }
+  // what a hangout world's script saved on this device (save / load)
+  const storeKey = 'bs:' + (opts.worldId || 'test');
+  const storeData = opts.test ? {} : store.get(storeKey, {});
+  const scriptStore = {
+    load: (k) => (Object.prototype.hasOwnProperty.call(storeData, k) ? storeData[k] : undefined),
+    save: (k, v) => { if (!(k in storeData) && Object.keys(storeData).length >= 40) return; storeData[k] = v; if (!opts.test) store.set(storeKey, storeData); },
+  };
   R.setSky(world.sky);
   R.setGrid(viewGrid);
   if (isV2) {
@@ -185,19 +197,64 @@ export function startWorld(root, opts) {
     R.setDyn(S.dyn.map((i) => ({ i, q: S.live.get(i).q })));
     v2Lights = world.parts.map((q, i) => (q.lt ? { i, p: q.p, range: q.lt.r, color: hexRGB(q.c), power: q.lt.b } : null)).filter(Boolean);
     boardVals.clear(); drawBoard(); scriptLog.length = 0; drawLog();
+    // a fresh start: no hint, no buttons, the normal look, and what this world remembered
+    setPrompt(''); sButtons.length = 0; drawSButtons(); setFx('dark', 0); setFx('mono', 0);
+    useBtn.hidden = !(S.runner && S.runner.listensTo('use'));
+    S.ext = scriptStore;
   }
-  function frameV2() {
-    for (const i of S.dyn) { const L = S.live.get(i); R.dynMove(i, L.p, L.R, L.hide); }
-    for (const l of v2Lights) { const L = S.live.get(l.i); if (L) { l.p = L.p; l.hide = L.hide; l.color = hexRGB(L.q.c); } }
+  // the crown (worlds with "crown" on): the server picks one player at a time. Playing alone, it's always you.
+  function initCrown() {
+    S.crown = isV2 && world.crown ? { me: false, name: '', left: () => Math.max(0, (crownUntil - Date.now()) / 1000) } : null;
+    if (!S.crown) return;
+    if (room) applyCrown(); else { S.crown.me = true; S.crown.name = 'You'; S.crown.left = () => 0; crownId = 'me'; if (S.runner) S.runner.fire('crown'); }
+  }
+  function setPrompt(t) {
+    promptText = t;
+    promptBox.hidden = !t; promptBox.replaceChildren(...(t ? [h('kbd', {}, keyName('use')), ' ' + t] : []));
+    useBtn.textContent = t ? t.slice(0, 18) : 'Use'; useBtn.classList.toggle('on', !!t);
+  }
+  function drawSButtons() {
+    sBtnBar.hidden = !sButtons.length;
+    sBtnBar.replaceChildren(...sButtons.map((label, i) => h('button', { class: 'btn', type: 'button', title: `${label} (${i + 1})`, onclick: (e) => { pressSButton(i); e.currentTarget.blur(); } }, h('kbd', {}, String(i + 1)), ' ' + label)));
+    stage.classList.toggle('has-sbtns', sButtons.length > 0); // (the number keys are the game's buttons while it has some: the emote bar steps aside)
+  }
+  function pressSButton(i) { if (i < sButtons.length && S.runner && !winShown) { S.runner.fire('press', sButtons[i]); sfx('pop'); return true; } return false; }
+  function setFx(k, v) {
+    if (k === 'dark') { if (R.setDark) R.setDark(v); }
+    else if (k === 'mono') { monoOn = !!v; canvas.style.filter = monoOn ? 'grayscale(1) contrast(1.08)' : ''; }
+  }
+  function applyCrown() {
+    if (!S.crown) return;
+    const was = S.crown.me, o = crownId && others.get(crownId);
+    S.crown.me = !!crownId && crownId === myId;
+    S.crown.name = S.crown.me ? (opts.me ? opts.me.display || opts.me.name : 'You') : o ? label(o) : '';
+    if (S.runner && S.crown.me !== was) S.runner.fire(S.crown.me ? 'crown' : 'uncrown');
+  }
+  function onScriptMessage(m) {
+    if (!S.runner || typeof m.n !== 'string') return;
+    const o = others.get(m.id), p = Array.isArray(m.p) ? m.p : o && o.pos ? o.pos : [S.p.x, S.p.y, S.p.z];
+    S.runner.fire('message', m.n, { from: [o ? label(o) : '?', Number(p[0]) || 0, Number(p[1]) || 0, Number(p[2]) || 0], value: Number(m.v) || 0, mine: false });
+  }
+  function frameV2(px, py, pz) {
+    for (const i of S.dyn) { const L = S.live.get(i), fa = L.fol ? followAt(S, i, px, py, pz) : null; R.dynMove(i, fa ? fa.p : L.p, fa ? fa.R : L.R, L.hide); if (fa) L.drawP = fa.p; }
+    for (const l of v2Lights) { const L = S.live.get(l.i); if (L) { l.p = L.fol && L.drawP ? L.drawP : L.p; l.hide = L.hide; l.color = hexRGB(L.q.c); } }
     R.setLights(v2Lights);
     water.hidden = !S.swim;
     if (S.script.length) {
       for (const e of S.script) {
         if (e.t === 'say') logicSay(e.text);
-        else if (e.t === 'sound') sfx(['jump', 'coin', 'win', 'die', 'pop', 'badge', 'bounce', 'checkpoint', 'speed', 'buy', 'land'].includes(e.name) ? e.name : 'pop');
+        else if (e.t === 'sound') sfx(['jump', 'coin', 'win', 'die', 'pop', 'badge', 'bounce', 'checkpoint', 'speed', 'buy', 'land', 'error', 'tick', 'go', 'splat', 'whoosh', 'door', 'key', 'hit'].includes(e.name) ? e.name : 'pop');
         else if (e.t === 'board') { if (e.value == null) boardVals.delete(e.label); else if (boardVals.size < 8 || boardVals.has(e.label)) boardVals.set(e.label, e.value); drawBoard(); }
         else if (e.t === 'print') { scriptLog.push(e.text); if (scriptLog.length > 6) scriptLog.shift(); drawLog(); }
         else if (e.t === 'part') { const L = S.live.get(e.i); if (L) R.dynMesh(e.i, L.q); }
+        else if (e.t === 'prompt') { if (e.text !== promptText) setPrompt(e.text); }
+        else if (e.t === 'button') { const at = sButtons.indexOf(e.label); if (e.on && at < 0 && sButtons.length < 9) sButtons.push(e.label); else if (!e.on && at >= 0) sButtons.splice(at, 1); drawSButtons(); }
+        else if (e.t === 'fx') setFx(e.k, e.v);
+        else if (e.t === 'send') {
+          // your own script hears it right away; the server passes it to everyone else in this server
+          S.runner.fire('message', e.name, { from: [opts.me ? opts.me.display || opts.me.name : 'You', S.p.x, S.p.y, S.p.z], value: e.value, mine: true });
+          if (room && online) room.send({ t: 'smsg', n: e.name, v: e.value });
+        }
       }
       S.script.length = 0;
     }
@@ -243,10 +300,16 @@ export function startWorld(root, opts) {
     const act = actionOf(e.code);
     if (down && act === 'respawn' && !e.ctrlKey && !e.metaKey) { resetPress = true; }
     if (shopOpen) { if (down && e.key === 'Escape') closeShop(); return; }
-    if (down && /^Digit[1-9]$/.test(e.code)) { const n = Number(e.code.slice(5)); if (digitKey(n)) return; if (paintWorld && n <= WEAPON_IDS.length) pickWeapon(WEAPON_IDS[n - 1]); else if (n <= EMOTES.length) emote(EMOTES[n - 1]); return; }
+    if (down && /^Digit[1-9]$/.test(e.code)) { const n = Number(e.code.slice(5)); if (sButtons.length) { if (!e.repeat) pressSButton(n - 1); return; } if (digitKey(n)) return; if (paintWorld && n <= WEAPON_IDS.length) pickWeapon(WEAPON_IDS[n - 1]); else if (n <= EMOTES.length) emote(EMOTES[n - 1]); return; }
     if (down && act === 'shift' && !e.repeat) { setShiftLock(!shiftLock); return; }
     if (down && act === 'shop' && tyCanBuy()) { tyBuy(); return; }
     if (down && act === 'shop' && (nearShop || nearStand)) { if (nearStand) openStand(); else openShop(); return; }
+    if (act === 'use') {
+      // Use (F): the world's script gets it. In worlds with nothing to use, it's still the admin's fly switch.
+      if (isV2 && S.runner && S.runner.listensTo('use')) { e.preventDefault(); if (down) keys.add('u'); else keys.delete('u'); return; }
+      if (down && canFly() && !e.repeat) setFly(!fly);
+      return;
+    }
     if (down && act === 'fly' && canFly() && !e.repeat) { setFly(!fly); return; }
     if (down && act === 'spec' && !e.repeat) { setSpec(!spec); return; }
     if (down && act === 'bag' && !e.repeat) { toggleBag(); return; }
@@ -260,7 +323,7 @@ export function startWorld(root, opts) {
     if (down) keys.add(k); else keys.delete(k);
   }
   addEventListener('keydown', onKey); addEventListener('keyup', onKey);
-  const clearKeys = () => { keys.clear(); joyVec = null; jumpTouch = false; };
+  const clearKeys = () => { keys.clear(); joyVec = null; jumpTouch = false; useTouch = false; };
   addEventListener('blur', clearKeys);
   let resetPress = false;
   resetBtn.addEventListener('click', () => { resetPress = true; resetBtn.blur(); });
@@ -327,6 +390,8 @@ export function startWorld(root, opts) {
   document.addEventListener('mousemove', onMouseMove);
   jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); jumpTouch = true; });
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) jumpBtn.addEventListener(ev, () => { jumpTouch = false; });
+  useBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); useTouch = true; });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) useBtn.addEventListener(ev, () => { useTouch = false; });
   fullBtn.addEventListener('click', () => { const el = stage; if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); else if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); });
   gfxBtn.addEventListener('click', () => { const m = GFX_ORDER[(GFX_ORDER.indexOf(gfxMode()) + 1) % GFX_ORDER.length]; setGfx(m); if (opts.onGraphics) opts.onGraphics(m); });
 
@@ -336,6 +401,7 @@ export function startWorld(root, opts) {
     if (joyVec) { f = f || joyVec.y < -0.35; b = b || joyVec.y > 0.35; l = l || joyVec.x < -0.35; r = r || joyVec.x > 0.35; }
     let bits = (f ? KEY.fwd : 0) | (b ? KEY.back : 0) | (l ? KEY.left : 0) | (r ? KEY.right : 0) | (keys.has('j') || jumpTouch ? KEY.jump : 0);
     if (resetPress) { bits |= KEY.reset; resetPress = false; }
+    if (isV2 && (keys.has('u') || useTouch)) bits |= KEY2.use;
     return bits;
   }
 
@@ -459,6 +525,8 @@ export function startWorld(root, opts) {
         if (m.code && (!opts.isTycoon || m.perm === 'owner')) { inviteBtn.hidden = false; inviteBtn.onclick = () => invite(m.code); }
         lastSent = '';
         if (m.round) onRound(m.round);
+        if (m.crown) { crownId = m.crown.id; crownUntil = Date.now() + (Number(m.crown.left) || 0) * 1000; }
+        applyCrown();
         setupBots(m.bots, m.players.filter((p) => String(p.id).startsWith('bot')).map((p) => p.id));
         break;
       case 'botcfg':
@@ -491,6 +559,8 @@ export function startWorld(root, opts) {
       case 'sys': addLine(null, m.m, null, m.big ? 'big' : true); break;
       case 'kicked': case 'full': case 'error': showMsg(m.m, true); break;
       case 'round': onRound(m); break;
+      case 'crown': crownId = m.id || null; crownUntil = Date.now() + (Number(m.left) || 0) * 1000; applyCrown(); if (crownId && S.crown) { const o = others.get(crownId); addLine(null, crownId === myId ? 'You have the crown!' : `${label(o)} has the crown.`, null, true); sfx(crownId === myId ? 'badge' : 'pop'); } break;
+      case 'smsg': onScriptMessage(m); break;
       case 'paint': onPaint(m); break;
       case 'throw': if (opts.snow && Array.isArray(m.o) && Array.isArray(m.d)) addSnowball(m.o, m.d, m.id); break;
       case 'prize': toast((m.coins ? `+${m.coins} coins!` : "You won! (You've hit today's minigame coin limit.)") + (m.xp ? ` +${m.xp} XP` : ''), 2.5); sfx('coin'); if (opts.onPrize) opts.onPrize(); break;
@@ -534,6 +604,7 @@ export function startWorld(root, opts) {
     hudNet.textContent = opts.test ? 'Testing' : 'Solo';
     if (!opts.test && opts.soloNote) addLine(null, opts.soloNote, null, true);
   }
+  initCrown();
   chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const text = chatInput.value.trim();
@@ -1244,7 +1315,7 @@ export function startWorld(root, opts) {
     if (near !== nearShop) { nearShop = near; shopBtn.hidden = !near; }
   }
   // automated tests can move the player (only with ?w3test in the address)
-  if (location.search.includes('w3test')) window.__w3 = { stats: () => ({ ...R.stats, err: window.__hdError || null }), cam: (yaw, pitch, dist) => { cam.yaw = yaw; cam.pitch = pitch; cam.dist = dist; }, at: (x, y, z) => { S.p.x = x; S.p.y = y; S.p.z = z; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; }, pos: () => [S.p.x, S.p.y, S.p.z], mods: () => S.mods, cell: (x, y, z) => physGrid.get(x, y, z), yaw: () => cam.yaw, edits: () => edited.size };
+  if (location.search.includes('w3test')) window.__w3 = { stats: () => ({ ...R.stats, err: window.__hdError || null }), cam: (yaw, pitch, dist) => { cam.yaw = yaw; cam.pitch = pitch; cam.dist = dist; }, at: (x, y, z) => { S.p.x = x; S.p.y = y; S.p.z = z; S.v.x = S.v.y = S.v.z = 0; prevP = { ...S.p }; }, pos: () => [S.p.x, S.p.y, S.p.z], mods: () => S.mods, cell: (x, y, z) => physGrid.get(x, y, z), yaw: () => cam.yaw, edits: () => edited.size, sim: () => S, g: (k) => (S.runner ? S.runner.globals.get(k) : undefined), buttons: () => sButtons.slice(), prompt: () => promptText, crown: () => crownId, mono: () => monoOn, me: () => myId, said: () => (sayBox.hidden ? '' : sayBox.textContent) };
   let lastHb = 0;
   function roundTick(px, py, pz, scene, clock) {
     if (!cfg || !rs.phase) return;
@@ -1330,7 +1401,7 @@ export function startWorld(root, opts) {
   }
   function restart() {
     S = newSim();
-    if (isV2 && R.setDyn) syncV2();
+    if (isV2 && R.setDyn) { syncV2(); initCrown(); }
     applyGear();
     scatter();
     drawVars();
@@ -1409,13 +1480,19 @@ export function startWorld(root, opts) {
     const k = Math.min(1, acc / STEP3);
     const px = prevP.x + (S.p.x - prevP.x) * k, py = prevP.y + (S.p.y - prevP.y) * k, pz = prevP.z + (S.p.z - prevP.z) * k;
     const hv = Math.hypot(S.v.x, S.v.z), moving = hv > 0.6;
-    if (moving || shiftLock) {
+    const driving = isV2 && !!S.drive, headRad = driving ? S.head * Math.PI * 2 / 4096 : 0;
+    if (driving) {
+      // in a car or a boat: Pip faces where it points, and the camera swings round behind it when you're not turning it yourself
+      let d = Math.atan2(Math.sin(headRad), -Math.cos(headRad)) - facing; d = Math.atan2(Math.sin(d), Math.cos(d)); facing += d * Math.min(1, dt * 16);
+      if (!camDrag && !shiftLock && !keys.has('ql') && !keys.has('qr') && Math.abs(S.drive.v) > 2) { let c = headRad + (S.drive.v < 0 ? Math.PI : 0) - cam.yaw; c = Math.atan2(Math.sin(c), Math.cos(c)); cam.yaw += c * Math.min(1, dt * 2.2); }
+      emoteNow = null;
+    } else if (moving || shiftLock) {
       // shift lock: face where the camera looks. Otherwise face the way you're going.
       const target = shiftLock ? Math.atan2(Math.sin(cam.yaw), -Math.cos(cam.yaw)) : Math.atan2(S.v.x, S.v.z);
       let d = target - facing; d = Math.atan2(Math.sin(d), Math.cos(d)); facing += d * Math.min(1, dt * (shiftLock ? 20 : 14));
       if (moving) emoteNow = null;
     }
-    walk += hv * dt * 2.2;
+    if (!driving) walk += hv * dt * 2.2;
     if (emoteNow) emoteAt += dt;
     // crumble blocks disappear and come back
     for (const [i, c] of S.crumbles) if (S.steps - c >= P3.crumbleDelay && !gone.has(i)) { gone.set(i, viewGrid.t[i]); viewGrid.t[i] = 0; R.markDirty(i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ); }
@@ -1430,7 +1507,8 @@ export function startWorld(root, opts) {
     const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     const dir = [-Math.sin(cam.yaw) * cp, sp, Math.cos(cam.yaw) * cp];
     let dist = cam.dist;
-    for (let s = 0.4; s <= cam.dist; s += 0.25) if (camSolid(tgt[0] + dir[0] * s, tgt[1] + dir[1] * s, tgt[2] + dir[2] * s)) { dist = Math.max(0.8, s - 0.35); break; }
+    if (isV2) { const free = camClear(S, tgt, dir, cam.dist); if (free < cam.dist) dist = Math.max(0.6, free - 0.3); }
+    else for (let s = 0.4; s <= cam.dist; s += 0.25) if (camSolid(tgt[0] + dir[0] * s, tgt[1] + dir[1] * s, tgt[2] + dir[2] * s)) { dist = Math.max(0.8, s - 0.35); break; }
     cam.eye = [tgt[0] + dir[0] * dist, tgt[1] + dir[1] * dist, tgt[2] + dir[2] * dist];
     aim.dir = [-dir[0], -dir[1], -dir[2]];
     if (S.jetting > 0) { S.jetting--; if (Math.random() < 0.8) parts.push({ x: px + (Math.random() - 0.5) * 0.3, y: py + 0.3, z: pz + (Math.random() - 0.5) * 0.3, vx: 0, vy: -4, vz: 0, life: 0.35, max: 0.35, size: 0.12, color: hexRGB(Math.random() < 0.5 ? '#ff9f1c' : '#ffd23f'), g: 0 }); }
@@ -1445,7 +1523,8 @@ export function startWorld(root, opts) {
     /* ----- build the scene ----- */
     const scene = [];
     const air = !S.onGround && S.air > 4;
-    avatarParts({ x: px, y: py, z: pz, yaw: facing, walk, move: Math.min(1, hv / P3.speed), air, emote: emoteNow, et: emoteAt, t: clock, look: kothKing && kothKing === myId ? { ...shownLook(), hat: 'crown' } : shownLook() }, scene);
+    const king = kothKing || (crownId === 'me' ? myId || 'me' : crownId), iAmKing = !!king && (king === myId || king === 'me');
+    avatarParts({ x: px, y: py + (driving ? S.drive.seat : 0), z: pz, yaw: facing, walk, move: driving ? 0 : Math.min(1, hv / P3.speed), air: air && !driving, emote: driving ? 'sit' : emoteNow, et: driving ? 1 : emoteAt, t: clock, look: iAmKing ? { ...shownLook(), hat: 'crown' } : shownLook() }, scene);
     shadow(scene, px, py, pz);
     if (look.pet && look.pet !== 'none') { petFollow(myPet, px, py, pz, facing, dt); petParts(look.pet, myPet.x, myPet.y, myPet.z, myPet.yaw, clock, myPet.moving ? Math.abs(Math.sin(clock * 10)) : 0, scene); }
     if (moverDraw.length) {
@@ -1460,7 +1539,7 @@ export function startWorld(root, opts) {
       if (oMove) { o.walk += dt * 13; o.emote = null; }
       if (em && !o.emote) { o.emote = EMOTES[em - 1]; o.et = 0; }
       if (o.emote) o.et += dt;
-      avatarParts({ x: st.p[0], y: st.p[1], z: st.p[2], yaw: st.r, walk: o.walk, move: oMove ? 1 : 0, air: oAir, emote: o.emote, et: o.et, t: clock, look: kothKing === o.id ? { ...o.look, hat: 'crown' } : o.look }, scene);
+      avatarParts({ x: st.p[0], y: st.p[1], z: st.p[2], yaw: st.r, walk: o.walk, move: oMove ? 1 : 0, air: oAir, emote: o.emote, et: o.et, t: clock, look: king === o.id ? { ...o.look, hat: 'crown' } : o.look }, scene);
       shadow(scene, st.p[0], st.p[1], st.p[2]);
       if (o.look && o.look.pet && o.look.pet !== 'none') { o.pet = o.pet || {}; petFollow(o.pet, st.p[0], st.p[1], st.p[2], st.r, dt); petParts(o.look.pet, o.pet.x, o.pet.y, o.pet.z, o.pet.yaw, clock, o.pet.moving ? Math.abs(Math.sin(clock * 10)) : 0, scene); }
       o.trailT -= dt;
@@ -1511,7 +1590,7 @@ export function startWorld(root, opts) {
     if (G3.auto) { const ch = G3.tick(dt); if (ch) gfxBtn.textContent = `Graphics: Auto (${GFX[ch].name})`; }
     // frames a second (Settings > Show FPS)
     if (!hudFps.hidden && dt > 0 && dt < 0.5) { fpsAvg += (1 / dt - fpsAvg) * 0.08; fpsT += dt; if (fpsT > 0.5) { fpsT = 0; hudFps.textContent = Math.round(fpsAvg) + ' FPS'; } }
-    if (isV2 && R.setDyn) frameV2();
+    if (isV2 && R.setDyn) frameV2(px, py, pz);
     R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, lines, far: G3.far || 230, skyClouds: isV2 && G3.clouds !== false, player: [S.p.x, S.p.y, S.p.z] });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 

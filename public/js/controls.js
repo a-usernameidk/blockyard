@@ -18,7 +18,8 @@ export const ACTIONS = [
   ['spec', 'Spectate', 'KeyV'],
   ['bag', 'Backpack (hotbar worlds)', 'Backquote'],
   ['build', 'Build mode (server Builders)', 'KeyG'],
-  ['fly', 'Fly on/off (admins)', 'KeyF'],
+  ['use', 'Use / interact (cars, doors, fishing)', 'KeyF'],
+  ['fly', 'Fly on/off (admins)', 'KeyH'],
   ['down', 'Fly down (admins)', 'KeyC'],
 ];
 const DEFAULT = Object.fromEntries(ACTIONS.map(([a, , k]) => [a, k]));

@@ -1,6 +1,10 @@
 // The built-in 3D worlds: the Plaza and Snowy Town (hangouts), one world per minigame, and the obbies.
 // Each one is built by code the first time it's needed. `way` is the route the test bot follows.
 import { beachWorld } from './beach.js';
+import { roadWorld } from './game_road.js';
+import { greyWorld } from './game_grey.js';
+import { reelWorld } from './game_reel.js';
+import { crownWorld } from './game_crown.js';
 import { normalizeParts } from './parts.js';
 import { Grid, B, encodeBlocks } from './world.js';
 import { SPOTS, padColor, COLLECT_PAD } from './tycoon.js';
@@ -414,5 +418,17 @@ let beachCache = null;
 export const BEACH = { id: 'beach', name: 'Sunset Beach', mode: 'hangout', sky: 'sunset', v2: true,
   blurb: 'Engine v2 showcase: swim in a rolling sea, walk through real grass, ride the boat and the lift, play volleyball and find 6 shells.',
   get() { if (!beachCache) beachCache = { world: normalizeParts(beachWorld()).world, way: [] }; return beachCache; } };
-export const WORLDS3D = [PLAZA, BEACH, TOWN, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA, TYCOON, SUNNY, TOWER, LAVA, FACTORY, SKY];
+// Blockyard's own games made with Engine v2 (parts + Blockscript). Each one is built by its own file, the same
+// way every time, so the server can check runs. "premade" puts them in the Games row and lets players open a
+// copy in the builder. long: a run may take up to 20 minutes to check.
+const v2game = (def, make) => { let cache = null; return { ...def, v2: true, premade: true, make, get() { if (!cache) cache = { world: normalizeParts(make()).world, way: [] }; return cache; } }; };
+export const ROAD = v2game({ id: 'rustyroad', name: 'Rusty Road', mode: 'obby', sky: 'sunset', reward: 150, long: true,
+  blurb: 'A desert road trip. Fix up the old buggy, fill the tank and drive to the oasis: fuel stops, falling rocks, a tar jump and a sandstorm.' }, roadWorld);
+export const GREY = v2game({ id: 'greyscale', name: 'Greyscale', mode: 'obby', sky: 'night', reward: 200, long: true,
+  blurb: 'Escape the grey halls: find 4 keys, switch on 3 breakers and call the elevator. When the lights go out, hide in a locker.' }, greyWorld);
+export const REEL = v2game({ id: 'reelrivals', name: 'Reel Rivals', mode: 'hangout', sky: 'day',
+  blurb: 'Fish from the dock or sail out: the reef and the deep water have the best fish, and a shark. Sell your catch, upgrade your rod, boat and bucket.' }, reelWorld);
+export const CROWN = v2game({ id: 'crownchaos', name: 'Crown Chaos', mode: 'hangout', sky: 'day',
+  blurb: 'Every 45 seconds one player gets the crown and its powers: blast, freeze, lava floor, upside-down gravity. Everyone else tries to survive. Best with friends.' }, crownWorld);
+export const WORLDS3D = [PLAZA, BEACH, TOWN, ROAD, GREY, REEL, CROWN, MG_RACE, MG_TAG, MG_PAINT, MG_KOTH, MG_LAVA, TYCOON, SUNNY, TOWER, LAVA, FACTORY, SKY];
 export const builtinWorld = (id) => WORLDS3D.find((w) => w.id === id) || null;

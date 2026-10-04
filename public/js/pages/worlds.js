@@ -45,13 +45,13 @@ $('#announce-x').addEventListener('click', () => { store.set('announce-hidden', 
 
 /* ---------------- cards ---------------- */
 const builtinThumbs = new Map();
-export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, dislikes, done, game, stars, tycoon }) {
+export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, dislikes, done, game, stars, tycoon, premade }) {
   const cv = el('canvas', { class: 'thumb3d', 'aria-hidden': 'true' });
   requestAnimationFrame(() => drawWorldThumb(cv, thumb, sky));
   const n = online.worlds[id] || 0;
   const meta = el('div', { class: 'card-meta' },
     diffTag(stars),
-    el('span', { class: 'tag tag-3d' + (game || tycoon ? ' tag-game' : '') }, tycoon ? 'Your own town' : game ? GAMES[game].name : mode === 'hangout' ? 'Hangout' : 'Obby'),
+    el('span', { class: 'tag tag-3d' + (game || tycoon ? ' tag-game' : '') }, tycoon ? 'Your own town' : game ? GAMES[game].name : premade ? (mode === 'hangout' ? 'Game' : 'Game with a goal') : mode === 'hangout' ? 'Hangout' : 'Obby'),
     n ? el('span', { class: 'tag tag-live' }, `${n} playing`) : null,
     reward ? el('span', { class: 'tag tag-pay' }, done ? 'Paid out' : `Pays ${reward} coins`) : null,
     plays != null ? el('span', { class: 'tag' }, plural(plays, 'visit')) : null,
@@ -62,11 +62,11 @@ export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays
       el('div', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go(`#/w/${id}/play`) }, 'Play'), el('button', { class: 'btn', type: 'button', onclick: () => go('#/w/' + id) }, 'Servers'))));
 }
 export function builtinCards(only) {
-  const kind = (w) => (w.game || w.tycoon ? 'games' : w.mode === 'hangout' ? 'hangout' : 'obby');
+  const kind = (w) => (w.premade ? 'premade' : w.game || w.tycoon ? 'games' : w.mode === 'hangout' ? 'hangout' : 'obby');
   return WORLDS3D.filter((w) => !w.hidden && (!only || kind(w) === only)).map((w) => {
     if (!builtinThumbs.has(w.id)) builtinThumbs.set(w.id, thumbOfWorld(w.get().world));
     const done = progress.level('w:' + w.id);
-    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, tycoon: w.tycoon, stars: starsFor('w:' + w.id) });
+    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, tycoon: w.tycoon, premade: w.premade, stars: starsFor('w:' + w.id) });
   });
 }
 export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, thumb: g.thumb, plays: g.plays, likes: g.likes, dislikes: g.dislikes, stars: g.stars, reward: g.pays || g.reward });
@@ -76,6 +76,7 @@ const wl = { sort: 'top', page: 0, busy: false };
 async function showWorlds(jump) {
   show('worlds');
   await loadOnline(true);
+  $('#worlds-premade').replaceChildren(...builtinCards('premade'));
   $('#worlds-hangout').replaceChildren(...builtinCards('hangout'));
   $('#worlds-games').replaceChildren(...builtinCards('games'));
   $('#worlds-builtin').replaceChildren(...builtinCards('obby'));
@@ -148,7 +149,7 @@ async function showWorld(id) {
   const done = progress.level('w:' + id);
   page.replaceChildren(
     el('div', { class: 'world-hero' }, el('div', { class: 'hero-thumb' }, cv, diffFace(w.stars, 64)), el('div', { class: 'world-info' },
-      el('p', { class: 'detail-kicker' }, w.builtin && builtinWorld(id).tycoon ? 'Your own town' : w.world.game ? `Minigame: ${GAMES[w.world.game].name}` : w.builtin && builtinWorld(id).game ? 'Minigame' : w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
+      el('p', { class: 'detail-kicker' }, w.builtin && builtinWorld(id).tycoon ? 'Your own town' : w.world.game ? `Minigame: ${GAMES[w.world.game].name}` : w.builtin && builtinWorld(id).game ? 'Minigame' : w.builtin && builtinWorld(id).premade ? 'Blockyard game' : w.mode === 'hangout' ? 'Hangout' : 'Obby', w.by ? [' by ', el('a', { class: 'linkish', href: '#/u/' + w.by }, w.by)] : ' by Blockyard'),
       el('h1', {}, w.name),
       w.blurb ? el('p', { class: 'lede' }, w.blurb) : null,
       el('div', { class: 'card-meta' },
@@ -161,6 +162,8 @@ async function showWorld(id) {
       el('div', { class: 'row' },
         el('button', { class: 'btn btn-big btn-grass', type: 'button', onclick: () => go(`#/w/${id}/play`) }, session.user ? 'Play' : 'Play solo'),
         session.user ? null : el('button', { class: 'btn btn-sun', type: 'button', onclick: () => needLogin('Playing with others and chat need an account.') }, 'Log in to play with others'),
+        // Blockyard's own Engine v2 games can be opened in the builder: you get your own copy to change
+        w.builtin && builtinWorld(id).premade ? el('button', { class: 'btn', type: 'button', onclick: () => dispatchEvent(new CustomEvent('by:remix3d', { detail: { ...JSON.parse(JSON.stringify(builtinWorld(id).get().world)), n: 'My ' + w.name } })) }, '🛠️ Open a copy in the builder') : null,
         w.builtin ? null : rateButtons(id),
         w.builtin ? null : el('button', { class: 'btn btn-ghost', type: 'button', onclick: () => (session.user ? openReport(id) : needLogin('Reporting needs an account.')) }, 'Report')))),
     w.mode === 'hangout' ? null : el('div', {}, el('h2', {}, 'Fastest times'), boardBox),

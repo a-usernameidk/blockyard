@@ -708,6 +708,10 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   let lights = [], lightCount = 0;
   const lp = new Float32Array(48), lc = new Float32Array(48);
   function setLights(list) { lights = list || []; }
+  // dark(0..1) from a world's script: dims the sun, the sky's light and the sky itself. Lamps keep shining.
+  let darkK = 1;
+  function setDark(d) { darkK = 1 - Math.max(0, Math.min(1, Number(d) || 0)) * 0.97; }
+  const dim = (a) => (darkK === 1 ? a : [a[0] * darkK, a[1] * darkK, a[2] * darkK]);
   function packLights() {
     const e = state.eye || [0, 0, 0];
     const near = lights.filter((l) => !l.hide).map((l) => [l, (l.p[0] - e[0]) ** 2 + (l.p[1] - e[1]) ** 2 + (l.p[2] - e[2]) ** 2 - l.range * l.range]).sort((a, b) => a[1] - b[1]).slice(0, 12);
@@ -836,8 +840,8 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   }
   function lightUniforms(prog) {
     const u = prog.u;
-    gl.uniform3fv(u.u_sunDir, L.dir); gl.uniform3fv(u.u_sunCol, L.sun); gl.uniform3fv(u.u_skyCol, L.sky); gl.uniform3fv(u.u_groundCol, L.ground);
-    gl.uniform3fv(u.u_fog, hexRGB((SKIES[skyId] || SKIES.day).fog)); gl.uniform3fv(u.u_cam, state.eye); gl.uniform2f(u.u_fogr, state.fog[0], state.fog[1]);
+    gl.uniform3fv(u.u_sunDir, L.dir); gl.uniform3fv(u.u_sunCol, dim(L.sun)); gl.uniform3fv(u.u_skyCol, dim(L.sky)); gl.uniform3fv(u.u_groundCol, dim(L.ground));
+    gl.uniform3fv(u.u_fog, dim(hexRGB((SKIES[skyId] || SKIES.day).fog))); gl.uniform3fv(u.u_cam, state.eye); gl.uniform2f(u.u_fogr, state.fog[0], state.fog[1]);
     gl.uniform1f(u.u_exposure, L.exposure);
     gl.uniform1f(u.u_shadowOn, shadowOk ? 1 : 0); gl.uniform2f(u.u_texel, 1 / SM, 1 / SM);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, shadowTex); gl.uniform1i(u.u_shadow, 0);
@@ -969,9 +973,9 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
       gl.useProgram(prog.p);
       const rot = new Float32Array(state.view); rot[12] = rot[13] = rot[14] = 0;
       gl.uniformMatrix4fv(prog.u.u_inv, false, invert(mul(proj, rot)));
-      gl.uniform3fv(prog.u.u_top, hexRGB(sk.top)); gl.uniform3fv(prog.u.u_bottom, hexRGB(sk.bottom));
+      gl.uniform3fv(prog.u.u_top, dim(hexRGB(sk.top))); gl.uniform3fv(prog.u.u_bottom, dim(hexRGB(sk.bottom)));
       gl.uniform1f(prog.u.u_stars, skyId === 'night' || skyId === 'space' ? 1 : 0);
-      gl.uniform3fv(prog.u.u_sun, sk.sun); gl.uniform3fv(prog.u.u_sunTint, L.sun.map((v) => Math.min(1, v)));
+      gl.uniform3fv(prog.u.u_sun, sk.sun); gl.uniform3fv(prog.u.u_sunTint, dim(L.sun.map((v) => Math.min(1, v))));
       gl.uniform1f(prog.u.u_time, state.time); gl.uniform1f(prog.u.u_cloud, scene.skyClouds ? 1 : 0);
       quad(prog);
     }
@@ -1060,7 +1064,7 @@ export function createRendererHD(canvas, { dpr: dprFn = null, hd = {} } = {}) {
   canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
   resize();
   return {
-    gl, hd: true, setGrid, setParts, setDyn, dynMesh, dynMove, dynClear, setLights, setSky, markDirty, frame, project, ray, resize,
+    gl, hd: true, setGrid, setParts, setDyn, dynMesh, dynMove, dynClear, setLights, setDark, setSky, markDirty, frame, project, ray, resize,
     get lost() { return lost; },
     get stats() { return { faces: state.faces, chunks: chunks.size, drawn: state.drawn, hd: true, shadows: shadowOk, samples, grass: grassCount, ssao: SSAO, rays: RAYS, depth: depthOk }; },
     get size() { return { w: W, h: H }; },

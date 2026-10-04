@@ -539,7 +539,8 @@ async function finishWorld(ctx, user, id, replay) {
   const { db, env } = ctx;
   const w = builtinWorld(id);
   if (!w || w.mode !== 'obby') fail(404, 'Unknown obby.');
-  const run = await verify(env, { type: '3d', builtin: id, replay, opts: { maxSteps: maxSteps3d(env) } });
+  // (the long games, like Rusty Road, may take up to 20 minutes)
+  const run = await verify(env, { type: '3d', builtin: id, replay, opts: { maxSteps: w.long ? Math.max(maxSteps3d(env), 72000) : maxSteps3d(env) } });
   if (!run.won) fail(400, "That run didn't reach the goal.");
   const key = 'w:' + id;
   const board = await saveTime(db, user.id, key, run.time);
