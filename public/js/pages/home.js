@@ -59,12 +59,12 @@ async function showHome() {
   startTitle();
   renderTiles();
   renderToday();
-  $('#home-worlds').replaceChildren(...builtinCards());
+  $('#home-worlds').replaceChildren(...builtinCards().slice(0, 8));
   if (!(await isOnline()) || currentView() !== 'home') return;
   await loadOnline(true);
   if (currentView() !== 'home') return;
   renderTiles();
-  const cards = builtinCards();
+  const cards = builtinCards().slice(0, 8);
   try {
     const r = await api.list({ kind: '3d', sort: 'top' });
     for (const g of r.games.slice(0, 4)) cards.push(playerWorldCard(g));

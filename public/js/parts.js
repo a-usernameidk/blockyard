@@ -9,7 +9,7 @@ import { checkScripts, LIMITS_BS } from './bscript.js';
 
 export const ENGINE2 = 2;
 export const MAX_PARTS = 10000;
-export const WORLD2 = { x: 1000, y: 500, z: 1000 }; // parts must be inside 0..x, 0..y, 0..z
+export const WORLD2 = { x: 10000, y: 500, z: 1000 }; // parts must be inside 0..x, 0..y, 0..z (long one way: room for a real road trip)
 export const SIZE2 = { min: 0.1, max: 1000 }; // (a part can be as big as the whole world)
 
 export const SHAPES2 = [

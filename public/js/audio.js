@@ -80,6 +80,26 @@ const SOUNDS = {
 };
 
 const vol0 = (b) => { const v = getVolume(b); return v * v; }; // squared: the slider feels even from quiet to loud
+// A looping engine hum for cars and boats (Engine v2). Call it every frame with how fast you're going (0 to 1);
+// engine(-1) switches it off.
+let eng = null;
+export function engine(k, boat) {
+  if (k < 0 || !ac || muted || vol0('sfx') <= 0.001) {
+    if (eng) { try { eng.g.gain.setTargetAtTime(0.0001, ac.currentTime, 0.05); eng.o.stop(ac.currentTime + 0.4); eng.o2.stop(ac.currentTime + 0.4); } catch (e) { /* already stopped */ } eng = null; }
+    return;
+  }
+  const t = ac.currentTime;
+  if (!eng) {
+    const o = ac.createOscillator(), o2 = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain();
+    o.type = 'sawtooth'; o2.type = 'square'; f.type = 'lowpass'; g.gain.value = 0.0001;
+    o.connect(f); o2.connect(f); f.connect(g).connect(ac.destination); o.start(); o2.start();
+    eng = { o, o2, f, g };
+  }
+  const hz = (boat ? 36 : 46) + k * (boat ? 34 : 92);
+  eng.o.frequency.setTargetAtTime(hz, t, 0.08); eng.o2.frequency.setTargetAtTime(hz / 2, t, 0.08);
+  eng.f.frequency.setTargetAtTime(260 + k * 900, t, 0.1);
+  eng.g.gain.setTargetAtTime((0.014 + 0.026 * k) * vol0('sfx'), t, 0.1);
+}
 export function sfx(name) { const s = SOUNDS[name]; if (!s) return; bus = UI_SOUNDS.has(name) ? 'ui' : 'sfx'; try { s(); } finally { bus = 'sfx'; } }
 
 /* ---------------- music: tiny looping tunes made from beeps ---------------- */

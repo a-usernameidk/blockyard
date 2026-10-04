@@ -207,7 +207,7 @@ export function startBuilder2(root, opts) {
         pick('Special', q.k || '', [['', 'None'], ...Object.entries(SPECIALS2)], (x, v) => { if (v) x.k = v; else delete x.k; if (v === 'coin') x.nc = true; return x; }),
         slider('See-through', 't'), slider('Glow', 'g'),
         h('label', { class: 'check' }, walk, ' Players walk through it')),
-      numRow('Position', 'p', 0, 1000, snap || 0.05), numRow('Size', 'z', SIZE2.min, SIZE2.max, snap || 0.05), numRow('Turn', 'r', -360, 360, snap ? 15 : 1),
+      numRow('Position', 'p', 0, WORLD2.x, snap || 0.05), numRow('Size', 'z', SIZE2.min, SIZE2.max, snap || 0.05), numRow('Turn', 'r', -360, 360, snap ? 15 : 1),
       h('div', { class: 'b2-color' }, h('span', { class: 'b2-lbl' }, 'Color'), color, sw),
       motionRow(q, set), lightRow(q, set),
       many ? h('p', { class: 'small' }, `Changes go to all ${list.length} selected parts (position: use Move).`) : null);

@@ -535,12 +535,24 @@ async function finishLevel(ctx, user, id, replay) {
   return json({ ok: true, earned: (paid ? earned : 0) + extra.coins, bonus: extra.coins || undefined, note: extra.note, rated, stars, newStars: paid ? [0, 1, 2].filter((i) => fresh & (1 << i)) : [], time: run.time, wallet: await getWallet(db, user.id) });
 }
 
+// Beating a Blockyard world or game (or a player's game that pays) again: half its first-win coins, up to 5 paid
+// wins a day for each one.
+export const AGAIN = { perDay: 5 };
+async function againPay(db, uid, key, coins) {
+  if (!(coins > 0)) return { coins: 0 };
+  const day = startOfDay(Date.now()), dayKey = new Date(day).toISOString().slice(0, 10), why = 'run again ' + key;
+  const mine = await db.prepare('SELECT COUNT(*) AS n FROM ledger WHERE user_id = ? AND why = ? AND at >= ?').bind(uid, why, day).first();
+  if (mine.n >= AGAIN.perDay) return { coins: 0, note: `This one already paid ${AGAIN.perDay} times today. It pays again tomorrow.` };
+  const ok = await payOnce(db, [claimStmt(db, uid, `ag:${key}:${dayKey}:${mine.n}`), ...coinStmts(db, uid, coins, why)]).catch(() => false);
+  return ok ? { coins, note: `Beaten again: +${coins} coins (${mine.n + 1} of ${AGAIN.perDay} paid wins today).` } : { coins: 0 };
+}
+
 async function finishWorld(ctx, user, id, replay) {
   const { db, env } = ctx;
   const w = builtinWorld(id);
   if (!w || w.mode !== 'obby') fail(404, 'Unknown obby.');
-  // (the long games, like Rusty Road, may take up to 20 minutes)
-  const run = await verify(env, { type: '3d', builtin: id, replay, opts: { maxSteps: w.long ? Math.max(maxSteps3d(env), 72000) : maxSteps3d(env) } });
+  // (the long games, like Rusty Road, may take up to 30 minutes)
+  const run = await verify(env, { type: '3d', builtin: id, replay, opts: { maxSteps: w.long ? Math.max(maxSteps3d(env), 108000) : maxSteps3d(env) } });
   if (!run.won) fail(400, "That run didn't reach the goal.");
   const key = 'w:' + id;
   const board = await saveTime(db, user.id, key, run.time);
@@ -554,7 +566,8 @@ async function finishWorld(ctx, user, id, replay) {
   if (earned && fresh) stmts.push(xpStmt(db, user.id, popcount(fresh) * XP.star));
   const paid = await payOnce(db, stmts);
   const rated = await earnStars(db, user.id, key, starsFor(key));
-  const extra = !paid || !earned ? await replayPay(db, user.id, key, 'obby') : { coins: 0 };
+  // already beaten before this run: it pays again (half), whatever else this run earned
+  const extra = old.stars & 1 ? await againPay(db, user.id, key, Math.round(w.reward / 2)) : { coins: 0 };
   return json({ ok: true, earned: (paid ? earned : 0) + extra.coins, bonus: extra.coins || undefined, note: extra.note, rated, first: paid && !!(fresh & 1), noFall: !!(bits & 2), time: run.time, board, wallet: await getWallet(db, user.id) });
 }
 
@@ -580,7 +593,8 @@ async function finishGame(ctx, user, id, replay) {
     if (builder) return json({ ok: true, earned: 0, board, note: "You helped build this one, so it doesn't pay you." });
   }
   const done = await db.prepare('SELECT 1 FROM claims WHERE user_id = ? AND what = ?').bind(user.id, 'g:' + id).first();
-  if (done) return json({ ok: true, earned: 0, board, note: 'You already got the reward for this one.' });
+  // beaten before: it pays again (half), up to 5 times a day
+  if (done) { const extra = await againPay(db, user.id, 'g:' + id, Math.round(g.reward / 2)); return json({ ok: true, earned: extra.coins, bonus: extra.coins || undefined, board, note: extra.note || 'You already got the reward for this one.', wallet: extra.coins ? await getWallet(db, user.id) : undefined }); }
   try {
     await db.batch([db.prepare('INSERT INTO claims (user_id, what, at) VALUES (?, ?, ?)').bind(user.id, 'g:' + id, Date.now()), ...coinStmts(db, user.id, g.reward, 'run game ' + id)]);
   } catch (e) { if (isConstraint(e)) return json({ ok: true, earned: 0, board }); throw e; }

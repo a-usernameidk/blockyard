@@ -20,11 +20,11 @@ let game = null;
 onLeave('w3', () => { if (game) { game.stop(); game = null; } $('#w3-root').replaceChildren(); });
 
 /* ---------------- online counts ---------------- */
-let online = { worlds: {}, total: 0 }, onlineAt = 0;
+let online = { worlds: {}, total: 0, visits: {}, hot: {} }, onlineAt = 0;
 export async function loadOnline(force) {
   if (!force && Date.now() - onlineAt < 20000) return online;
   onlineAt = Date.now();
-  try { online = await api.online(); } catch (e) { /* offline */ }
+  try { online = { visits: {}, hot: {}, ...(await api.online()) }; } catch (e) { /* offline */ }
   const dot = $('#nav-online');
   dot.hidden = !online.total; dot.textContent = online.total ? String(online.total) : '';
   dot.title = online.total ? `${plural(online.total, 'player')} in worlds right now` : '';
@@ -45,7 +45,7 @@ $('#announce-x').addEventListener('click', () => { store.set('announce-hidden', 
 
 /* ---------------- cards ---------------- */
 const builtinThumbs = new Map();
-export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, dislikes, done, game, stars, tycoon, premade }) {
+export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays, likes, dislikes, done, game, stars, tycoon, premade, official }) {
   const cv = el('canvas', { class: 'thumb3d', 'aria-hidden': 'true' });
   requestAnimationFrame(() => drawWorldThumb(cv, thumb, sky));
   const n = online.worlds[id] || 0;
@@ -53,38 +53,102 @@ export function worldCard({ id, name, by, mode, sky, blurb, reward, thumb, plays
     diffTag(stars),
     el('span', { class: 'tag tag-3d' + (game || tycoon ? ' tag-game' : '') }, tycoon ? 'Your own town' : game ? GAMES[game].name : premade ? (mode === 'hangout' ? 'Game' : 'Game with a goal') : mode === 'hangout' ? 'Hangout' : 'Obby'),
     n ? el('span', { class: 'tag tag-live' }, `${n} playing`) : null,
-    reward ? el('span', { class: 'tag tag-pay' }, done ? 'Paid out' : `Pays ${reward} coins`) : null,
+    reward ? el('span', { class: 'tag tag-pay' }, done && official ? `Pays ${Math.round(reward / 2)} again` : done ? 'Paid out' : `Pays ${reward} coins`) : null,
     plays != null ? el('span', { class: 'tag' }, plural(plays, 'visit')) : null,
     likes || dislikes ? el('span', { class: 'tag' }, `👍 ${likes || 0}${dislikes ? `  👎 ${dislikes}` : ''}`) : null);
   return el('article', { class: 'card card-world' }, cv,
     el('div', { class: 'card-body' },
-      el('div', {}, el('h3', {}, name), by ? el('p', { class: 'by-line' }, 'by ', el('a', { class: 'linkish', href: '#/u/' + encodeURIComponent(by) }, by)) : null, blurb ? el('p', {}, blurb) : null, meta),
+      el('div', {}, el('h3', {}, name), by ? el('p', { class: 'by-line' }, 'by ', el('a', { class: 'linkish', href: '#/u/' + encodeURIComponent(by) }, by)) : official ? el('p', { class: 'by-line' }, 'by ', el('b', { class: 'by-us' }, 'Blockyard ✔')) : null, blurb ? el('p', {}, blurb) : null, meta),
       el('div', { class: 'row' }, el('button', { class: 'btn btn-grass', type: 'button', onclick: () => go(`#/w/${id}/play`) }, 'Play'), el('button', { class: 'btn', type: 'button', onclick: () => go('#/w/' + id) }, 'Servers'))));
 }
-export function builtinCards(only) {
-  const kind = (w) => (w.premade ? 'premade' : w.game || w.tycoon ? 'games' : w.mode === 'hangout' ? 'hangout' : 'obby');
-  return WORLDS3D.filter((w) => !w.hidden && (!only || kind(w) === only)).map((w) => {
-    if (!builtinThumbs.has(w.id)) builtinThumbs.set(w.id, thumbOfWorld(w.get().world));
-    const done = progress.level('w:' + w.id);
-    return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, tycoon: w.tycoon, premade: w.premade, stars: starsFor('w:' + w.id) });
-  });
-}
+// how popular one of our own worlds is: players in it right now count the most, then new visitors this week, then all visits
+const pop = (id) => (online.worlds[id] || 0) * 40 + (online.hot[id] || 0) * 3 + (online.visits[id] || 0) * 0.05;
+const kindOf = (w) => (w.premade ? 'premade' : w.game || w.tycoon ? 'games' : w.mode === 'hangout' ? 'hangout' : 'obby');
+const builtinCard = (w) => {
+  if (!builtinThumbs.has(w.id)) builtinThumbs.set(w.id, thumbOfWorld(w.thumbWorld ? w.thumbWorld() : w.get().world));
+  const done = progress.level('w:' + w.id);
+  return worldCard({ id: w.id, name: w.name, mode: w.mode, sky: w.sky, blurb: w.blurb, reward: w.reward, thumb: builtinThumbs.get(w.id), done: done && done.won, game: w.game, tycoon: w.tycoon, premade: w.premade, official: true, plays: online.visits[w.id] || undefined, stars: starsFor('w:' + w.id) });
+};
+// Blockyard's own worlds, most popular first (when it's a tie, the games go first) (only: 'premade' | 'games' | 'hangout' | 'obby')
+export function builtinList(only) { return WORLDS3D.filter((w) => !w.hidden && (!only || kindOf(w) === only)).map((w, i) => ({ w, i })).sort((a, b) => pop(b.w.id) - pop(a.w.id) || (b.w.premade ? 1 : 0) - (a.w.premade ? 1 : 0) || a.i - b.i).map((x) => x.w); }
+export function builtinCards(only) { return builtinList(only).map(builtinCard); }
 export const playerWorldCard = (g) => worldCard({ id: g.id, name: g.name, by: g.creator, mode: g.style, sky: g.theme, blurb: g.descr, thumb: g.thumb, plays: g.plays, likes: g.likes, dislikes: g.dislikes, stars: g.stars, reward: g.pays || g.reward });
 
 /* ---------------- the worlds page ---------------- */
-const wl = { sort: 'top', page: 0, busy: false };
-async function showWorlds(jump) {
+const wl = { sort: 'top', page: 0, busy: false, view: 'home', kind: '', q: '', stamp: 0 };
+/* The front page is three lines (Trending, Blockyard games, Made by players), each with More.
+   More, and Search, open the whole list: wl.view says which one. */
+const LISTS = { trending: '🔥 Trending', blockyard: 'Blockyard games', players: 'Made by players', search: 'Search' };
+const BY_KINDS = [['', 'All'], ['premade', 'Games'], ['hangout', 'Hangouts'], ['games', 'Minigames'], ['obby', 'Obbies']];
+const P_SORTS = [['top', 'Popular'], ['trending', 'Trending'], ['new', 'Newest'], ['reward', 'Pays coins'], ['rated', 'Rated ★']];
+async function showWorlds(view, opt) {
   show('worlds');
   await loadOnline(true);
-  $('#worlds-premade').replaceChildren(...builtinCards('premade'));
-  $('#worlds-hangout').replaceChildren(...builtinCards('hangout'));
-  $('#worlds-games').replaceChildren(...builtinCards('games'));
-  $('#worlds-builtin').replaceChildren(...builtinCards('obby'));
-  if (jump) requestAnimationFrame(() => $('#minigames').scrollIntoView({ block: 'start' }));
-  loadWorlds(true);
+  wl.view = LISTS[view] ? view : 'home';
+  if (opt && opt.kind !== undefined) wl.kind = opt.kind;
+  if (opt && opt.q !== undefined) wl.q = opt.q;
+  $('#worlds-home').hidden = wl.view !== 'home';
+  $('#worlds-list').hidden = wl.view === 'home';
+  $('#world-q').value = wl.view === 'search' ? wl.q : '';
+  if (wl.view === 'home') drawHome(); else drawList();
   renderFriendsOnline();
   if (session.user) checkFriends().then(renderFriendsOnline);
 }
+// trending: our worlds and players' worlds in one line, the busiest first
+const hotOf = (g) => (online.worlds[g.id] || 0) * 40 + (g.hot || 0) * 3 + (g.plays || 0) * 0.05 + (g.likes || 0) * 0.5;
+async function trendingCards(limit) {
+  let games = [];
+  try { if (await isOnline()) games = (await api.list({ kind: '3d', sort: 'trending' })).games; } catch (e) { /* just ours then */ }
+  const all = [...builtinList().map((w) => ({ score: pop(w.id), card: () => builtinCard(w) })), ...games.map((g) => ({ score: hotOf(g), card: () => playerWorldCard(g) }))];
+  return all.sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.card());
+}
+async function drawHome() {
+  $('#row-blockyard').replaceChildren(...builtinCards().slice(0, 12));
+  $('#row-trending').replaceChildren(...builtinCards().slice(0, 4));
+  const stamp = ++wl.stamp;
+  trendingCards(12).then((cards) => { if (stamp === wl.stamp) $('#row-trending').replaceChildren(...cards); });
+  const msg = $('#row-players-msg'); msg.textContent = '';
+  if (!(await isOnline())) { msg.textContent = 'Player worlds need the online version of Blockyard.'; return; }
+  try {
+    const r = await api.list({ kind: '3d', sort: 'top' });
+    if (stamp !== wl.stamp) return;
+    $('#row-players').replaceChildren(...r.games.slice(0, 12).map(playerWorldCard));
+    if (!r.games.length) msg.textContent = 'No player worlds yet. Build one in Create and publish it!';
+  } catch (e) { msg.textContent = e.message; }
+}
+function drawChips(list, current, pick) {
+  $('#worlds-chips').replaceChildren(...list.map(([v, name]) => el('button', { class: 'chip', type: 'button', 'aria-pressed': String(v === current), onclick: () => pick(v) }, name)));
+}
+function drawList() {
+  $('#worlds-list-h').textContent = wl.view === 'search' ? `Search: "${wl.q}"` : LISTS[wl.view];
+  $('#worlds-grid').replaceChildren(); $('#worlds-more').hidden = true; $('#worlds-msg').textContent = '';
+  if (wl.view === 'blockyard') {
+    drawChips(BY_KINDS, wl.kind, (v) => { wl.kind = v; drawList(); });
+    $('#worlds-grid').replaceChildren(...builtinCards(wl.kind || undefined));
+  } else if (wl.view === 'trending') {
+    drawChips([], '', () => {});
+    const stamp = ++wl.stamp;
+    $('#worlds-msg').textContent = 'Loading…';
+    trendingCards(60).then((cards) => { if (stamp !== wl.stamp) return; $('#worlds-grid').replaceChildren(...cards); $('#worlds-msg').textContent = ''; });
+  } else if (wl.view === 'players') {
+    drawChips(P_SORTS, wl.sort, (v) => { wl.sort = v; drawList(); });
+    loadWorlds(true);
+  } else {
+    // search: our own worlds by name or what they say, then players' worlds by name or maker
+    drawChips([], '', () => {});
+    const q = wl.q.toLowerCase();
+    const ours = builtinList().filter((w) => (w.name + ' ' + (w.blurb || '')).toLowerCase().includes(q));
+    $('#worlds-grid').replaceChildren(...ours.map(builtinCard));
+    loadWorlds(true);
+  }
+}
+$$('[data-wmore]').forEach((b) => b.addEventListener('click', () => go('#/worlds/' + b.dataset.wmore)));
+$('#worlds-back').addEventListener('click', () => go('#/worlds'));
+$('#world-search').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $('#world-q').value.trim().slice(0, 40);
+  if (q) go('#/worlds/search/' + encodeURIComponent(q)); else go('#/worlds');
+});
 // "Friends playing now" with a Join button
 function renderFriendsOnline() {
   const d = friendsNow(), box = $('#friends-online');
@@ -103,21 +167,24 @@ function boardList(b, compact) {
     b.me && b.me.rank > b.top.length ? el('li', { class: 'me' }, el('span', { class: 'rank' }, `#${b.me.rank}`), el('span', {}, me), el('span', {}, `${b.me.time.toFixed(2)}s`)) : null);
 }
 async function loadWorlds(reset) {
-  if (wl.busy) return;
+  // (a new list or search always starts, and the answer to an older one is thrown away; only "Load more" waits its turn)
+  if (wl.busy && !reset) return;
   wl.busy = true;
-  if (reset) { wl.page = 0; $('#worlds-grid').innerHTML = ''; }
+  const stamp = ++wl.stamp, view = wl.view, grid = $('#worlds-grid');
+  if (reset) wl.page = 0;
   const msg = $('#worlds-msg');
   if (!(await isOnline())) { msg.textContent = 'Player worlds need the online version of Blockyard.'; wl.busy = false; return; }
   msg.textContent = 'Loading…';
   try {
-    const r = await api.list({ kind: '3d', sort: wl.sort, page: wl.page, rewarding: wl.sort === 'reward' ? '1' : '' });
-    for (const g of r.games) $('#worlds-grid').append(playerWorldCard(g));
-    $('#worlds-more').hidden = !r.more;
-    msg.textContent = !r.games.length && reset ? (wl.sort === 'reward' ? 'No player worlds pay coins right now.' : wl.sort === 'rated' ? 'No rated worlds yet. Admins give great worlds a star rating.' : 'No player worlds yet. Go to Create and build the first one!') : '';
-  } catch (e) { msg.textContent = e.message; }
-  wl.busy = false;
+    const r = await api.list(view === 'search' ? { kind: '3d', sort: 'top', q: wl.q, page: wl.page } : { kind: '3d', sort: wl.sort, page: wl.page, rewarding: wl.sort === 'reward' ? '1' : '' });
+    if (stamp === wl.stamp && view === wl.view) {
+      for (const g of r.games) grid.append(playerWorldCard(g));
+      $('#worlds-more').hidden = !r.more;
+      msg.textContent = grid.children.length ? '' : view === 'search' ? 'Nothing found. Try another word.' : wl.sort === 'reward' ? 'No player worlds pay coins right now.' : wl.sort === 'rated' ? 'No rated worlds yet. Admins give great worlds a star rating.' : 'No player worlds yet. Build one in Create and publish it!';
+    }
+  } catch (e) { if (stamp === wl.stamp) msg.textContent = e.message; }
+  if (stamp === wl.stamp) wl.busy = false;
 }
-$$('[data-wsort]').forEach((b) => b.addEventListener('click', () => { wl.sort = b.dataset.wsort; $$('[data-wsort]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); loadWorlds(true); }));
 $('#worlds-more').addEventListener('click', () => { wl.page++; loadWorlds(false); });
 $('#join-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -156,7 +223,7 @@ async function showWorld(id) {
         diffTag(w.stars),
         el('span', { class: 'tag' }, SKIES[w.sky] ? SKIES[w.sky].name : 'Sky'),
         online.worlds[id] ? el('span', { class: 'tag tag-live' }, `${online.worlds[id]} playing now`) : null,
-        w.reward ? el('span', { class: 'tag tag-pay' }, w.builtin ? `First clear pays ${w.reward} coins, +25 with no falls, +2 per coin` : `Pays ${w.reward} coins the first time you beat it`) : null,
+        w.reward ? el('span', { class: 'tag tag-pay' }, w.builtin ? `First win pays ${w.reward} coins (+25 with no falls, +2 per coin). After that: ${Math.round(w.reward / 2)} each win, 5 times a day${builtinWorld(id).long ? '. A run can take up to 30 minutes' : ''}` : `Pays ${w.reward} coins the first time you beat it`) : null,
         done && done.won ? el('span', { class: 'tag' }, `Your best: ${done.time}s`) : null,
         w.plays != null ? el('span', { class: 'tag' }, plural(w.plays, 'visit')) : null),
       el('div', { class: 'row' },
@@ -293,14 +360,14 @@ async function enterWorld(id, code) {
       if (r.noProof) return { text: 'Flying or building was used in this server, so this run does not count.' };
       const res = await api.finish(w.builtin ? { kind: 'world', id, replay: r.replay } : { kind: 'game', id, replay: r.replay });
       if (res.wallet) setWallet(res.wallet);
-      const coins = (res.earned ? `+${res.earned} coins${res.bonus ? ' (replay bonus)' : ''}! ` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '') + (res.rated ? `+${res.rated}★ difficulty stars! ` : '');
+      const coins = (res.earned ? `+${res.earned} coins! ${res.bonus && res.note ? res.note + ' ' : ''}` : w.reward ? (res.note || 'You already got the coins for this one.') + ' ' : '') + (res.rated ? `+${res.rated}★ difficulty stars! ` : '');
       const b = res.board;
       const rank = b && b.me ? (b.newBest ? `New best: you're #${b.me.rank} on the leaderboard!` : `Your best is #${b.me.rank} (${b.me.time.toFixed(2)}s).`) : '';
       const vb = !w.builtin && !w.stars && w.by !== session.user.name ? voteBox(id, w.myVote) : null;
       return { text: coins + rank, extra: el('div', {}, b ? boardList(b, true) : null, vb) };
     },
   });
-  if (w.builtin) progress.visit(id);
+  if (w.builtin) { progress.visit(id); const seen = 'visited:' + id; try { if (!sessionStorage.getItem(seen)) { sessionStorage.setItem(seen, '1'); api.visit(id).catch(() => {}); } } catch (e) { /* ok */ } }
   if (!w.builtin) { const seen = 'played:' + id; try { if (!sessionStorage.getItem(seen)) { sessionStorage.setItem(seen, '1'); api.play(id).catch(() => {}); } } catch (e) { /* ok */ } }
   if (multi) setTimeout(() => loadOnline(true), 3000);
   // count chat for the badge
@@ -309,7 +376,9 @@ async function enterWorld(id, code) {
 let firstTicket = null;
 
 addRoute(/^#\/worlds$/, () => showWorlds());
-addRoute(/^#\/worlds\/games$/, () => showWorlds(true));
+addRoute(/^#\/worlds\/games$/, () => showWorlds('blockyard', { kind: 'games' })); // (the Minigames button on the home page)
+addRoute(/^#\/worlds\/(trending|blockyard|players)$/, (m) => showWorlds(m[1], m[1] === 'blockyard' ? { kind: '' } : undefined));
+addRoute(/^#\/worlds\/search\/(.{1,160})$/, (m) => { let q = ''; try { q = decodeURIComponent(m[1]).slice(0, 40); } catch (e) { /* a broken link */ } showWorlds(q ? 'search' : 'home', { q }); });
 addRoute(/^#\/w\/([A-Za-z0-9-]+)\/play$/, (m) => enterWorld(m[1]));
 addRoute(/^#\/w\/([A-Za-z0-9-]+)$/, (m) => showWorld(m[1]));
 addRoute(/^#\/join\/([A-Za-z0-9]+)$/, (m) => enterWorld(null, m[1]));

@@ -127,6 +127,7 @@ export const api = {
   visibility: (id, visibility) => request('PUT', `/games/${enc(id)}`, { only: 'visibility', visibility }),
   remove: (id, editKey) => request('DELETE', `/games/${enc(id)}`, null, editKey ? { 'x-edit-key': editKey } : {}),
   play: (id) => request('POST', `/games/${enc(id)}/play`),
+  visit: (id) => request('POST', `/visit/${enc(id)}`),
   randomWorld: () => request('GET', '/games/random'),
   like: (id) => request('POST', `/games/${enc(id)}/like`),
   report: (id, reason) => request('POST', `/games/${enc(id)}/report`, { reason }),

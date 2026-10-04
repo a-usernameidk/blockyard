@@ -1287,6 +1287,18 @@ canvas.pfp { display: inline-block; vertical-align: middle; border-radius: 50%; 
 .gfx-row .seg-btn { padding: 5px 11px; font-size: 13px; }
 .w3-fps { font-variant-numeric: tabular-nums; }
 
+/* ---------- the Worlds page: search, and one line of cards per row ---------- */
+.world-search { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 6px; }
+.world-search input { flex: 1; min-width: 180px; }
+.row-scroll { display: flex; gap: 16px; overflow-x: auto; padding: 4px 4px 14px; margin: 0 -4px; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.row-scroll > .card { flex: 0 0 250px; scroll-snap-align: start; }
+/* (in a row the cards stay short: three lines of what it is, the rest is on its page) */
+.row-scroll .card-body > div > p:not(.by-line) { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.row-scroll:empty::after { content: "Loading…"; color: var(--muted); font-weight: 700; padding: 20px 4px; }
+.by-us { background: var(--sun); color: var(--ink); border: 2px solid var(--line); border-radius: 8px; padding: 0 6px; font-size: 12px; }
+#worlds-chips { margin: 0 0 14px; }
+@media (max-width: 760px) { .row-scroll > .card { flex-basis: 190px; } .row-scroll { gap: 10px; } }
+
 /* ---------- engine v2 games: the Use hint, the Use button for touch, and a script's own buttons ---------- */
 .w3-prompt { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); background: rgba(29, 35, 64, .88); color: #fff; border: 3px solid #fff; border-radius: 14px; padding: 6px 14px; font: 800 17px Nunito, system-ui, sans-serif; pointer-events: none; white-space: nowrap; max-width: 90%; overflow: hidden; text-overflow: ellipsis; z-index: 3; }
 .w3-prompt kbd, .w3-sbtns kbd { display: inline-block; min-width: 24px; text-align: center; background: var(--sun); color: var(--ink); border: 2px solid var(--ink); border-radius: 7px; padding: 0 6px; font: 800 14px Nunito, system-ui, sans-serif; }

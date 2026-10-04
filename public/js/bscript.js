@@ -235,6 +235,9 @@ export function createRunner(scripts, host) {
       const i = host.near(text(a[0]), d); return i < 0 ? null : partH(i);
     },
     dist: (a, l) => { if (!a[0] || a[0].__part == null) throw new BSError('dist needs a part: dist(part("Door")).', l); return host.dist(a[0].__part); },
+    // sees(part, 40): can the part see the player (no wall in between, no further than 40)? looking(part, 50): is it on the player's screen?
+    sees: (a, l) => { if (!a[0] || a[0].__part == null) throw new BSError('sees needs a part: sees(part("Guard"), 40).', l); return host.sees(a[0].__part, a.length > 1 ? num(a[1], 'sees', l) : 40); },
+    looking: (a, l) => { if (!a[0] || a[0].__part == null) throw new BSError('looking needs a part: looking(part("Statue")).', l); return host.looking(a[0].__part, a.length > 1 ? num(a[1], 'looking', l) : 50); },
     prompt: (a) => { host.prompt(a.length && a[0] != null ? text(a[0]).slice(0, 60) : ''); return null; },
     // vehicles: drive(top speed, turning) turns walking into driving; sail is the same but floats on water; walk() goes back
     // (the third number is how high the seat is, so Pip is drawn sitting in it)

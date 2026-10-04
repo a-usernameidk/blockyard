@@ -222,31 +222,33 @@
 <!-- ============ WORLDS (3D) ============ -->
 <section id="view-worlds" class="view" hidden>
   <div class="page-head">
-    <div><h1>Worlds</h1><p class="lede">3D places to hang out and obbies to beat. Log in to see other players and chat.</p><button class="btn btn-sun btn-big" id="random-world" type="button">🎲 Random world</button></div>
+    <div><h1>Worlds</h1><p class="lede">3D games, hangouts and obbies. Log in to see other players and chat.</p></div>
     <form class="join-code" id="join-form"><label for="join-code">Got a server code?</label><div class="row"><input id="join-code" placeholder="Server code" maxlength="12" autocomplete="off"><button class="btn btn-sun" type="submit">Join</button></div></form>
   </div>
+  <form class="world-search" id="world-search" role="search">
+    <input id="world-q" type="search" placeholder="Search worlds and games by name or maker" maxlength="40" autocomplete="off" aria-label="Search worlds">
+    <button class="btn btn-sun" type="submit">🔍 Search</button>
+    <button class="btn" id="random-world" type="button">🎲 Random</button>
+  </form>
   <div id="friends-online" hidden></div>
-  <h2>Games</h2>
-  <p class="small">Blockyard's own games, made with Engine v2. Open any of them in the builder (the button is on the game's page) to see how it works and make your own version.</p>
-  <div class="grid" id="worlds-premade"></div>
-  <h2>Hangouts</h2>
-  <div class="grid" id="worlds-hangout"></div>
-  <h2 id="minigames">Minigames</h2>
-  <p class="small">Each minigame has its own servers. Wait in the lobby (the shop keeper is there too) and the next round starts when 2 players are in.</p>
-  <div class="grid" id="worlds-games"></div>
-  <h2>Obbies</h2>
-  <div class="grid" id="worlds-builtin"></div>
-  <div class="section-head"><h2>Player worlds</h2>
-    <div class="chips" role="group" aria-label="Sort">
-      <button class="chip" data-wsort="top" aria-pressed="true">Popular</button>
-      <button class="chip" data-wsort="new" aria-pressed="false">Newest</button>
-      <button class="chip" data-wsort="reward" aria-pressed="false">Pays coins</button>
-      <button class="chip" data-wsort="rated" aria-pressed="false">Rated ★</button>
-    </div>
+  <!-- the front page: one line each, with More -->
+  <div id="worlds-home">
+    <div class="section-head"><h2>🔥 Trending</h2><button class="btn" type="button" data-wmore="trending">More →</button></div>
+    <div class="row-scroll" id="row-trending"></div>
+    <div class="section-head"><h2>Blockyard games</h2><button class="btn" type="button" data-wmore="blockyard">More →</button></div>
+    <div class="row-scroll" id="row-blockyard"></div>
+    <div class="section-head"><h2>Made by players</h2><button class="btn" type="button" data-wmore="players">More →</button></div>
+    <div class="row-scroll" id="row-players"></div>
+    <p class="msg" id="row-players-msg"></p>
   </div>
-  <div class="grid" id="worlds-grid"></div>
-  <p class="msg" id="worlds-msg"></p>
-  <div class="row center"><button class="btn" id="worlds-more" hidden>Load more</button></div>
+  <!-- More / search: the whole list -->
+  <div id="worlds-list" hidden>
+    <div class="section-head"><h2 id="worlds-list-h"></h2><button class="btn" type="button" id="worlds-back">‹ Back</button></div>
+    <div class="chips" id="worlds-chips" role="group" aria-label="Filter"></div>
+    <div class="grid" id="worlds-grid"></div>
+    <p class="msg" id="worlds-msg"></p>
+    <div class="row center"><button class="btn" id="worlds-more" hidden>Load more</button></div>
+  </div>
 </section>
 
 <!-- ============ ONE WORLD ============ -->

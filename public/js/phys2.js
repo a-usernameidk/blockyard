@@ -3,7 +3,7 @@
 // with this exact file. The player is a box (P3.halfW wide, P3.height tall) that never turns.
 // Parts are convex solids (planes) or balls; parts live in a grid of 8x8 columns so only nearby ones are checked.
 import { P3, STEP3, YAWS } from './physics3d.js';
-import { solidOf, rotMat, motionAt, MATERIALS2, MATERIAL2 } from './parts.js';
+import { solidOf, rotMat, motionAt, MATERIALS2, MATERIAL2, WORLD2 } from './parts.js';
 import { decodeReplay } from './replay.js';
 import { createRunner } from './bscript.js';
 
@@ -141,7 +141,7 @@ function scriptHost(S) {
       const sec = (k) => (a.length > k ? a[k] : 0);
       if (m === 'move' || m === 'moveTo') {
         const to = m === 'move' ? [x.bp[0] + a[0], x.bp[1] + a[1], x.bp[2] + a[2]] : [a[0], a[1], a[2]];
-        const b = to.map((v, k) => Math.round(Math.min(k === 1 ? 500 : 1000, Math.max(k === 1 ? -100 : 0, Number(v) || 0)) * 1e4) / 1e4);
+        const b = to.map((v, k) => Math.round(Math.min(k === 1 ? WORLD2.y : k === 0 ? WORLD2.x : WORLD2.z, Math.max(k === 1 ? -100 : 0, Number(v) || 0)) * 1e4) / 1e4);
         if (sec(3) > 0) x.tw = { a: x.bp.slice(), b, t0: S.steps, n: steps(sec(3)) }; else { x.tw = null; x.bp = b; }
       } else if (m === 'turn' || m === 'turnTo') {
         const b = m === 'turn' ? [x.br[0] + a[0], x.br[1] + a[1], x.br[2] + a[2]] : [a[0], a[1], a[2]];
@@ -171,7 +171,7 @@ function scriptHost(S) {
     playerDo: (m, a) => {
       if (m === 'kill') S.scriptKill = true;
       else if (m === 'win') S.scriptWin = true;
-      else if (m === 'teleport') { S.p.x = Math.max(0, Math.min(1000, a[0])); S.p.y = Math.max(-50, Math.min(600, a[1])); S.p.z = Math.max(0, Math.min(1000, a[2])); S.v.x = S.v.y = S.v.z = 0; if (S.drive) S.drive.v = 0; freeSpot(S); }
+      else if (m === 'teleport') { S.p.x = Math.max(0, Math.min(WORLD2.x, a[0])); S.p.y = Math.max(-50, Math.min(600, a[1])); S.p.z = Math.max(0, Math.min(WORLD2.z, a[2])); S.v.x = S.v.y = S.v.z = 0; if (S.drive) S.drive.v = 0; freeSpot(S); }
       else if (m === 'speed') S.smod.speed = Math.max(0, Math.min(4, a[0]));
       else if (m === 'jump') S.smod.jump = Math.max(0, Math.min(4, a[0]));
       else if (m === 'gravity') S.smod.grav = Math.max(-1, Math.min(4, a[0]));
@@ -188,6 +188,27 @@ function scriptHost(S) {
     // the closest part with that name (not hidden) within d studs, or -1; and how far the player is from part i
     near: (name, d) => { let best = -1, bd = d; for (const i of byName.get(name) || []) { if (hidden(S, i)) continue; const dd = distTo(S, i); if (dd <= bd) { bd = dd; best = i; } } return best; },
     dist: (i) => distTo(S, i),
+    // can this part "see" the player? Nothing solid on the straight line from its middle to the player's head, and no further than `far`.
+    sees: (i, far) => {
+      const x = S.live.get(i), p = x ? x.p : S.solids[i].q.p, o = [p[0], p[1], p[2]];
+      const dx = S.p.x - o[0], dy = S.p.y + S.ht * 0.8 - o[1], dz = S.p.z - o[2], len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (len > far) return false;
+      if (len < 0.05) return true;
+      const d = [dx / len, dy / len, dz / len];
+      for (const k of nearby(S, Math.min(o[0], S.p.x) - 0.5, Math.max(o[0], S.p.x) + 0.5, Math.min(o[2], S.p.z) - 0.5, Math.max(o[2], S.p.z) + 0.5)) {
+        const s = S.solids[k]; if (k === i || !s.walk || s.water || (s.q.t || 0) > 0.45 || hidden(S, k)) continue;
+        const F = S.live.get(k); if (F && F.fol) continue;
+        const t = rayHit(s, o, d, len); if (t != null && t < len - 0.05) return false;
+      }
+      return true;
+    },
+    // is the part on the player's screen, more or less? (within `deg` degrees of where the camera points, left to right)
+    looking: (i, deg) => {
+      const x = S.live.get(i), p = x ? x.p : S.solids[i].q.p, dx = p[0] - S.p.x, dz = p[2] - S.p.z, len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 0.05) return true;
+      const yaw = S.yaw || 0;
+      return (dx * SIN[yaw] - dz * COS[yaw]) / len >= r6f(Math.cos(Math.max(1, Math.min(180, deg)) * Math.PI / 180)) ;
+    },
     // things only the game on your screen does (the server skips them when it replays a run)
     prompt: (t) => S.script.push({ t: 'prompt', text: t }),
     button: (label, on) => S.script.push({ t: 'button', label, on }),
@@ -376,7 +397,7 @@ function die(S) {
 export function step2(S, value) {
   if (S.won) return;
   const bits = value >> 8, yaw = value & 255, dt = STEP3;
-  S.steps++; S.runSteps++;
+  S.steps++; S.runSteps++; S.yaw = yaw;
   const reset = (bits & 32) ? 1 : 0;
   if (reset && !S.lastReset) { S.lastReset = 1; die(S); if (S.runner) S.runner.fire('die'); return; }
   S.lastReset = reset;
@@ -417,7 +438,9 @@ export function step2(S, value) {
       const rate = (f === 0 ? 9 : D.v * f < 0 ? 42 : Math.max(10, D.top * 0.6)) * dt;
       D.v = r6f(D.v + Math.max(-rate, Math.min(rate, target - D.v)));
       const grip = Math.min(1, Math.abs(D.v) / 6);
-      if (sd && grip > 0) S.head = Math.round((((S.head + sd * D.turn * HEADS / 360 / 60 * grip * (D.v < 0 ? -1 : 1)) % HEADS) + HEADS) % HEADS * 1000) / 1000;
+      // (full steering at low speed, gentler flat out, so it doesn't twitch on a straight road)
+      const ease = r6f(grip * (1 - 0.45 * Math.min(1, Math.abs(D.v) / Math.max(1, D.top))));
+      if (sd && grip > 0) S.head = Math.round((((S.head + sd * D.turn * HEADS / 360 / 60 * ease * (D.v < 0 ? -1 : 1)) % HEADS) + HEADS) % HEADS * 1000) / 1000;
     }
     hi = headIdx(S.head);
     S.v.x = HSIN[hi] * D.v; S.v.z = -HCOS[hi] * D.v;

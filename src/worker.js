@@ -243,6 +243,7 @@ async function handle(request, env, url) {
 
   // multiplayer
   if (path === '/online' && method === 'GET') return online(ctx);
+  if ((m = path.match(/^\/visit\/([a-z0-9]{2,20})$/)) && method === 'POST') return visitWorld(ctx, m[1]);
   if (path === '/servers' && method === 'GET') return listServers(ctx);
   if (path === '/servers' && method === 'POST') return privateServer(ctx, await body(request));
   if ((m = path.match(/^\/servers\/([A-Za-z0-9]{8})$/)) && method === 'PUT') return serverBots(ctx, m[1], await body(request));
@@ -684,6 +685,11 @@ async function listGames(ctx) {
     where.push("(name LIKE ? ESCAPE '\\' OR creator LIKE ? ESCAPE '\\')"); args.push(like, like);
   }
   const cols = kind === '3d' ? 'id, kind, name, creator, descr, style, theme, plays, likes, created_at, visibility, reward, stars, w, h, thumb' : '*';
+  if (url.searchParams.get('sort') === 'trending') {
+    // trending: the most new visitors in the last week (then likes and all-time visits)
+    const { results } = await db.prepare(`SELECT ${cols}, (SELECT COUNT(*) FROM plays p WHERE p.game_id = games.id AND p.at > ?) AS hot FROM games WHERE ${where.join(' AND ')} ORDER BY hot DESC, likes DESC, plays DESC, created_at DESC LIMIT ? OFFSET ?`).bind(Date.now() - WEEK, ...args, PAGE + 1, page * PAGE).all();
+    return json({ games: results.slice(0, PAGE).map((g) => ({ ...row(g), hot: g.hot || 0 })), more: results.length > PAGE });
+  }
   const { results } = await db.prepare(`SELECT ${cols} FROM games WHERE ${where.join(' AND ')} ORDER BY ${sort} LIMIT ? OFFSET ?`).bind(...args, PAGE + 1, page * PAGE).all();
   return json({ games: results.slice(0, PAGE).map(row), more: results.length > PAGE });
 }
@@ -924,14 +930,27 @@ async function worldInfo(ctx, id) {
   if (!g || !(await canSeeGame(ctx, g))) fail(404, 'That world was not found. It may have been removed, or it is private.');
   return { id, name: g.name, mode: g.style, builtin: false };
 }
-const FRESH = 10 * 60e3;
+const FRESH = 10 * 60e3, WEEK = 7 * 86400e3;
+// someone opened one of Blockyard's own worlds: counted once per visitor (kept in "plays" as w:<id>), so they can
+// be sorted by how popular they are, the same way player worlds are
+async function visitWorld(ctx, id) {
+  if (!builtinWorld(id)) fail(404, 'That world was not found.');
+  await ctx.db.prepare('INSERT OR IGNORE INTO plays (game_id, who, at) VALUES (?, ?, ?)').bind('w:' + id, ctx.ip, Date.now()).run();
+  return json({ ok: true });
+}
 async function online(ctx) {
   const { results } = await ctx.db.prepare(`SELECT s.world, SUM(s.players) AS n, MAX(g.visibility) AS visibility FROM servers s LEFT JOIN games g ON g.id = s.world
     WHERE s.updated > ? AND s.players > 0 GROUP BY s.world`).bind(Date.now() - FRESH).all();
   const worlds = {};
   let total = 0;
   for (const r of results) { total += r.n; if (builtinWorld(r.world) || r.visibility === 'public') worlds[r.world] = r.n; }
-  return json({ worlds, total, announce: await getSetting(ctx.db, 'announce'), events: await loadEvents(ctx.db) });
+  // visits to Blockyard's own worlds: all time, and new visitors this week ("hot")
+  const visits = {}, hot = {};
+  try {
+    const v = await ctx.db.prepare("SELECT game_id, COUNT(*) AS n, SUM(CASE WHEN at > ? THEN 1 ELSE 0 END) AS hot FROM plays WHERE game_id LIKE 'w:%' GROUP BY game_id").bind(Date.now() - WEEK).all();
+    for (const r of v.results) { visits[r.game_id.slice(2)] = r.n; hot[r.game_id.slice(2)] = r.hot || 0; }
+  } catch (e) { /* counts are a nice-to-have */ }
+  return json({ worlds, total, visits, hot, announce: await getSetting(ctx.db, 'announce'), events: await loadEvents(ctx.db) });
 }
 async function listServers(ctx) {
   const world = String(ctx.url.searchParams.get('world') || '');

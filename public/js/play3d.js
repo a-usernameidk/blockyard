@@ -7,7 +7,7 @@ import { createSim2, step2 , followAt, camClear, KEY2 } from './phys2.js';
 import { encodeReplay } from './replay.js';
 import { avatarParts, TRAIL3D, EMOTES, petParts } from './avatar3d.js';
 import { openRoom } from './net.js';
-import { sfx, startMusic, stopMusic, unlockAudio } from './audio.js';
+import { sfx, startMusic, stopMusic, unlockAudio, engine } from './audio.js';
 import { mountMusicBox, unmountMusicBox } from './musicbox.js';
 import { store } from './api.js';
 import { GAMES, ROUND, WEAPONS, WEAPON_IDS, onHill, inBox, nearBlock } from './games.js';
@@ -276,6 +276,7 @@ export function startWorld(root, opts) {
 
   /* ---------------- camera ---------------- */
   const cam = { yaw: 0, pitch: 0.38, dist: 8, eye: [0, 0, 0] };
+  let camDist = 8, wasDriving = false, dustT = 0;
   {
     const g = goals[0] || { x: 64, z: 64 };
     const dx = g.x - S.spawn.x, dz = g.z - S.spawn.z;
@@ -1493,6 +1494,18 @@ export function startWorld(root, opts) {
       if (moving) emoteNow = null;
     }
     if (!driving) walk += hv * dt * 2.2;
+    // a vehicle: the engine hums higher the faster you go, and it kicks up dust (or spray)
+    if (driving) {
+      const k = Math.min(1, Math.abs(S.drive.v) / Math.max(1, S.drive.top || 30));
+      engine(k, S.drive.boat);
+      dustT -= dt;
+      if (dustT <= 0 && k > 0.3 && (S.onGround || S.drive.boat)) {
+        dustT = 0.05;
+        const hx = Math.sin(headRad), hz = -Math.cos(headRad);
+        for (const side of [-1, 1]) parts.push({ x: px - hx * 2.3 + hz * side * 1.2 + (Math.random() - 0.5) * 0.4, y: py + 0.25, z: pz - hz * 2.3 - hx * side * 1.2 + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 1.5, vy: 1 + Math.random() * 1.5, vz: (Math.random() - 0.5) * 1.5, life: 0.7, max: 0.7, size: 0.5 + k * 0.5, color: hexRGB(S.drive.boat ? '#eaf6ff' : '#d8c08a'), g: 1.5 });
+      }
+    } else if (wasDriving) engine(-1);
+    wasDriving = driving;
     if (emoteNow) emoteAt += dt;
     // crumble blocks disappear and come back
     for (const [i, c] of S.crumbles) if (S.steps - c >= P3.crumbleDelay && !gone.has(i)) { gone.set(i, viewGrid.t[i]); viewGrid.t[i] = 0; R.markDirty(i % SX, Math.floor(i / (SX * SZ)), Math.floor(i / SX) % SZ); }
@@ -1506,8 +1519,13 @@ export function startWorld(root, opts) {
     aim.from = tgt;
     const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     const dir = [-Math.sin(cam.yaw) * cp, sp, Math.cos(cam.yaw) * cp];
-    let dist = cam.dist;
-    if (isV2) { const free = camClear(S, tgt, dir, cam.dist); if (free < cam.dist) dist = Math.max(0.6, free - 0.3); }
+    let dist = cam.dist + (driving ? 3.5 : 0);
+    if (isV2) {
+      // pulls in fast when a wall is in the way, eases back out slowly (so it doesn't pump in corridors)
+      const want = dist, free = camClear(S, tgt, dir, want), to = free < want ? Math.max(0.6, free - 0.3) : want;
+      camDist = to < camDist ? to : camDist + (to - camDist) * Math.min(1, dt * 2.5);
+      dist = camDist;
+    }
     else for (let s = 0.4; s <= cam.dist; s += 0.25) if (camSolid(tgt[0] + dir[0] * s, tgt[1] + dir[1] * s, tgt[2] + dir[2] * s)) { dist = Math.max(0.8, s - 0.35); break; }
     cam.eye = [tgt[0] + dir[0] * dist, tgt[1] + dir[1] * dist, tgt[2] + dir[2] * dist];
     aim.dir = [-dir[0], -dir[1], -dir[2]];
@@ -1591,7 +1609,7 @@ export function startWorld(root, opts) {
     // frames a second (Settings > Show FPS)
     if (!hudFps.hidden && dt > 0 && dt < 0.5) { fpsAvg += (1 / dt - fpsAvg) * 0.08; fpsT += dt; if (fpsT > 0.5) { fpsT = 0; hudFps.textContent = Math.round(fpsAvg) + ' FPS'; } }
     if (isV2 && R.setDyn) frameV2(px, py, pz);
-    R.frame({ eye: cam.eye, target: tgt, fov: 1.15, time: clock, parts: scene, lines, far: G3.far || 230, skyClouds: isV2 && G3.clouds !== false, player: [S.p.x, S.p.y, S.p.z] });
+    R.frame({ eye: cam.eye, target: tgt, fov: 1.15 + (driving ? 0.14 * Math.min(1, Math.abs(S.drive.v) / Math.max(1, S.drive.top || 30)) : 0), time: clock, parts: scene, lines, far: G3.far || 230, skyClouds: isV2 && G3.clouds !== false, player: [S.p.x, S.p.y, S.p.z] });
     if (R.lost) { showMsg('The 3D graphics stopped working (the browser reset them). Leave and come back to keep playing.', true); stop(); return; }
 
     // name tags and chat bubbles
@@ -1658,6 +1676,7 @@ export function startWorld(root, opts) {
   function stop() {
     if (stopped) return;
     stopped = true;
+    engine(-1);
     cancelAnimationFrame(raf);
     removeEventListener('keydown', onKey); removeEventListener('keyup', onKey); removeEventListener('blur', clearKeys);
     document.removeEventListener('pointerlockchange', onLockChange); document.removeEventListener('mousemove', onMouseMove);
